@@ -1,6 +1,7 @@
 import express from "express";
 import { validate } from "../middleware/validator.js";
 import { userSchemas as authSchemas } from "../models/schemas.js";
+import { authenticateToken } from "../middleware/authMiddleware.js";
 
 /**
  * Auth Routes Factory
@@ -44,8 +45,8 @@ export default function authRoutes(dependencies = {}) {
   router.post("/verify-token", authController.verifyToken);
 
   // Protected routes (require authentication)
-  router.get("/me", authController.getProfile);
-  router.post("/logout", authController.logout);
+  router.get("/me", authenticateToken, authController.getProfile);
+  router.post("/logout", authenticateToken, authController.logout);
 
   return router;
 }
