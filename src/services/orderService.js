@@ -220,8 +220,8 @@ export class OrderService {
         userRepositoryExists: !!this.userRepository,
         userRepositoryMethods: this.userRepository
           ? Object.getOwnPropertyNames(
-              Object.getPrototypeOf(this.userRepository)
-            )
+            Object.getPrototypeOf(this.userRepository)
+          )
           : "N/A",
       });
 
@@ -558,8 +558,7 @@ export class OrderService {
 
           if (fetchError || !variantData) {
             throw new Error(
-              `Failed to fetch variant stock: ${
-                fetchError?.message || "Variant not found"
+              `Failed to fetch variant stock: ${fetchError?.message || "Variant not found"
               }`
             );
           }
@@ -593,8 +592,7 @@ export class OrderService {
 
           if (fetchError || !productData) {
             throw new Error(
-              `Failed to fetch product stock: ${
-                fetchError?.message || "Product not found"
+              `Failed to fetch product stock: ${fetchError?.message || "Product not found"
               }`
             );
           }
@@ -1155,8 +1153,7 @@ export class OrderService {
 
             if (fetchError || !variantData) {
               throw new Error(
-                `Failed to fetch variant stock for restocking: ${
-                  fetchError?.message || "Variant not found"
+                `Failed to fetch variant stock for restocking: ${fetchError?.message || "Variant not found"
                 }`
               );
             }
@@ -1187,8 +1184,7 @@ export class OrderService {
 
             if (fetchError || !productData) {
               throw new Error(
-                `Failed to fetch product stock for restocking: ${
-                  fetchError?.message || "Product not found"
+                `Failed to fetch product stock for restocking: ${fetchError?.message || "Product not found"
                 }`
               );
             }

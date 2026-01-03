@@ -972,7 +972,7 @@ export class OrderController {
         "Your order is ready for shipment",
         "You will receive tracking information once shipped",
         "Estimated delivery: " +
-          OrderController._calculateEstimatedDelivery(order),
+        OrderController._calculateEstimatedDelivery(order),
       ],
       shipped: [
         "Your order is on the way",
