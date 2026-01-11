@@ -204,11 +204,41 @@ export class UserController {
    * Verify user email
    * POST /api/users/verify-email
    */
+  /**
+   * Internal helper to initiate verification
+   * POST /api/users/verify-email
+   */
   verifyEmail = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const result = await this.userService.verifyEmail(userId);
+    const result = await this.userService.initiateEmailVerification(userId);
 
-    logger.info("User email verified", { userId });
+    logger.info("User email verification initiated", { userId });
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Verification email sent successfully",
+    });
+  });
+
+  /**
+   * Confirm email verification
+   * POST /api/users/verify-email/confirm
+   * Public endpoint
+   */
+  confirmEmail = asyncHandler(async (req, res) => {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Verification token is required",
+      });
+    }
+
+    const result = await this.userService.confirmEmailVerification(token);
+
+    logger.info("User email verified via token");
 
     res.json({
       success: true,

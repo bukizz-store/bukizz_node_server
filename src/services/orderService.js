@@ -573,7 +573,6 @@ export class OrderService {
             .from("product_variants")
             .update({
               stock: newStock,
-              updated_at: new Date().toISOString(),
             })
             .eq("id", item.variantId);
 
@@ -607,7 +606,6 @@ export class OrderService {
             .from("products")
             .update({
               stock: newStock,
-              updated_at: new Date().toISOString(),
             })
             .eq("id", item.productId);
 
@@ -629,7 +627,7 @@ export class OrderService {
           variantId: item.variantId,
           error: error.message,
         });
-        throw new AppError("Failed to update stock levels", 500);
+        throw new AppError(`Failed to update stock levels: ${error.message}`, 500);
       }
     }
   }

@@ -111,7 +111,7 @@ export class AuthService {
         .from("users")
         .select(
           `
-          id, full_name, email, email_verified, phone, is_active,
+          id, full_name, email, email_verified, phone, is_active, role,
           user_auths!inner(password_hash)
         `
         )
@@ -410,7 +410,7 @@ export class AuthService {
       // Check if user still exists and is active
       const { data: users, error } = await this.supabase
         .from("users")
-        .select("id, full_name, email, email_verified, phone, is_active")
+        .select("id, full_name, email, email_verified, phone, is_active, role")
         .eq("id", decoded.userId)
         .eq("is_active", true);
 
@@ -418,9 +418,13 @@ export class AuthService {
         throw new Error("User not found or inactive");
       }
 
+      const user = users[0];
+      // Map role to roles array for middleware compatibility
+      user.roles = user.role ? [user.role] : [];
+
       return {
         valid: true,
-        user: users[0],
+        user,
         decoded,
       };
     } catch (error) {
@@ -446,6 +450,35 @@ export class AuthService {
 
     const [, value, unit] = match;
     return parseInt(value) * units[unit];
+  }
+
+  async generateVerificationToken(userId) {
+    try {
+      const verificationToken = crypto.randomBytes(32).toString("hex");
+      const tokenHash = crypto
+        .createHash("sha256")
+        .update(verificationToken)
+        .digest("hex");
+
+      // Token expires in 24 hours
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+      const { error } = await this.supabase
+        .from("users")
+        .update({
+          verification_token: tokenHash, // Store hash for security
+          verification_token_expiry: expiresAt,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", userId);
+
+      if (error) throw error;
+
+      return verificationToken;
+    } catch (error) {
+      logger.error("Verification token generation error:", error);
+      throw error;
+    }
   }
 }
 

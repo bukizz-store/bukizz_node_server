@@ -109,7 +109,7 @@ export const categorySchemas = {
   query: Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
-    search: Joi.string().max(255).optional(),
+    search: Joi.string().max(255).allow("").optional(),
     parentId: optionalUuidSchema,
     sortBy: Joi.string().valid("createdAt", "name").default("name"),
     sortOrder: Joi.string().valid("asc", "desc").default("asc"),
@@ -190,9 +190,10 @@ export const productSchemas = {
       .default("general"),
     basePrice: Joi.number().min(0).precision(2).required(),
     currency: Joi.string().length(3).default("INR"),
-    retailerId: optionalUuidSchema,
+    city: Joi.string().max(100).optional(),
     categoryIds: Joi.array().items(uuidSchema).optional(),
     brandIds: Joi.array().items(uuidSchema).optional(),
+    warehouseIds: Joi.array().items(uuidSchema).optional(),
     metadata: Joi.object().optional(),
   }),
 
@@ -206,7 +207,7 @@ export const productSchemas = {
       .optional(),
     basePrice: Joi.number().min(0).precision(2).optional(),
     currency: Joi.string().length(3).optional(),
-    retailerId: optionalUuidSchema,
+    city: Joi.string().max(100).optional(),
     isActive: Joi.boolean().optional(),
     metadata: Joi.object().optional(),
   }),
@@ -223,7 +224,8 @@ export const productSchemas = {
     minPrice: Joi.number().min(0).optional(),
     maxPrice: Joi.number().min(0).optional(),
     schoolId: optionalUuidSchema,
-    retailerId: optionalUuidSchema,
+    warehouseId: optionalUuidSchema,
+    city: Joi.string().max(100).optional(),
     sortBy: Joi.string()
       .valid("createdAt", "title", "basePrice", "rating")
       .default("createdAt"),
@@ -253,9 +255,9 @@ export const productImageSchemas = {
 };
 
 /**
- * Retailer validation schemas
+ * Warehouse validation schemas
  */
-export const retailerSchemas = {
+export const warehouseSchemas = {
   create: Joi.object({
     name: Joi.string().min(2).max(255).required(),
     contactEmail: Joi.string().email().optional(),
@@ -298,6 +300,7 @@ export const retailerSchemas = {
 export const schoolSchemas = {
   create: Joi.object({
     name: Joi.string().min(2).max(255).required(),
+    image: Joi.string().uri().optional(),
     type: Joi.string()
       .valid("public", "private", "charter", "international", "other")
       .required(),
@@ -325,6 +328,7 @@ export const schoolSchemas = {
 
   update: Joi.object({
     name: Joi.string().min(2).max(255).optional(),
+    image: Joi.string().uri().optional(),
     type: Joi.string()
       .valid("public", "private", "charter", "international", "other")
       .optional(),
@@ -398,7 +402,7 @@ export const schoolSchemas = {
   partnership: Joi.object({
     partnerName: Joi.string().min(2).max(255).required(),
     partnerType: Joi.string()
-      .valid("retailer", "supplier", "logistics", "educational", "other")
+      .valid("warehouse", "supplier", "logistics", "educational", "other")
       .required(),
     contactEmail: Joi.string().email().optional(),
     contactPhone: phoneSchema,
@@ -472,7 +476,7 @@ export const orderSchemas = {
       .required(),
   }),
 
-  updateStatus: Joi.object({
+  updateOrderStatus: Joi.object({
     status: Joi.string()
       .valid(
         "initialized",
@@ -493,7 +497,7 @@ export const orderSchemas = {
     refundRequested: Joi.boolean().default(false),
   }),
 
-  updatePayment: Joi.object({
+  updatePaymentStatus: Joi.object({
     paymentStatus: Joi.string()
       .valid("pending", "paid", "failed", "refunded")
       .required(),
@@ -523,7 +527,7 @@ export const orderSchemas = {
       .valid("pending", "paid", "failed", "refunded")
       .optional(),
     userId: optionalUuidSchema,
-    retailerId: optionalUuidSchema,
+    warehouseId: optionalUuidSchema,
     startDate: Joi.date().optional(),
     endDate: Joi.date().optional(),
     minAmount: Joi.number().min(0).optional(),
@@ -541,7 +545,7 @@ export const orderSchemas = {
   }),
 
   // Bulk operations validation
-  bulkUpdate: Joi.object({
+  bulkUpdateOrders: Joi.object({
     orderIds: Joi.array().items(uuidSchema).min(1).max(100).required(),
     status: Joi.string()
       .valid("processed", "shipped", "out_for_delivery", "delivered")

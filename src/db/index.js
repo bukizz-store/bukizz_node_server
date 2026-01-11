@@ -71,6 +71,68 @@ export function getSupabase() {
 }
 
 /**
+ * Create an authenticated Supabase client for a specific user
+ * @param {string} token - JWT access token
+ * @returns {SupabaseClient} Authenticated Supabase client
+ */
+export function createAuthenticatedClient(token) {
+  if (!token) {
+    return getSupabase();
+  }
+
+  try {
+    console.log(config.database.supabase.url,
+      config.database.supabase.serviceKey, config.database.supabase.anonKey)
+    return createClient(
+      config.database.supabase.url,
+      config.database.supabase.serviceKey,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+        auth: {
+          persistSession: false,
+        },
+      }
+    );
+  } catch (error) {
+    logger.error("Failed to create authenticated client:", error);
+    return getSupabase();
+  }
+}
+
+/**
+ * Create a Service Role Supabase client (Bypasses RLS)
+ * @returns {SupabaseClient} Service Role Supabase client
+ */
+export function createServiceClient() {
+  const serviceKey = config.database.supabase.serviceKey;
+
+  if (!serviceKey) {
+    logger.warn("SUPABASE_SERVICE_ROLE_KEY missing - falling back to anon client (RLS applies)");
+    return getSupabase();
+  }
+
+  try {
+    return createClient(
+      config.database.supabase.url,
+      serviceKey,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+  } catch (error) {
+    logger.error("Failed to create service client:", error);
+    return getSupabase();
+  }
+}
+
+/**
  * Execute Supabase query with proper error handling
  * @param {string} table - Table name
  * @param {string} operation - Operation type (select, insert, update, delete)

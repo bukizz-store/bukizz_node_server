@@ -1,4 +1,5 @@
 import express from "express";
+import multer from "multer";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { schoolSchemas, paramSchemas } from "../models/schemas.js";
@@ -11,6 +12,23 @@ import { schoolSchemas, paramSchemas } from "../models/schemas.js";
 export default function schoolRoutes(dependencies = {}) {
   const router = express.Router();
 
+  // Configure multer for file uploads
+  const storage = multer.memoryStorage();
+  const upload = multer({
+    storage,
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5MB limit
+    },
+    fileFilter: (req, file, cb) => {
+      // Accept only image files
+      if (file.mimetype.startsWith("image/")) {
+        cb(null, true);
+      } else {
+        cb(new Error("Only image files are allowed"), false);
+      }
+    },
+  });
+
   // Get the school controller from dependencies
   const { schoolController } = dependencies;
 
@@ -19,6 +37,24 @@ export default function schoolRoutes(dependencies = {}) {
     console.error("SchoolController not found in dependencies");
     return router;
   }
+
+  // Middleware to parse JSON strings from multipart/form-data
+  const parseMultipartFields = (req, res, next) => {
+    try {
+      if (req.body.address && typeof req.body.address === "string") {
+        req.body.address = JSON.parse(req.body.address);
+      }
+      if (req.body.contact && typeof req.body.contact === "string") {
+        req.body.contact = JSON.parse(req.body.contact);
+      }
+      next();
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid JSON format in address or contact fields",
+      });
+    }
+  };
 
   // Public school routes (no authentication required)
 
@@ -109,6 +145,8 @@ export default function schoolRoutes(dependencies = {}) {
   router.post(
     "/",
     authenticateToken,
+    upload.single("image"),
+    parseMultipartFields,
     validate(schoolSchemas.create),
     schoolController.createSchool
   );
@@ -120,6 +158,8 @@ export default function schoolRoutes(dependencies = {}) {
   router.put(
     "/:id",
     authenticateToken,
+    upload.single("image"),
+    parseMultipartFields,
     validate(paramSchemas.id, "params"),
     validate(schoolSchemas.update),
     schoolController.updateSchool
@@ -155,6 +195,17 @@ export default function schoolRoutes(dependencies = {}) {
     "/bulk-import",
     authenticateToken,
     schoolController.bulkImportSchools
+  );
+
+  /**
+   * Upload school image
+   * POST /api/v1/schools/upload-image
+   */
+  router.post(
+    "/upload-image",
+    authenticateToken,
+    upload.single("image"),
+    schoolController.uploadImage
   );
 
   // Product association routes

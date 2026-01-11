@@ -52,7 +52,7 @@ export class SchoolService {
       }
 
       // Validate phone number if provided
-      if (schoolData.phone && !/^[6-9]\d{9}$/.test(schoolData.phone)) {
+      if (schoolData.phone && !/^(\+91|91)?[6-9]\d{9}$/.test(schoolData.phone)) {
         throw new AppError("Invalid phone number format", 400);
       }
 
@@ -62,6 +62,14 @@ export class SchoolService {
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(schoolData.email)
       ) {
         throw new AppError("Invalid email format", 400);
+      }
+
+      // Validate image URL if provided
+      if (
+        schoolData.image &&
+        !/^https?:\/\/.+/.test(schoolData.image)
+      ) {
+        throw new AppError("Invalid image URL format", 400);
       }
 
       // Check for duplicate school names in the same city
@@ -229,7 +237,7 @@ export class SchoolService {
       }
 
       // Validate phone number if being updated
-      if (updateData.phone && !/^[6-9]\d{9}$/.test(updateData.phone)) {
+      if (updateData.phone && !/^(\+91|91)?[6-9]\d{9}$/.test(updateData.phone)) {
         throw new AppError("Invalid phone number format", 400);
       }
 
@@ -239,6 +247,14 @@ export class SchoolService {
         !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(updateData.email)
       ) {
         throw new AppError("Invalid email format", 400);
+      }
+
+      // Validate image URL if being updated
+      if (
+        updateData.image &&
+        !/^https?:\/\/.+/.test(updateData.image)
+      ) {
+        throw new AppError("Invalid image URL format", 400);
       }
 
       // Check for duplicate name if name or city is being updated
@@ -581,7 +597,9 @@ export class SchoolService {
    */
   async reactivateSchool(schoolId) {
     try {
-      const school = await this.schoolRepository.findById(schoolId);
+      const school = await this.schoolRepository.findById(schoolId, {
+        includeInactive: true,
+      });
       if (!school) {
         throw new AppError("School not found", 404);
       }
@@ -677,6 +695,17 @@ export class SchoolService {
       };
     } catch (error) {
       logger.error("Error in bulk school import:", error);
+      throw error;
+    }
+  }
+  /**
+   * Upload school image
+   */
+  async uploadImage(file, token) {
+    try {
+      return await this.schoolRepository.uploadImage(file, token);
+    } catch (error) {
+      logger.error("Error uploading school image:", error);
       throw error;
     }
   }

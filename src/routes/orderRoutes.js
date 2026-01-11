@@ -110,7 +110,7 @@ export default function orderRoutes(dependencies = {}) {
   // Search and filter orders (admin/retailer access)
   router.get(
     "/admin/search",
-    requireRoles(["admin", "retailer"]),
+    requireRoles("admin", "retailer"),
     orderQueryLimiter,
     async (req, res, next) => {
       try {
@@ -125,7 +125,7 @@ export default function orderRoutes(dependencies = {}) {
   // Get orders by specific status (admin dashboard)
   router.get(
     "/admin/status/:status",
-    requireRoles(["admin", "retailer"]),
+    requireRoles("admin", "retailer"),
     orderQueryLimiter,
     async (req, res, next) => {
       try {
@@ -140,7 +140,7 @@ export default function orderRoutes(dependencies = {}) {
   // Update order status (admin/retailer operation)
   router.put(
     "/:orderId/status",
-    requireRoles(["admin", "retailer"]),
+    requireRoles("admin", "retailer"),
     validate(orderSchemas.updateOrderStatus),
     async (req, res, next) => {
       try {
@@ -155,7 +155,7 @@ export default function orderRoutes(dependencies = {}) {
   // Update payment status (payment gateway webhook or admin)
   router.put(
     "/:orderId/payment",
-    requireRoles(["admin", "system"]),
+    requireRoles("admin", "system"),
     validate(orderSchemas.updatePaymentStatus),
     async (req, res, next) => {
       try {
@@ -170,7 +170,7 @@ export default function orderRoutes(dependencies = {}) {
   // Bulk update orders (admin operation)
   router.put(
     "/admin/bulk-update",
-    requireRoles(["admin"]),
+    requireRoles("admin"),
     validate(orderSchemas.bulkUpdateOrders),
     async (req, res, next) => {
       try {
@@ -185,7 +185,7 @@ export default function orderRoutes(dependencies = {}) {
   // Export orders data (admin reporting)
   router.get(
     "/admin/export",
-    requireRoles(["admin"]),
+    requireRoles("admin"),
     async (req, res, next) => {
       try {
         const orderController = new OrderController();
@@ -199,7 +199,7 @@ export default function orderRoutes(dependencies = {}) {
   // Get order statistics and analytics
   router.get(
     "/admin/statistics",
-    requireRoles(["admin", "retailer"]),
+    requireRoles("admin", "retailer"),
     async (req, res, next) => {
       try {
         const orderController = new OrderController();

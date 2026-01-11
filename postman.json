@@ -1,0 +1,1193 @@
+{
+	"info": {
+		"name": "Bukizz School E-commerce API",
+		"description": "Complete API collection for Bukizz School E-commerce platform with enhanced user profile management, authentication, and order processing. Includes comprehensive example payloads.",
+		"version": "5.1.0",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{access_token}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:5001",
+			"type": "string"
+		},
+		{
+			"key": "api_base",
+			"value": "{{base_url}}/api/v1",
+			"type": "string"
+		},
+		{
+			"key": "access_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "refresh_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "order_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "product_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "school_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "address_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "variant_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "category_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "warehouse_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "attribute_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "value_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "image_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "brand_id",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "🏥 Health & Info",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/health",
+						"description": "Check API server health and status"
+					}
+				},
+				{
+					"name": "API Info",
+					"request": {
+						"method": "GET",
+						"url": "{{base_url}}/api",
+						"description": "Get API version and available endpoints"
+					}
+				}
+			]
+		},
+		{
+			"name": "🔐 Authentication",
+			"item": [
+				{
+					"name": "Register User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.data && response.data.tokens) {",
+									"        pm.collectionVariables.set('access_token', response.data.tokens.accessToken);",
+									"        pm.collectionVariables.set('refresh_token', response.data.tokens.refreshToken);",
+									"    }",
+									"    if (response.data && response.data.user) {",
+									"        pm.collectionVariables.set('user_id', response.data.user.id);",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/auth/register",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fullName\": \"Test User\",\n  \"email\": \"test.user@example.com\",\n  \"password\": \"Password123!\",\n  \"phone\": \"+919876543210\",\n  \"provider\": \"email\" \n  // provider is optional, defaults to 'email'\n}"
+						},
+						"description": "Register a new user account"
+					}
+				},
+				{
+					"name": "Login",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.data && response.data.tokens) {",
+									"        pm.collectionVariables.set('access_token', response.data.tokens.accessToken);",
+									"        pm.collectionVariables.set('refresh_token', response.data.tokens.refreshToken);",
+									"    }",
+									"    if (response.data && response.data.user) {",
+									"        pm.collectionVariables.set('user_id', response.data.user.id);",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/auth/login",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test.user@example.com\",\n  \"password\": \"Password123!\"\n}"
+						},
+						"description": "Authenticate user and get access tokens"
+					}
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.data) {",
+									"        pm.collectionVariables.set('access_token', response.data.accessToken);",
+									"        pm.collectionVariables.set('refresh_token', response.data.refreshToken);",
+									"    }",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/auth/refresh-token",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}"
+						},
+						"description": "Refresh access token"
+					}
+				},
+				{
+					"name": "Verify Token",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/auth/verify-token",
+						"description": "Verify validity of current token"
+					}
+				},
+				{
+					"name": "Get Profile",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/auth/me",
+						"description": "Get current user profile"
+					}
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/auth/logout",
+						"description": "Logout user and invalidate token"
+					}
+				},
+				{
+					"name": "Forgot Password",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/auth/forgot-password",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"test.user@example.com\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Reset Password",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/auth/reset-password",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"token\": \"RESET_TOKEN_FROM_EMAIL\",\n  \"password\": \"NewPassword123!\"\n}"
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "👤 User Management",
+			"item": [
+				{
+					"name": "Get Profile",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/users/profile"
+					}
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/users/profile",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fullName\": \"Updated Name\",\n  \"phone\": \"+919876543211\",\n  \"metadata\": { \"preferences\": \"dark_mode\" } \n}"
+						}
+					}
+				},
+				{
+					"name": "Get Addresses",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/users/addresses"
+					}
+				},
+				{
+					"name": "Add Address",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('address_id', jsonData.data.address.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/users/addresses",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"label\": \"Home\",\n  \"recipientName\": \"John Doe\",\n  \"phone\": \"9876543210\",\n  \"line1\": \"123 Main St\",\n  \"line2\": \"Apt 4B\",\n  \"city\": \"Mumbai\",\n  \"state\": \"Maharashtra\",\n  \"postalCode\": \"400001\",\n  \"country\": \"India\",\n  \"isDefault\": true,\n  \"lat\": 19.0760,\n  \"lng\": 72.8777\n}"
+						}
+					}
+				},
+				{
+					"name": "Update Address",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/users/addresses/{{address_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"label\": \"Work\",\n  \"isDefault\": false\n}"
+						}
+					}
+				},
+				{
+					"name": "Delete Address",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/users/addresses/{{address_id}}"
+					}
+				},
+				{
+					"name": "Get Preferences",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/users/preferences"
+					}
+				},
+				{
+					"name": "Update Preferences",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/users/preferences",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"notifications\": true,\n  \"newsletter\": false\n}"
+						}
+					}
+				},
+				{
+					"name": "Get User Stats",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/users/stats"
+					}
+				},
+				{
+					"name": "Deactivate Account",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/users/account"
+					}
+				},
+				{
+					"name": "Verify Email",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/users/verify-email"
+					}
+				},
+				{
+					"name": "Verify Phone",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/users/verify-phone"
+					}
+				},
+				{
+					"name": "Admin: Search Users",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/users/admin/search?q=john&role=customer"
+					}
+				},
+				{
+					"name": "Admin: Export Users",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/users/admin/export?role=customer"
+					}
+				},
+				{
+					"name": "Admin: Get User by ID",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/users/admin/{{user_id}}"
+					}
+				},
+				{
+					"name": "Admin: Update User Role",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/users/admin/{{user_id}}/role",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"admin\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Admin: Reactivate User",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/users/admin/{{user_id}}/reactivate"
+					}
+				}
+			]
+		},
+		{
+			"name": "📍 Pincodes",
+			"item": [
+				{
+					"name": "Check Availability",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/pincodes/check/400001"
+					}
+				}
+			]
+		},
+		{
+			"name": "Factory Warehouses",
+			"item": [
+				{
+					"name": "Create Warehouse",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('warehouse_id', jsonData.data.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/warehouses",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Mumbai Central Warehouse\",\n  \"contactEmail\": \"warehouse@example.com\",\n  \"contactPhone\": \"+919876543210\",\n  \"address\": {\n    \"line1\": \"Building A, Industrial Estate\",\n    \"line2\": \"Andheri East\",\n    \"city\": \"Mumbai\",\n    \"state\": \"Maharashtra\",\n    \"postalCode\": \"400093\",\n    \"country\": \"India\"\n  },\n  \"website\": \"https://warehouse-logistics.com\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Get My Warehouses",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/warehouses"
+					}
+				},
+				{
+					"name": "Get Retailer Warehouses (Admin)",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/warehouses/retailer/{{user_id}}"
+					}
+				},
+				{
+					"name": "Update Warehouse",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/warehouses/{{warehouse_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Updated Warehouse Name\",\n  \"isVerified\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Delete Warehouse",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/warehouses/{{warehouse_id}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "📑 Categories",
+			"item": [
+				{
+					"name": "Search Categories",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/categories?page=1&limit=20&search=&sortBy=name&sortOrder=asc"
+					}
+				},
+				{
+					"name": "Get Category",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/categories/{{category_id}}"
+					}
+				},
+				{
+					"name": "Create Category",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('category_id', jsonData.data.category.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/categories",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"School Supplies\",\n  \"slug\": \"school-supplies\",\n  \"description\": \"All essential school supplies\",\n  \"parentId\": null\n}"
+						}
+					}
+				},
+				{
+					"name": "Update Category",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/categories/{{category_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Updated School Supplies\",\n  \"isActive\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Delete Category",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/categories/{{category_id}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "🏫 Schools",
+			"item": [
+				{
+					"name": "Search Schools",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/schools?page=1&limit=20&city=Mumbai&type=private&board=CBSE"
+					}
+				},
+				{
+					"name": "Create School",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('school_id', jsonData.data.school.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/schools",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Green Valley International\",\n  \"type\": \"private\",\n  \"board\": \"CBSE\",\n  \"address\": {\n    \"line1\": \"123 Knowledge Park\",\n    \"city\": \"Noida\",\n    \"state\": \"Uttar Pradesh\",\n    \"postalCode\": \"201301\",\n    \"country\": \"India\"\n  },\n  \"city\": \"Noida\",\n  \"state\": \"Uttar Pradesh\",\n  \"country\": \"India\",\n  \"postalCode\": \"201301\",\n  \"contact\": {\n    \"phone\": \"+919876543210\",\n    \"email\": \"info@greenvalley.edu\",\n    \"website\": \"https://greenvalley.edu\"\n  },\n  \"phone\": \"+919876543210\",\n  \"email\": \"info@greenvalley.edu\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Get School by ID",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/schools/{{school_id}}"
+					}
+				},
+				{
+					"name": "Update School",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/schools/{{school_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Green Valley International School\",\n  \"contact\": {\n    \"phone\": \"+919876543211\"\n  }\n}"
+						}
+					}
+				},
+				{
+					"name": "Deactivate School",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/schools/{{school_id}}"
+					}
+				},
+				{
+					"name": "Reactivate School",
+					"request": {
+						"method": "PATCH",
+						"url": "{{api_base}}/schools/{{school_id}}/reactivate"
+					}
+				},
+				{
+					"name": "Bulk Import Schools",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/schools/bulk-import",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schools\": [\n    {\n      \"name\": \"School A\",\n      \"type\": \"public\",\n      \"board\": \"State Board\",\n      \"address\": { \"line1\": \"Addr1\", \"city\": \"City1\", \"state\": \"State1\", \"postalCode\": \"111111\" },\n      \"city\": \"City1\",\n      \"state\": \"State1\",\n      \"country\": \"India\",\n      \"postalCode\": \"111111\"\n    }\n  ]\n}"
+						}
+					}
+				},
+				{
+					"name": "Associate Product",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/schools/{{school_id}}/products/{{product_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"grade\": \"10th\",\n  \"mandatory\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Update Product Association",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/schools/{{school_id}}/products/{{product_id}}/10th",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"mandatory\": false\n}"
+						}
+					}
+				},
+				{
+					"name": "Remove Product Association",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/schools/{{school_id}}/products/{{product_id}}"
+					}
+				},
+				{
+					"name": "Create Partnership",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/schools/{{school_id}}/partnerships",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"partnerName\": \"ABC Logistics\",\n  \"partnerType\": \"logistics\",\n  \"contactEmail\": \"contact@abc.com\",\n  \"contactPhone\": \"+919999999999\",\n  \"description\": \"Logistics partner for books\"\n}"
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "📦 Products",
+			"item": [
+				{
+					"name": "Search Products",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products?page=1&limit=20&search=notebook&productType=stationary&minPrice=10&maxPrice=500&sortBy=basePrice&sortOrder=asc"
+					}
+				},
+				{
+					"name": "Get Featured Products",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/featured"
+					}
+				},
+				{
+					"name": "Get Products by Category",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/category/school-supplies?page=1&limit=10"
+					}
+				},
+				{
+					"name": "Get Product Stats",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/stats"
+					}
+				},
+				{
+					"name": "Create Product",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('product_id', jsonData.data.product.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/products",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Premium Notebook 4-Pack\",\n  \"sku\": \"NOTE-004\",\n  \"shortDescription\": \"High quality notebooks\",\n  \"description\": \"Detailed description of notebooks...\",\n  \"productType\": \"stationary\",\n  \"basePrice\": 199.00,\n  \"currency\": \"INR\",\n  \"city\": \"Mumbai\",\n  \"categoryIds\": [\"{{category_id}}\"],\n  \"brandIds\": [\"{{brand_id}}\"],\n  \"warehouseIds\": [\"{{warehouse_id}}\"],\n  \"metadata\": { \"pages\": 200 }\n}"
+						}
+					}
+				},
+				{
+					"name": "Get Product by ID",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/{{product_id}}"
+					}
+				},
+				{
+					"name": "Update Product",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/products/{{product_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"title\": \"Premium Notebook 6-Pack\",\n  \"basePrice\": 299.00,\n  \"isActive\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Search Variants",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/variants/search?sku=NOTE-004",
+						"description": "Public search for variants"
+					}
+				},
+				{
+					"name": "Get Variant by ID",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/variants/{{variant_id}}",
+						"description": "Public get variant"
+					}
+				},
+				{
+					"name": "Create Variant",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('variant_id', jsonData.data.variant.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/products/{{product_id}}/variants",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"sku\": \"NOTE-004-RED\",\n  \"price\": 199.00,\n  \"compareAtPrice\": 249.00,\n  \"stock\": 100,\n  \"weight\": 0.5,\n  \"optionValue1\": \"{{value_id}}\", \n  \"metadata\": { \"color\": \"Red\" }\n}"
+						}
+					}
+				},
+				{
+					"name": "Update Variant Stock",
+					"request": {
+						"method": "PATCH",
+						"url": "{{api_base}}/products/variants/{{variant_id}}/stock",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"quantity\": 50,\n  \"operation\": \"set\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Add Product Image",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/products/{{product_id}}/images",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "multipart/form-data"
+							}
+						],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "image",
+									"type": "file",
+									"src": []
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Add Product Option Attribute",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) { var jsonData = pm.response.json(); pm.collectionVariables.set('attribute_id', jsonData.data.attribute.id); }"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/products/{{product_id}}/options",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Color\",\n  \"position\": 1,\n  \"isRequired\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Add Product Option Value",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) { var jsonData = pm.response.json(); pm.collectionVariables.set('value_id', jsonData.data.value.id); }"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/products/options/{{attribute_id}}/values",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"value\": \"Red\",\n  \"priceModifier\": 10.00,\n  \"sortOrder\": 1\n}"
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🛒 Orders",
+			"item": [
+				{
+					"name": "Create Order",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('order_id', jsonData.data.order.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/orders",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{product_id}}\",\n      \"variantId\": \"{{variant_id}}\",\n      \"quantity\": 2\n    }\n  ],\n  \"shippingAddress\": {\n    \"recipientName\": \"Jane Doe\",\n    \"phone\": \"+919876543210\",\n    \"line1\": \"Flat 101, Galaxy Apts\",\n    \"city\": \"Bengaluru\",\n    \"state\": \"Karnataka\",\n    \"postalCode\": \"560001\",\n    \"country\": \"India\",\n    \"landmark\": \"Near Park\"\n  },\n  \"billingAddress\": {\n    \"recipientName\": \"Jane Doe\",\n    \"phone\": \"+919876543210\",\n    \"line1\": \"Flat 101, Galaxy Apts\",\n    \"city\": \"Bengaluru\",\n    \"state\": \"Karnataka\",\n    \"postalCode\": \"560001\",\n    \"country\": \"India\"\n  },\n  \"paymentMethod\": \"cod\",\n  \"notes\": \"Leave at reception\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Calculate Summary (Checkout)",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/orders/calculate-summary",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"items\": [\n    {\n      \"productId\": \"{{product_id}}\",\n      \"variantId\": \"{{variant_id}}\",\n      \"quantity\": 2\n    }\n  ]\n}"
+						}
+					}
+				},
+				{
+					"name": "Get My Orders",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/orders/my-orders?page=1&limit=10&status=initialized"
+					}
+				},
+				{
+					"name": "Get Order Details",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/orders/{{order_id}}"
+					}
+				},
+				{
+					"name": "Track Order",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/orders/{{order_id}}/track"
+					}
+				},
+				{
+					"name": "Cancel Order",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/orders/{{order_id}}/cancel",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Changed my mind\",\n  \"refundRequested\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Create Support Query",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/orders/{{order_id}}/queries",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"subject\": \"Delivery Delay\",\n  \"message\": \"My order is delayed by 2 days. Please help.\",\n  \"priority\": \"high\",\n  \"category\": \"delivery\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Get Support Queries",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/orders/{{order_id}}/queries"
+					}
+				},
+				{
+					"name": "Admin: Search Orders",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/orders/admin/search?status=processed&sortBy=createdAt&sortOrder=desc"
+					}
+				},
+				{
+					"name": "Admin: Update Order Status",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/orders/{{order_id}}/status",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"processed\",\n  \"note\": \"Order verified and processed\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Admin: Update Payment",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/orders/{{order_id}}/payment",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"paymentStatus\": \"paid\",\n  \"paymentMethod\": \"upi\",\n  \"transactionId\": \"UPI123456789\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Admin: Bulk Update",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/orders/admin/bulk-update",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"orderIds\": [\"{{order_id}}\"],\n  \"status\": \"shipped\",\n  \"note\": \"Batch processed\"\n}"
+						}
+					}
+				}
+			]
+		}
+	]
+}

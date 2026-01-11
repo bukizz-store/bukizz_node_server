@@ -39,7 +39,7 @@ function getOrderService() {
  */
 export class OrderController {
   constructor(orderServiceInstance) {
-    this.orderService = orderServiceInstance;
+    this.orderService = orderServiceInstance || getOrderService();
   }
 
   /**
@@ -564,7 +564,7 @@ export class OrderController {
    * GET /api/orders/:id
    */
   getOrder = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const { orderId: id } = req.params;
     const userId = req.user?.id;
 
     const order = await this.orderService.getOrder(id, userId);
@@ -610,7 +610,7 @@ export class OrderController {
    * PUT /api/orders/:id/status
    */
   updateOrderStatus = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const { orderId: id } = req.params;
     const { status, note, metadata = {} } = req.body;
     const changedBy = req.user.id;
 
@@ -640,7 +640,7 @@ export class OrderController {
    * PUT /api/orders/:id/cancel
    */
   cancelOrder = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const { orderId: id } = req.params;
     const { reason } = req.body;
     const userId = req.user.id;
 
@@ -694,7 +694,7 @@ export class OrderController {
    * POST /api/orders/:id/queries
    */
   createOrderQuery = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const { orderId: id } = req.params;
     const userId = req.user.id;
 
     const query = await this.orderService.createOrderQuery(
@@ -721,7 +721,7 @@ export class OrderController {
    * GET /api/orders/:id/queries
    */
   getOrderQueries = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const { orderId: id } = req.params;
     const userId = req.user.id;
 
     const queries = await this.orderService.getOrderQueries(id, userId);
@@ -738,7 +738,7 @@ export class OrderController {
    * PUT /api/orders/:id/payment
    */
   updatePaymentStatus = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const { orderId: id } = req.params;
     const { paymentStatus, paymentData = {} } = req.body;
 
     await this.orderService.updatePaymentStatus(id, paymentStatus, paymentData);
@@ -759,7 +759,7 @@ export class OrderController {
    * GET /api/orders/:id/tracking
    */
   getOrderTracking = asyncHandler(async (req, res) => {
-    const { id } = req.params;
+    const { orderId: id } = req.params;
     const userId = req.user?.id;
 
     // Get order with events for tracking

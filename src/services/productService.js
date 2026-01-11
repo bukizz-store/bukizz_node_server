@@ -80,9 +80,10 @@ export class ProductService {
       productData,
       images = [],
       brandData = null,
-      retailerData = null,
+      warehouseData = null,
       variants = [],
       categories = [],
+      retailerId = null, // Destructure from data object
     } = data;
 
     // Declare result outside try block to fix scoping issue
@@ -162,54 +163,54 @@ export class ProductService {
         }
       }
 
-      // Step 4: Handle retailer creation/association
-      if (retailerData) {
+      // Step 4: Handle warehouse creation/association
+      if (warehouseData) {
         try {
-          if (retailerData.type === "new") {
-            const retailerResult =
-              await this.productRepository.addRetailerDetails(productId, {
-                name: retailerData.name,
-                contact_email: retailerData.contact_email,
-                contact_phone: retailerData.contact_phone,
-                address: retailerData.address,
-                website: retailerData.website,
-                is_verified: retailerData.is_verified || false,
-                metadata: retailerData.metadata || {},
-              });
+          if (warehouseData.type === "new") {
+            const warehouseResult =
+              await this.productRepository.addWarehouseDetails(productId, {
+                name: warehouseData.name,
+                contact_email: warehouseData.contact_email,
+                contact_phone: warehouseData.contact_phone,
+                address: warehouseData.address,
+                website: warehouseData.website,
+                is_verified: warehouseData.is_verified || false,
+                metadata: warehouseData.metadata || {},
+              }, retailerId); // Pass retailerId if available
 
-            result.retailer = {
-              id: retailerResult.retailerId,
-              message: retailerResult.message,
+            result.warehouse = {
+              id: warehouseResult.warehouseId,
+              message: warehouseResult.message,
             };
-            logger.info("New retailer created and associated", {
-              retailerId: retailerResult.retailerId,
+            logger.info("New warehouse created and associated", {
+              warehouseId: warehouseResult.warehouseId,
               productId,
             });
           } else if (
-            retailerData.type === "existing" &&
-            retailerData.retailerId
+            warehouseData.type === "existing" &&
+            warehouseData.warehouseId
           ) {
-            const retailerResult =
-              await this.productRepository.addRetailerDetails(productId, {
-                retailerId: retailerData.retailerId,
-              });
+            const warehouseResult =
+              await this.productRepository.addWarehouseDetails(productId, {
+                warehouseId: warehouseData.warehouseId,
+              }, retailerId); // Pass retailerId if available
 
-            result.retailer = {
-              id: retailerData.retailerId,
-              message: retailerResult.message,
+            result.warehouse = {
+              id: warehouseData.warehouseId,
+              message: warehouseResult.message,
             };
-            logger.info("Existing retailer associated", {
-              retailerId: retailerData.retailerId,
+            logger.info("Existing warehouse associated", {
+              warehouseId: warehouseData.warehouseId,
               productId,
             });
           }
-        } catch (retailerError) {
+        } catch (warehouseError) {
           logger.error(
-            "Error handling retailer in comprehensive product creation:",
-            retailerError
+            "Error handling warehouse in comprehensive product creation:",
+            warehouseError
           );
           result.errors.push(
-            `Retailer operation failed: ${retailerError.message}`
+            `Warehouse operation failed: ${warehouseError.message}`
           );
         }
       }
@@ -279,7 +280,8 @@ export class ProductService {
           includeImages: true,
           includeVariantImages: true,
           includeBrandDetails: true,
-          includeRetailerDetails: true,
+          includeBrandDetails: true,
+          includeWarehouseDetails: true,
         }
       );
 
@@ -290,7 +292,7 @@ export class ProductService {
         productId,
         imagesCreated: result.images.length,
         brandsAssociated: result.brands.length,
-        hasRetailer: !!result.retailer,
+        hasWarehouse: !!result.warehouse,
         variantsCreated: result.variants.length,
         errorCount: result.errors.length,
       });
@@ -324,7 +326,7 @@ export class ProductService {
    * Validate comprehensive product data before creation
    */
   async validateComprehensiveProductData(data) {
-    const { productData, brandData, retailerData, variants, categories } = data;
+    const { productData, brandData, warehouseData, variants, categories } = data;
 
     // Validate product data
     if (!productData) {
@@ -343,7 +345,14 @@ export class ProductService {
       );
     }
 
-    // Validate brand data if provided
+    if (!productData.city) {
+      throw new AppError("City is required for product", 400);
+    }
+
+    // Validate warehouse data is required
+    if (!warehouseData) {
+      throw new AppError("Warehouse information is required for product", 400);
+    }
     if (brandData) {
       if (brandData.type === "existing" && !brandData.brandId) {
         throw new AppError("Brand ID is required for existing brand", 400);
@@ -361,16 +370,16 @@ export class ProductService {
       }
     }
 
-    // Validate retailer data if provided
-    if (retailerData) {
-      if (retailerData.type === "existing" && !retailerData.retailerId) {
+    // Validate warehouse data if provided
+    if (warehouseData) {
+      if (warehouseData.type === "existing" && !warehouseData.warehouseId) {
         throw new AppError(
-          "Retailer ID is required for existing retailer",
+          "Warehouse ID is required for existing warehouse",
           400
         );
       }
-      if (retailerData.type === "new" && !retailerData.name) {
-        throw new AppError("Retailer name is required for new retailer", 400);
+      if (warehouseData.type === "new" && !warehouseData.name) {
+        throw new AppError("Warehouse name is required for new warehouse", 400);
       }
     }
 
@@ -561,12 +570,12 @@ export class ProductService {
    * Update a comprehensive product with all related data atomically
    * This method ensures all operations succeed or all fail (ACID compliance)
    */
-  async updateComprehensiveProduct(productId, data) {
+  async updateComprehensiveProduct(productId, data, retailerId = null) {
     const {
       productData,
       images = [],
       brandData = null,
-      retailerData = null,
+      warehouseData = null,
       variants = [],
       categories = [],
     } = data;
@@ -660,46 +669,46 @@ export class ProductService {
         }
       }
 
-      // Step 4: Handle retailer updates
-      if (retailerData) {
+      // Step 4: Handle warehouse updates
+      if (warehouseData) {
         try {
-          if (retailerData.type === "new") {
-            const retailerResult =
-              await this.productRepository.addRetailerDetails(productId, {
-                name: retailerData.name,
-                contact_email: retailerData.contact_email,
-                contact_phone: retailerData.contact_phone,
-                address: retailerData.address,
-                website: retailerData.website,
-                is_verified: retailerData.is_verified || false,
-                metadata: retailerData.metadata || {},
-              });
+          if (warehouseData.type === "new") {
+            const warehouseResult =
+              await this.productRepository.addWarehouseDetails(productId, {
+                name: warehouseData.name,
+                contact_email: warehouseData.contact_email,
+                contact_phone: warehouseData.contact_phone,
+                address: warehouseData.address,
+                website: warehouseData.website,
+                is_verified: warehouseData.is_verified || false,
+                metadata: warehouseData.metadata || {},
+              }, data.retailerId); // Pass retailerId if available
 
-            result.retailer = {
-              id: retailerResult.retailerId,
-              message: retailerResult.message,
+            result.warehouse = {
+              id: warehouseResult.warehouseId,
+              message: warehouseResult.message,
             };
           } else if (
-            retailerData.type === "existing" &&
-            retailerData.retailerId
+            warehouseData.type === "existing" &&
+            warehouseData.warehouseId
           ) {
-            const retailerResult =
-              await this.productRepository.addRetailerDetails(productId, {
-                retailerId: retailerData.retailerId,
-              });
+            const warehouseResult =
+              await this.productRepository.addWarehouseDetails(productId, {
+                warehouseId: warehouseData.warehouseId,
+              }, data.retailerId); // Pass retailerId if available
 
-            result.retailer = {
-              id: retailerData.retailerId,
-              message: retailerResult.message,
+            result.warehouse = {
+              id: warehouseData.warehouseId,
+              message: warehouseResult.message,
             };
           }
-        } catch (retailerError) {
+        } catch (warehouseError) {
           logger.error(
-            "Error handling retailer in comprehensive product update:",
-            retailerError
+            "Error handling warehouse in comprehensive product update:",
+            warehouseError
           );
           result.errors.push(
-            `Retailer operation failed: ${retailerError.message}`
+            `Warehouse operation failed: ${warehouseError.message}`
           );
         }
       }
@@ -833,7 +842,7 @@ export class ProductService {
         productId,
         imagesUpdated: result.images.length,
         brandsAssociated: result.brands.length,
-        hasRetailer: !!result.retailer,
+        hasWarehouse: !!result.warehouse,
         variantsUpdated: result.variants.length,
         errorCount: result.errors.length,
       });
@@ -1750,13 +1759,13 @@ export class ProductService {
         },
         retailerInfo: product.retailerId
           ? {
-              hasRetailer: true,
-              retailerId: product.retailerId,
-              retailerName: product.retailerName,
-            }
+            hasRetailer: true,
+            retailerId: product.retailerId,
+            retailerName: product.retailerName,
+          }
           : {
-              hasRetailer: false,
-            },
+            hasRetailer: false,
+          },
       };
 
       // Get detailed image statistics

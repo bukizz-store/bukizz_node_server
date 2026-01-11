@@ -1,4 +1,4 @@
-import { asyncHandler } from "../middleware/errorHandler.js";
+import { asyncHandler, AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -15,7 +15,23 @@ export class SchoolController {
    * POST /api/schools
    */
   createSchool = asyncHandler(async (req, res) => {
-    const school = await this.schoolService.createSchool(req.body);
+    let schoolData = { ...req.body };
+
+    // Handle image upload if file is present
+    if (req.file) {
+      try {
+        const imageUrl = await this.schoolService.uploadImage(
+          req.file,
+          req.token
+        );
+        schoolData.image = imageUrl;
+      } catch (error) {
+        logger.error("Failed to upload image during school creation:", error);
+        throw new AppError("Failed to upload image", 500);
+      }
+    }
+
+    const school = await this.schoolService.createSchool(schoolData);
 
     logger.info("School created", { schoolId: school.id });
 
@@ -61,7 +77,23 @@ export class SchoolController {
    */
   updateSchool = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const school = await this.schoolService.updateSchool(id, req.body);
+    let updateData = { ...req.body };
+
+    // Handle image upload if file is present
+    if (req.file) {
+      try {
+        const imageUrl = await this.schoolService.uploadImage(
+          req.file,
+          req.token
+        );
+        updateData.image = imageUrl;
+      } catch (error) {
+        logger.error("Failed to upload image during school update:", error);
+        throw new AppError("Failed to upload image", 500);
+      }
+    }
+
+    const school = await this.schoolService.updateSchool(id, updateData);
 
     logger.info("School updated", { schoolId: id });
 
@@ -313,6 +345,27 @@ export class SchoolController {
       success: true,
       data: result,
       message: `Bulk import completed: ${result.summary.successful}/${result.summary.total} schools imported successfully`,
+    });
+  });
+
+  /**
+   * Upload school image
+   * POST /api/schools/upload-image
+   */
+  uploadImage = asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "No image file provided",
+      });
+    }
+
+    const imageUrl = await this.schoolService.uploadImage(req.file, req.token);
+
+    res.status(200).json({
+      success: true,
+      data: { url: imageUrl },
+      message: "Image uploaded successfully",
     });
   });
 

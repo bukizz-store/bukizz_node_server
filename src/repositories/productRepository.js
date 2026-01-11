@@ -28,7 +28,7 @@ export class ProductRepository {
         product_type: productData.productType || "general",
         base_price: productData.basePrice,
         currency: productData.currency || "INR",
-        retailer_id: productData.retailerId,
+        city: productData.city,
         metadata: productData.metadata || {},
         is_active: true,
       };
@@ -99,7 +99,10 @@ export class ProductRepository {
         .select(
           `
           *,
-          retailers!products_retailer_id_fkey(name, id),
+          *,
+          products_warehouse(
+            warehouse(id, name)
+          ),
           product_categories(
             categories(id, name, slug, description)
           ),
@@ -164,36 +167,36 @@ export class ProductRepository {
             // Add enhanced option value references with attribute data
             option_value_1_ref: v.option_value_1_ref
               ? {
-                  id: v.option_value_1_ref.id,
-                  value: v.option_value_1_ref.value,
-                  price_modifier: v.option_value_1_ref.price_modifier,
-                  attribute_name:
-                    v.option_value_1_ref.product_option_attributes?.name,
-                  attribute_position:
-                    v.option_value_1_ref.product_option_attributes?.position,
-                }
+                id: v.option_value_1_ref.id,
+                value: v.option_value_1_ref.value,
+                price_modifier: v.option_value_1_ref.price_modifier,
+                attribute_name:
+                  v.option_value_1_ref.product_option_attributes?.name,
+                attribute_position:
+                  v.option_value_1_ref.product_option_attributes?.position,
+              }
               : null,
             option_value_2_ref: v.option_value_2_ref
               ? {
-                  id: v.option_value_2_ref.id,
-                  value: v.option_value_2_ref.value,
-                  price_modifier: v.option_value_2_ref.price_modifier,
-                  attribute_name:
-                    v.option_value_2_ref.product_option_attributes?.name,
-                  attribute_position:
-                    v.option_value_2_ref.product_option_attributes?.position,
-                }
+                id: v.option_value_2_ref.id,
+                value: v.option_value_2_ref.value,
+                price_modifier: v.option_value_2_ref.price_modifier,
+                attribute_name:
+                  v.option_value_2_ref.product_option_attributes?.name,
+                attribute_position:
+                  v.option_value_2_ref.product_option_attributes?.position,
+              }
               : null,
             option_value_3_ref: v.option_value_3_ref
               ? {
-                  id: v.option_value_3_ref.id,
-                  value: v.option_value_3_ref.value,
-                  price_modifier: v.option_value_3_ref.price_modifier,
-                  attribute_name:
-                    v.option_value_3_ref.product_option_attributes?.name,
-                  attribute_position:
-                    v.option_value_3_ref.product_option_attributes?.position,
-                }
+                id: v.option_value_3_ref.id,
+                value: v.option_value_3_ref.value,
+                price_modifier: v.option_value_3_ref.price_modifier,
+                attribute_name:
+                  v.option_value_3_ref.product_option_attributes?.name,
+                attribute_position:
+                  v.option_value_3_ref.product_option_attributes?.position,
+              }
               : null,
           };
         });
@@ -267,7 +270,10 @@ export class ProductRepository {
       let query = supabase.from("products").select(
         `
           *,
-          retailers!products_retailer_id_fkey(name)
+          *,
+          products_warehouse(
+            warehouse(name)
+          )
         `,
         { count: "exact" }
       );
@@ -285,8 +291,10 @@ export class ProductRepository {
         query = query.eq("product_type", filters.productType);
       }
 
-      if (filters.retailerId) {
-        query = query.eq("retailer_id", filters.retailerId);
+      if (filters.warehouseId) {
+        query = query.eq("products_warehouse.warehouse_id", filters.warehouseId);
+        // Note: You might need to adjust the select to include the join for filtering if Supabase doesn't auto-join on filter
+        // Or filter on the join table directly if possible
       }
 
       if (filters.minPrice !== undefined) {
@@ -421,8 +429,8 @@ export class ProductRepository {
         updatePayload.base_price = updateData.basePrice;
       if (updateData.currency !== undefined)
         updatePayload.currency = updateData.currency;
-      if (updateData.retailerId !== undefined)
-        updatePayload.retailer_id = updateData.retailerId;
+      if (updateData.city !== undefined)
+        updatePayload.city = updateData.city;
       if (updateData.isActive !== undefined)
         updatePayload.is_active = updateData.isActive;
       if (updateData.metadata !== undefined)
@@ -461,7 +469,9 @@ export class ProductRepository {
           mandatory,
           products!inner(
             *,
-            retailers!products_retailer_id_fkey(name)
+             products_warehouse(
+               warehouse(name)
+             )
           )
         `
         )
@@ -590,8 +600,10 @@ export class ProductRepository {
         query = query.eq("product_type", filters.productType);
       }
 
-      if (filters.retailerId) {
-        query = query.eq("retailer_id", filters.retailerId);
+      if (filters.warehouseId) {
+        // This count might be tricky with join, simplest is often:
+        // query = query.eq("products_warehouse.warehouse_id", filters.warehouseId);
+        // But for count usually we need inner join explicit if filtering by related table
       }
 
       const { count, error } = await query;
@@ -620,8 +632,8 @@ export class ProductRepository {
       productType: row.product_type,
       basePrice: parseFloat(row.base_price),
       currency: row.currency,
-      retailerId: row.retailer_id,
-      retailerName: row.retailers?.name,
+      town: row.city,
+      warehouses: row.products_warehouse?.map(pw => pw.warehouse) || [],
       isActive: Boolean(row.is_active),
       metadata: row.metadata || {},
       createdAt: row.created_at,
@@ -666,9 +678,8 @@ export class ProductRepository {
 
       if (imageData.file && !imageUrl) {
         // If file is provided, upload to Supabase storage
-        const fileName = `products/${productId}/${
-          imageData.variantId || "main"
-        }/${Date.now()}-${imageData.file.name}`;
+        const fileName = `products/${productId}/${imageData.variantId || "main"
+          }/${Date.now()}-${imageData.file.name}`;
 
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("product-images")
@@ -767,9 +778,8 @@ export class ProductRepository {
       let imageUrl = updateData.url || existingImage.url;
 
       if (updateData.file) {
-        const fileName = `products/${existingImage.product_id}/${
-          existingImage.variant_id || "main"
-        }/${Date.now()}-${updateData.file.name}`;
+        const fileName = `products/${existingImage.product_id}/${existingImage.variant_id || "main"
+          }/${Date.now()}-${updateData.file.name}`;
 
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("product-images")
@@ -810,8 +820,8 @@ export class ProductRepository {
           source: updateData.file
             ? "upload"
             : updateData.url
-            ? "url"
-            : existingImage.metadata?.source,
+              ? "url"
+              : existingImage.metadata?.source,
           original_name:
             updateData.file?.name || existingImage.metadata?.original_name,
           size: updateData.file?.size || existingImage.metadata?.size,
@@ -1094,9 +1104,9 @@ export class ProductRepository {
   }
 
   /**
-   * Add retailer details to product
+   * Add warehouse details to product
    */
-  async addRetailerDetails(productId, retailerData) {
+  async addWarehouseDetails(productId, warehouseData, retailerId = null) {
     try {
       const supabase = getSupabase();
 
@@ -1106,84 +1116,122 @@ export class ProductRepository {
         throw new Error("Product not found");
       }
 
-      let retailerId = retailerData.retailerId;
+      let warehouseId = warehouseData.warehouseId;
 
-      // If no retailerId provided, create new retailer
-      if (!retailerId) {
-        const retailerPayload = {
-          name: retailerData.name,
-          contact_email: retailerData.contact_email,
-          contact_phone: retailerData.contact_phone,
-          address: retailerData.address,
-          website: retailerData.website,
-          is_verified: false, // Default to false for new retailers
-          metadata: retailerData.metadata || {},
+      // If no warehouseId provided, create new warehouse
+      if (!warehouseId) {
+        const warehousePayload = {
+          name: warehouseData.name,
+          contact_email: warehouseData.contact_email,
+          contact_phone: warehouseData.contact_phone,
+          address: warehouseData.address,
+          website: warehouseData.website,
+          is_verified: false, // Default to false for new warehouses
+          metadata: warehouseData.metadata || {},
         };
 
-        const { data: newRetailer, error: retailerError } = await supabase
-          .from("retailers")
-          .insert(retailerPayload)
+        const { data: newWarehouse, error: warehouseError } = await supabase
+          .from("warehouse")
+          .insert(warehousePayload)
           .select()
           .single();
 
-        if (retailerError) throw retailerError;
-        retailerId = newRetailer.id;
+        if (warehouseError) throw warehouseError;
+        warehouseId = newWarehouse.id;
+
+        // If retailerId is provided, link the new warehouse to the retailer
+        if (retailerId) {
+          const { error: linkError } = await supabase
+            .from("retailer_warehouse")
+            .insert({
+              retailer_id: retailerId,
+              warehouse_id: warehouseId,
+            });
+
+          if (linkError) {
+            // Log warning but don't fail the whole operation?
+            // Or should we fail? Better to fail if consistency is important.
+            // But if retailer_warehouse constraint fails, it might be due to setup issues.
+            // Let's retry or throw. For now, throw.
+            throw linkError;
+          }
+        }
       } else {
-        // Validate retailer exists
-        const { data: existingRetailer, error: fetchError } = await supabase
-          .from("retailers")
+        // Validate warehouse exists
+        const { data: existingWarehouse, error: fetchError } = await supabase
+          .from("warehouse")
           .select("id")
-          .eq("id", retailerId)
+          .eq("id", warehouseId)
           .single();
 
-        if (fetchError || !existingRetailer) {
-          throw new Error("Retailer not found");
+        if (fetchError || !existingWarehouse) {
+          throw new Error("Warehouse not found");
+        }
+
+        // SECURITY CHECK: If retailerId is provided, ensure they are linked to this warehouse
+        if (retailerId) {
+          const { data: ownership, error: ownershipError } = await supabase
+            .from("retailer_warehouse")
+            .select("id")
+            .eq("retailer_id", retailerId)
+            .eq("warehouse_id", warehouseId)
+            .single();
+
+          if (ownershipError || !ownership) {
+            throw new Error("Unauthorized: You do not have access to this warehouse");
+          }
         }
       }
 
-      // Update product with retailer
-      const { error: updateError } = await supabase
-        .from("products")
-        .update({
-          retailer_id: retailerId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", productId);
+      // Check if association already exists, if not create it
+      const { data: existingAssociation } = await supabase
+        .from("products_warehouse")
+        .select("id")
+        .eq("product_id", productId)
+        .eq("warehouse_id", warehouseId)
+        .single();
 
-      if (updateError) throw updateError;
+      if (!existingAssociation) {
+        const { error: insertError } = await supabase
+          .from("products_warehouse")
+          .insert({
+            product_id: productId,
+            warehouse_id: warehouseId
+          });
+
+        if (insertError) throw insertError;
+      }
 
       return {
-        retailerId,
-        message: "Retailer successfully associated with product",
+        warehouseId,
+        message: "Warehouse successfully associated with product",
       };
     } catch (error) {
-      logger.error("Error adding retailer details:", error);
+      logger.error("Error adding warehouse details:", error);
       throw error;
     }
   }
 
   /**
-   * Remove retailer from product
+   * Remove warehouse from product
    */
-  async removeRetailerDetails(productId) {
+  async removeWarehouseDetails(productId, warehouseId) {
     try {
       const supabase = getSupabase();
 
       const { error } = await supabase
-        .from("products")
-        .update({
-          retailer_id: null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", productId);
+        .from("products_warehouse")
+        .delete()
+        .eq("product_id", productId)
+        .eq("warehouse_id", warehouseId);
 
       if (error) throw error;
 
       return {
-        message: "Retailer successfully removed from product",
+        message: "Warehouse successfully removed from product",
       };
     } catch (error) {
-      logger.error("Error removing retailer details:", error);
+      logger.error("Error removing warehouse details:", error);
       throw error;
     }
   }
@@ -1297,25 +1345,21 @@ export class ProductRepository {
         product.brandDetails = brands;
       }
 
-      // Get retailer details if requested
-      if (options.includeRetailerDetails && product.retailerId) {
+      // Get warehouse details if requested
+      if (options.includeWarehouseDetails) {
+        // Fetch warehouses via the join table
         const supabase = getSupabase();
-        const { data: retailer, error: retailerError } = await supabase
-          .from("retailers")
-          .select("*")
-          .eq("id", product.retailerId)
-          .eq("is_active", true)
-          .single();
+        const { data: warehouseLinks, error: warehouseError } = await supabase
+          .from("products_warehouse")
+          .select(`
+                warehouse:warehouse_id (
+                    id, name, contact_email, contact_phone, address, metadata
+                )
+             `)
+          .eq("product_id", productId);
 
-        if (!retailerError && retailer) {
-          product.retailerDetails = {
-            id: retailer.id,
-            name: retailer.name,
-            email: retailer.contact_email,
-            phone: retailer.contact_phone,
-            address: retailer.address,
-            metadata: retailer.metadata,
-          };
+        if (!warehouseError && warehouseLinks) {
+          product.warehouseDetails = warehouseLinks.map(link => link.warehouse).filter(Boolean);
         }
       }
 

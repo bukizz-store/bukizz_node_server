@@ -27,6 +27,9 @@ export default function userRoutes(dependencies = {}) {
     return router;
   }
 
+  // Public verification route
+  router.post("/verify-email/confirm", userController.confirmEmail);
+
   // All user routes require authentication
   router.use(authenticateToken);
 

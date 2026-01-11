@@ -35,7 +35,7 @@ export class ProductController {
       productData,
       images = [],
       brandData = null,
-      retailerData = null,
+      warehouseData = null,
       variants = [],
       categories = [],
     } = req.body;
@@ -52,16 +52,17 @@ export class ProductController {
       productData,
       images,
       brandData,
-      retailerData,
+      warehouseData,
       variants,
       categories,
+      retailerId: req.user?.role === "retailer" ? req.user.id : null,
     });
 
     logger.info("Comprehensive product created", {
       productId: result.product.id,
       imagesCount: result.images?.length || 0,
       brandsCount: result.brands?.length || 0,
-      hasRetailer: !!result.retailer,
+      hasWarehouse: !!result.warehouse,
       variantsCount: result.variants?.length || 0,
     });
 
@@ -128,7 +129,7 @@ export class ProductController {
       productData,
       images = [],
       brandData = null,
-      retailerData = null,
+      warehouseData = null,
       variants = [],
       categories = [],
       replaceVariants = false,
@@ -140,13 +141,13 @@ export class ProductController {
       !productData &&
       !images.length &&
       !brandData &&
-      !retailerData &&
+      !warehouseData &&
       !variants.length
     ) {
       return res.status(400).json({
         success: false,
         message:
-          "At least one update field is required (productData, images, brandData, retailerData, or variants)",
+          "At least one update field is required (productData, images, brandData, warehouseData, or variants)",
       });
     }
 
@@ -156,19 +157,20 @@ export class ProductController {
         productData,
         images,
         brandData,
-        retailerData,
+        warehouseData,
         variants,
         categories,
         replaceVariants,
         replaceImages,
-      }
+      },
+      req.user?.role === "retailer" ? req.user.id : null
     );
 
     logger.info("Comprehensive product updated", {
       productId,
       imagesUpdated: result.images?.length || 0,
       brandsUpdated: result.brands?.length || 0,
-      hasRetailer: !!result.retailer,
+      hasWarehouse: !!result.warehouse,
       variantsUpdated: result.variants?.length || 0,
       errorCount: result.errors?.length || 0,
     });

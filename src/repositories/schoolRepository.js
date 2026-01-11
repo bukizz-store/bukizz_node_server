@@ -1,4 +1,4 @@
-import { getSupabase } from "../db/index.js";
+import { getSupabase, createAuthenticatedClient, createServiceClient } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 import { logger } from "../utils/logger.js";
 
@@ -21,15 +21,13 @@ export class SchoolRepository {
       const {
         name,
         type,
+        image,
         board,
         address,
         city,
         state,
-        country,
         postalCode,
         contact,
-        phone,
-        email,
       } = schoolData;
       const schoolId = uuidv4();
 
@@ -39,16 +37,16 @@ export class SchoolRepository {
           {
             id: schoolId,
             name: name.trim(),
-            type,
-            board,
+
+            type: type,
+            image: image || null,
+            board: board || null,
             address: JSON.stringify(address),
             city: city.trim(),
             state: state.trim(),
-            country: country || "India",
+
             postal_code: postalCode,
             contact: JSON.stringify(contact || {}),
-            phone: phone || null,
-            email: email || null,
             is_active: true,
             created_at: new Date().toISOString(),
           },
@@ -70,14 +68,18 @@ export class SchoolRepository {
    * @param {string} schoolId - School ID
    * @returns {Promise<Object|null>} School object or null
    */
-  async findById(schoolId) {
+  async findById(schoolId, { includeInactive = false } = {}) {
     try {
-      const { data, error } = await this.supabase
+      let query = this.supabase
         .from("schools")
         .select("*")
-        .eq("id", schoolId)
-        .eq("is_active", true)
-        .single();
+        .eq("id", schoolId);
+
+      if (!includeInactive) {
+        query = query.eq("is_active", true);
+      }
+
+      const { data, error } = await query.single();
 
       if (error) {
         if (error.code === "PGRST116") return null; // Not found
@@ -230,12 +232,7 @@ export class SchoolRepository {
       if (updateData.name !== undefined) {
         updates.name = updateData.name.trim();
       }
-      if (updateData.type !== undefined) {
-        updates.type = updateData.type;
-      }
-      if (updateData.board !== undefined) {
-        updates.board = updateData.board;
-      }
+
       if (updateData.address !== undefined) {
         updates.address = JSON.stringify(updateData.address);
         updates.city = updateData.address.city;
@@ -248,21 +245,35 @@ export class SchoolRepository {
       if (updateData.state !== undefined) {
         updates.state = updateData.state.trim();
       }
-      if (updateData.country !== undefined) {
-        updates.country = updateData.country;
-      }
+
       if (updateData.postalCode !== undefined) {
         updates.postal_code = updateData.postalCode;
       }
       if (updateData.contact !== undefined) {
         updates.contact = JSON.stringify(updateData.contact);
       }
+
+      if (updateData.image !== undefined) {
+        updates.image = updateData.image;
+      }
+
+      if (updateData.type !== undefined) {
+        updates.type = updateData.type;
+      }
+
+      if (updateData.board !== undefined) {
+        updates.board = updateData.board;
+      }
+
       if (updateData.phone !== undefined) {
         updates.phone = updateData.phone;
       }
+
       if (updateData.email !== undefined) {
         updates.email = updateData.email;
       }
+
+
       if (updateData.isActive !== undefined) {
         updates.is_active = updateData.isActive;
       }
@@ -271,7 +282,7 @@ export class SchoolRepository {
         return this.findById(schoolId);
       }
 
-      updates.updated_at = new Date().toISOString();
+
 
       const { data, error } = await this.supabase
         .from("schools")
@@ -387,7 +398,6 @@ export class SchoolRepository {
         .from("product_schools")
         .update({
           ...updateData,
-          updated_at: new Date().toISOString(),
         })
         .eq("product_id", productId)
         .eq("school_id", schoolId)
@@ -567,62 +577,62 @@ export class SchoolRepository {
    * @param {Object} filters - Catalog filters
    * @returns {Promise<Object>} Catalog with products
    */
-// Assumes `this.supabase` is a configured supabase-js client instance
-// and `logger` is available in this scope (or change to console).
+  // Assumes `this.supabase` is a configured supabase-js client instance
+  // and `logger` is available in this scope (or change to console).
 
-async getSchoolCatalog(schoolId, filters = {}) {
-  // Helper: Validate UUID v4 (case-insensitive)
-  const isUUID = (s) =>
-    typeof s === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+  async getSchoolCatalog(schoolId, filters = {}) {
+    // Helper: Validate UUID v4 (case-insensitive)
+    const isUUID = (s) =>
+      typeof s === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 
-  try {
-    if (!isUUID(schoolId)) {
-      const err = new Error("Invalid schoolId (not a UUID)");
-      err.status = 400;
-      throw err;
-    }
+    try {
+      if (!isUUID(schoolId)) {
+        const err = new Error("Invalid schoolId (not a UUID)");
+        err.status = 400;
+        throw err;
+      }
 
-    // --- Parse & normalize filters ---
-    const {
-      page = 1,
-      limit = 20,
-      grade = null,
-      mandatory = null,
-      category = null, // category id or slug (we treat as id if UUID)
-      productType = null, // alias for category if used
-      priceMin = null,
-      priceMax = null,
-      search = null,
-      sortBy = "name",
-      sortOrder = "asc",
-      onlyAvailable = false,
-    } = filters;
+      // --- Parse & normalize filters ---
+      const {
+        page = 1,
+        limit = 20,
+        grade = null,
+        mandatory = null,
+        category = null, // category id or slug (we treat as id if UUID)
+        productType = null, // alias for category if used
+        priceMin = null,
+        priceMax = null,
+        search = null,
+        sortBy = "name",
+        sortOrder = "asc",
+        onlyAvailable = false,
+      } = filters;
 
-    const filterCategory = category || productType || null;
-    const validPage = Math.max(1, Number.parseInt(page, 10) || 1);
-    const validLimit = Math.min(Math.max(1, Number.parseInt(limit, 10) || 1), 200);
-    const offset = (validPage - 1) * validLimit;
-    const isDescending = String(sortOrder || "asc").toLowerCase() === "desc";
+      const filterCategory = category || productType || null;
+      const validPage = Math.max(1, Number.parseInt(page, 10) || 1);
+      const validLimit = Math.min(Math.max(1, Number.parseInt(limit, 10) || 1), 200);
+      const offset = (validPage - 1) * validLimit;
+      const isDescending = String(sortOrder || "asc").toLowerCase() === "desc";
 
-    // Mapping of UI sort keys to how we'll sort (some done DB-side, some in-memory)
-    const sortKeyMap = {
-      name: "title", // product.title
-      price: "min_price",
-      category: "category",
-      created_at: "created_at",
-      grade: "grade",
-      mandatory: "mandatory",
-    };
-    const mappedSortBy = sortKeyMap[sortBy] || "title";
+      // Mapping of UI sort keys to how we'll sort (some done DB-side, some in-memory)
+      const sortKeyMap = {
+        name: "title", // product.title
+        price: "min_price",
+        category: "category",
+        created_at: "created_at",
+        grade: "grade",
+        mandatory: "mandatory",
+      };
+      const mappedSortBy = sortKeyMap[sortBy] || "title";
 
-    // --- 1) Fetch product_schools rows joined with products (server-side join)
-    // We rely on Supabase relationship: product_schools -> products (named 'products').
-    // Request exact count for pagination.
-    let baseQuery = this.supabase
-      .from("product_schools")
-      .select(
-        `
+      // --- 1) Fetch product_schools rows joined with products (server-side join)
+      // We rely on Supabase relationship: product_schools -> products (named 'products').
+      // Request exact count for pagination.
+      let baseQuery = this.supabase
+        .from("product_schools")
+        .select(
+          `
         grade,
         mandatory,
         products!inner(
@@ -638,74 +648,366 @@ async getSchoolCatalog(schoolId, filters = {}) {
           updated_at
         )
       `,
-        { count: "exact" }
-      )
-      .eq("school_id", schoolId)
-      .eq("products.is_active", true);
+          { count: "exact" }
+        )
+        .eq("school_id", schoolId)
+        .eq("products.is_active", true);
 
-    // grade filter (product_schools.grade)
-    // if (grade && String(grade).trim()) baseQuery = baseQuery.eq("grade", String(grade).trim());
+      // grade filter (product_schools.grade)
+      // if (grade && String(grade).trim()) baseQuery = baseQuery.eq("grade", String(grade).trim());
 
-    // mandatory filter (product_schools.mandatory)
-    if (mandatory !== null && mandatory !== undefined) baseQuery = baseQuery.eq("mandatory", !!mandatory);
+      // mandatory filter (product_schools.mandatory)
+      if (mandatory !== null && mandatory !== undefined) baseQuery = baseQuery.eq("mandatory", !!mandatory);
 
-    // product-level price filtering (on products.base_price)
-    if (priceMin !== null && priceMin !== undefined && !Number.isNaN(Number(priceMin)))
-      baseQuery = baseQuery.gte("products.base_price", Number(priceMin));
-    if (priceMax !== null && priceMax !== undefined && !Number.isNaN(Number(priceMax)))
-      baseQuery = baseQuery.lte("products.base_price", Number(priceMax));
+      // product-level price filtering (on products.base_price)
+      if (priceMin !== null && priceMin !== undefined && !Number.isNaN(Number(priceMin)))
+        baseQuery = baseQuery.gte("products.base_price", Number(priceMin));
+      if (priceMax !== null && priceMax !== undefined && !Number.isNaN(Number(priceMax)))
+        baseQuery = baseQuery.lte("products.base_price", Number(priceMax));
 
-    // search on product title/description (use ilike)
-    if (search && String(search).trim()) {
-      const term = String(search).trim().replace(/[%_]/g, "\\$&");
-      // Supabase .or(...) syntax takes comma-separated conditions
-      baseQuery = baseQuery.or(`products.title.ilike.%${term}%,products.description.ilike.%${term}%`);
-    }
+      // search on product title/description (use ilike)
+      if (search && String(search).trim()) {
+        const term = String(search).trim().replace(/[%_]/g, "\\$&");
+        // Supabase .or(...) syntax takes comma-separated conditions
+        baseQuery = baseQuery.or(`products.title.ilike.%${term}%,products.description.ilike.%${term}%`);
+      }
 
-    // Attempt some DB ordering where possible (grade/mandatory can be sorted DB-side)
-    let dbOrderAttempted = false;
-    try {
-      if (mappedSortBy === "grade" || mappedSortBy === "mandatory") {
-        baseQuery = baseQuery.order(mappedSortBy, { ascending: !isDescending });
-        dbOrderAttempted = true;
-      } else if (mappedSortBy === "title" || mappedSortBy === "created_at") {
-        // sort by product fields (via foreign table)
-        baseQuery = baseQuery.order(mappedSortBy, { foreignTable: "products", ascending: !isDescending });
-        dbOrderAttempted = true;
-      } else {
+      // Attempt some DB ordering where possible (grade/mandatory can be sorted DB-side)
+      let dbOrderAttempted = false;
+      try {
+        if (mappedSortBy === "grade" || mappedSortBy === "mandatory") {
+          baseQuery = baseQuery.order(mappedSortBy, { ascending: !isDescending });
+          dbOrderAttempted = true;
+        } else if (mappedSortBy === "title" || mappedSortBy === "created_at") {
+          // sort by product fields (via foreign table)
+          baseQuery = baseQuery.order(mappedSortBy, { foreignTable: "products", ascending: !isDescending });
+          dbOrderAttempted = true;
+        } else {
+          dbOrderAttempted = false;
+        }
+      } catch (err) {
+        // ordering by foreignTable sometimes throws; fallback to in-memory
         dbOrderAttempted = false;
       }
-    } catch (err) {
-      // ordering by foreignTable sometimes throws; fallback to in-memory
-      dbOrderAttempted = false;
-    }
 
-    baseQuery = baseQuery.range(offset, offset + validLimit - 1);
-    const { data: baseRows, error: baseErr, count } = await baseQuery;
-    if (baseErr) {
-      logger?.error("Supabase: failed fetching product_schools + products", baseErr);
-      throw baseErr;
-    }
+      baseQuery = baseQuery.range(offset, offset + validLimit - 1);
+      const { data: baseRows, error: baseErr, count } = await baseQuery;
+      if (baseErr) {
+        logger?.error("Supabase: failed fetching product_schools + products", baseErr);
+        throw baseErr;
+      }
 
-    const schoolRows = baseRows || [];
-    const totalCountFromDB = Number.isFinite(count) ? count : null;
+      const schoolRows = baseRows || [];
+      const totalCountFromDB = Number.isFinite(count) ? count : null;
 
-    // If no products found, return early with pagination metadata
-    if (schoolRows.length === 0) {
-      const totalCount = totalCountFromDB ?? 0;
-      const totalPages = Math.ceil(totalCount / validLimit || 0);
+      // If no products found, return early with pagination metadata
+      if (schoolRows.length === 0) {
+        const totalCount = totalCountFromDB ?? 0;
+        const totalPages = Math.ceil(totalCount / validLimit || 0);
+        return {
+          schoolId,
+          products: [],
+          pagination: {
+            page: validPage,
+            limit: validLimit,
+            total: totalCount,
+            totalPages,
+            hasNext: totalPages ? validPage < totalPages : false,
+            hasPrev: validPage > 1,
+          },
+          filters: { grade, mandatory, category: filterCategory, priceMin, priceMax, search, sortBy, sortOrder, onlyAvailable },
+          meta: {
+            appliedFilters: {
+              hasGradeFilter: !!grade,
+              hasMandatoryFilter: mandatory !== null && mandatory !== undefined,
+              hasCategoryFilter: !!filterCategory,
+              hasPriceFilter: priceMin !== null || priceMax !== null,
+              hasSearchFilter: !!search,
+              hasOnlyAvailable: !!onlyAvailable,
+            },
+          },
+        };
+      }
+
+      // --- Build product map & ids list
+      const productMap = new Map();
+      const productIds = [];
+      for (const row of schoolRows) {
+        const prod = row.products;
+        productMap.set(prod.id, {
+          id: prod.id,
+          sku: prod.sku || null,
+          title: prod.title,
+          description: prod.description || null,
+          base_price: Number(prod.base_price ?? 0),
+          currency: prod.currency ?? "INR",
+          product_type: prod.product_type ?? null,
+          primary_image: prod.image_url ?? null,
+          variants: [],
+          min_price: null,
+          schoolInfo: { grade: row.grade, mandatory: !!row.mandatory },
+          created_at: prod.created_at,
+          updated_at: prod.updated_at,
+        });
+        productIds.push(prod.id);
+      }
+
+      // --- 2) Fetch variants for these products (bulk)
+      let variantQuery = this.supabase
+        .from("product_variants")
+        .select("id, product_id, sku, price, stock, option_value_1, option_value_2, option_value_3");
+
+      // console.log({productIds});
+
+
+      // Avoid calling .in() with empty array (Supabase error). productIds is non-empty here.
+      variantQuery = variantQuery.in("product_id", productIds);
+
+      const { data: variantRows, error: variantErr } = await variantQuery;
+      if (variantErr) {
+        logger?.error("Supabase: failed fetching product_variants", variantErr);
+        throw variantErr;
+      }
+      const allVariants = variantRows || [];
+      // Optionally keep only available variants
+      const variants = onlyAvailable ? allVariants.filter((v) => Number(v.stock) > 0) : allVariants;
+
+      // --- 3) Collect option_value ids present and bulk fetch them
+      const optionValueIdsSet = new Set();
+      for (const v of variants) {
+        if (v.option_value_1) optionValueIdsSet.add(v.option_value_1);
+        if (v.option_value_2) optionValueIdsSet.add(v.option_value_2);
+        if (v.option_value_3) optionValueIdsSet.add(v.option_value_3);
+      }
+      const optionValueIds = Array.from(optionValueIdsSet);
+
+      // Bulk fetch option values (includes price_modifier or price if you added)
+      let optionValues = [];
+      if (optionValueIds.length > 0) {
+        const { data: ovData, error: ovErr } = await this.supabase
+          .from("product_option_values")
+          .select("id, value, attribute_id, price_modifier")
+          .in("id", optionValueIds);
+
+        if (ovErr) {
+          logger?.error("Supabase: failed fetching product_option_values", ovErr);
+          throw ovErr;
+        }
+        optionValues = ovData || [];
+      }
+      const optionValueMap = new Map(optionValues.map((o) => [o.id, o]));
+
+      // --- 4) Fetch attributes used by those option values
+      const attributeIds = Array.from(new Set(optionValues.map((o) => o.attribute_id).filter(Boolean)));
+      let attributes = [];
+      if (attributeIds.length > 0) {
+        const { data: attrData, error: attrErr } = await this.supabase
+          .from("product_option_attributes")
+          .select("id, name, position")
+          .in("id", attributeIds);
+
+        if (attrErr) {
+          logger?.error("Supabase: failed fetching product_option_attributes", attrErr);
+          throw attrErr;
+        }
+        attributes = attrData || [];
+      }
+      const attributeMap = new Map(attributes.map((a) => [a.id, a]));
+
+      // --- 5) Fetch categories (product_categories -> categories) and brands in bulk
+      // categories
+      let pcData = [];
+      if (productIds.length > 0) {
+        const { data: _pcData, error: pcErr } = await this.supabase
+          .from("product_categories")
+          .select("product_id, categories(id, name)")
+          .in("product_id", productIds);
+        if (pcErr) {
+          logger?.error("Supabase: failed fetching product_categories", pcErr);
+          throw pcErr;
+        }
+        pcData = _pcData || [];
+      }
+      const categoriesMap = new Map();
+      for (const r of pcData) {
+        const pid = r.product_id;
+        const cat = r.categories;
+        if (!categoriesMap.has(pid)) categoriesMap.set(pid, []);
+        if (cat) categoriesMap.get(pid).push({ id: cat.id, name: cat.name });
+      }
+
+      // brands
+      let pbData = [];
+      if (productIds.length > 0) {
+        const { data: _pbData, error: pbErr } = await this.supabase
+          .from("product_brands")
+          .select("product_id, brands(id, name)")
+          .in("product_id", productIds);
+        if (pbErr) {
+          logger?.error("Supabase: failed fetching product_brands", pbErr);
+          throw pbErr;
+        }
+        pbData = _pbData || [];
+      }
+      const brandsMap = new Map();
+      for (const r of pbData) {
+        const pid = r.product_id;
+        const b = r.brands;
+        if (!brandsMap.has(pid)) brandsMap.set(pid, []);
+        if (b) brandsMap.get(pid).push({ id: b.id, name: b.name });
+      }
+
+      // images (optional: primary image fallback)
+      let piData = [];
+      if (productIds.length > 0) {
+        const { data: _piData, error: piErr } = await this.supabase
+          .from("product_images")
+          .select("product_id, url, is_primary")
+          .in("product_id", productIds);
+        if (piErr) {
+          logger?.error("Supabase: failed fetching product_images", piErr);
+          throw piErr;
+        }
+        piData = _piData || [];
+      }
+      const imagesMap = new Map();
+      for (const r of piData) {
+        const pid = r.product_id;
+        if (!imagesMap.has(pid)) imagesMap.set(pid, []);
+        imagesMap.get(pid).push(r);
+      }
+
+      // --- 6) Assemble variants into productMap and compute final price per variant
+      for (const v of variants) {
+        const product = productMap.get(v.product_id);
+        if (!product) continue; // variant for product outside our page (shouldn't happen)
+
+        // Build option list and sum modifiers
+        const optionList = [];
+        let optionModifiersSum = 0;
+        const optionIds = [v.option_value_1, v.option_value_2, v.option_value_3];
+
+        for (const optId of optionIds) {
+          if (!optId) continue;
+          const ov = optionValueMap.get(optId);
+          if (!ov) continue;
+          const attr = attributeMap.get(ov.attribute_id) || {};
+          const modifier = Number(ov.price_modifier ?? ov.price ?? 0);
+          optionModifiersSum += modifier;
+          optionList.push({
+            attribute_id: ov.attribute_id,
+            attribute_name: attr.name ?? null,
+            option_value_id: ov.id,
+            option_value_label: ov.value,
+            option_value_price: modifier,
+          });
+        }
+
+        // Base price for variant (variant.price preferred, fallback to product.base_price)
+        const basePrice = v.price !== null && v.price !== undefined ? Number(v.price) : Number(product.base_price || 0);
+        const finalPrice = Number((basePrice || 0) + optionModifiersSum);
+
+        const variantObj = {
+          variant_id: v.id,
+          sku: v.sku || null,
+          price: finalPrice,
+          base_price: basePrice,
+          option_modifier_sum: optionModifiersSum,
+          stock: Number(v.stock || 0),
+          options: optionList,
+        };
+
+        product.variants.push(variantObj);
+        if (product.min_price === null || finalPrice < product.min_price) product.min_price = finalPrice;
+      }
+
+      // Attach categories, brands, images and finalize products array
+      const products = [];
+      for (const row of schoolRows) {
+        const prod = row.products;
+        const pid = prod.id;
+        const p = productMap.get(pid);
+        if (!p) continue;
+
+        // choose primary image: prefer product.primary_image, otherwise product_images is checked
+        let primaryImage = p.primary_image;
+        if (!primaryImage) {
+          const imgs = imagesMap.get(pid) || [];
+          const primary = imgs.find((i) => i.is_primary) || imgs[0];
+          primaryImage = primary ? primary.url : null;
+        }
+
+        products.push({
+          product_id: pid,
+          sku: p.sku,
+          title: p.title,
+          description: p.description,
+          product_type: p.product_type,
+          base_price: p.base_price,
+          currency: p.currency,
+          mandatory_for_school: !!row.mandatory,
+          primary_image: primaryImage,
+          categories: categoriesMap.get(pid) || [],
+          brands: brandsMap.get(pid) || [],
+          min_price: p.min_price !== null ? Number(p.min_price) : null,
+          variants: p.variants,
+          schoolInfo: p.schoolInfo,
+          created_at: p.created_at,
+          updated_at: p.updated_at,
+        });
+      }
+
+      // --- 7) In-memory sorting when DB ordering wasn't applied or for price/category sorts
+      if (!dbOrderAttempted || mappedSortBy === "min_price" || mappedSortBy === "category") {
+        const dir = isDescending ? -1 : 1;
+        products.sort((a, b) => {
+          let aValue, bValue;
+          if (mappedSortBy === "min_price" || mappedSortBy === "price") {
+            aValue = Number(a.min_price ?? a.base_price ?? 0);
+            bValue = Number(b.min_price ?? b.base_price ?? 0);
+          } else if (mappedSortBy === "category") {
+            aValue = (a.categories?.[0]?.name || "").toLowerCase();
+            bValue = (b.categories?.[0]?.name || "").toLowerCase();
+          } else if (mappedSortBy === "title") {
+            aValue = (a.title || "").toLowerCase();
+            bValue = (b.title || "").toLowerCase();
+          } else {
+            aValue = (a.title || "").toLowerCase();
+            bValue = (b.title || "").toLowerCase();
+          }
+
+          if (aValue < bValue) return -1 * dir;
+          if (aValue > bValue) return 1 * dir;
+          return 0;
+        });
+      }
+
+      // totalCount: use DB-provided count if available, else fallback to products.length
+      const totalCount = totalCountFromDB ?? products.length;
+      const totalPages = Math.ceil((totalCount || 0) / validLimit);
+
       return {
         schoolId,
-        products: [],
+        products,
         pagination: {
           page: validPage,
           limit: validLimit,
           total: totalCount,
           totalPages,
-          hasNext: totalPages ? validPage < totalPages : false,
+          hasNext: validPage < totalPages,
           hasPrev: validPage > 1,
         },
-        filters: { grade, mandatory, category: filterCategory, priceMin, priceMax, search, sortBy, sortOrder, onlyAvailable },
+        filters: {
+          grade,
+          mandatory,
+          category: filterCategory,
+          priceMin: priceMin !== null ? Number(priceMin) : null,
+          priceMax: priceMax !== null ? Number(priceMax) : null,
+          search,
+          sortBy,
+          sortOrder,
+          onlyAvailable,
+        },
         meta: {
           appliedFilters: {
             hasGradeFilter: !!grade,
@@ -717,307 +1019,15 @@ async getSchoolCatalog(schoolId, filters = {}) {
           },
         },
       };
+    } catch (error) {
+      logger?.error("Error getting school catalog:", error);
+      if (!error.status) error.status = 500;
+      throw error;
     }
-
-    // --- Build product map & ids list
-    const productMap = new Map();
-    const productIds = [];
-    for (const row of schoolRows) {
-      const prod = row.products;
-      productMap.set(prod.id, {
-        id: prod.id,
-        sku: prod.sku || null,
-        title: prod.title,
-        description: prod.description || null,
-        base_price: Number(prod.base_price ?? 0),
-        currency: prod.currency ?? "INR",
-        product_type: prod.product_type ?? null,
-        primary_image: prod.image_url ?? null,
-        variants: [],
-        min_price: null,
-        schoolInfo: { grade: row.grade, mandatory: !!row.mandatory },
-        created_at: prod.created_at,
-        updated_at: prod.updated_at,
-      });
-      productIds.push(prod.id);
-    }
-
-    // --- 2) Fetch variants for these products (bulk)
-    let variantQuery = this.supabase
-      .from("product_variants")
-      .select("id, product_id, sku, price, stock, option_value_1, option_value_2, option_value_3");
-
-      // console.log({productIds});
-
-
-    // Avoid calling .in() with empty array (Supabase error). productIds is non-empty here.
-    variantQuery = variantQuery.in("product_id", productIds);
-
-    const { data: variantRows, error: variantErr } = await variantQuery;
-    if (variantErr) {
-      logger?.error("Supabase: failed fetching product_variants", variantErr);
-      throw variantErr;
-    }
-    const allVariants = variantRows || [];
-    // Optionally keep only available variants
-    const variants = onlyAvailable ? allVariants.filter((v) => Number(v.stock) > 0) : allVariants;
-
-    // --- 3) Collect option_value ids present and bulk fetch them
-    const optionValueIdsSet = new Set();
-    for (const v of variants) {
-      if (v.option_value_1) optionValueIdsSet.add(v.option_value_1);
-      if (v.option_value_2) optionValueIdsSet.add(v.option_value_2);
-      if (v.option_value_3) optionValueIdsSet.add(v.option_value_3);
-    }
-    const optionValueIds = Array.from(optionValueIdsSet);
-
-    // Bulk fetch option values (includes price_modifier or price if you added)
-    let optionValues = [];
-    if (optionValueIds.length > 0) {
-      const { data: ovData, error: ovErr } = await this.supabase
-        .from("product_option_values")
-        .select("id, value, attribute_id, price_modifier")
-        .in("id", optionValueIds);
-
-      if (ovErr) {
-        logger?.error("Supabase: failed fetching product_option_values", ovErr);
-        throw ovErr;
-      }
-      optionValues = ovData || [];
-    }
-    const optionValueMap = new Map(optionValues.map((o) => [o.id, o]));
-
-    // --- 4) Fetch attributes used by those option values
-    const attributeIds = Array.from(new Set(optionValues.map((o) => o.attribute_id).filter(Boolean)));
-    let attributes = [];
-    if (attributeIds.length > 0) {
-      const { data: attrData, error: attrErr } = await this.supabase
-        .from("product_option_attributes")
-        .select("id, name, position")
-        .in("id", attributeIds);
-
-      if (attrErr) {
-        logger?.error("Supabase: failed fetching product_option_attributes", attrErr);
-        throw attrErr;
-      }
-      attributes = attrData || [];
-    }
-    const attributeMap = new Map(attributes.map((a) => [a.id, a]));
-
-    // --- 5) Fetch categories (product_categories -> categories) and brands in bulk
-    // categories
-    let pcData = [];
-    if (productIds.length > 0) {
-      const { data: _pcData, error: pcErr } = await this.supabase
-        .from("product_categories")
-        .select("product_id, categories(id, name)")
-        .in("product_id", productIds);
-      if (pcErr) {
-        logger?.error("Supabase: failed fetching product_categories", pcErr);
-        throw pcErr;
-      }
-      pcData = _pcData || [];
-    }
-    const categoriesMap = new Map();
-    for (const r of pcData) {
-      const pid = r.product_id;
-      const cat = r.categories;
-      if (!categoriesMap.has(pid)) categoriesMap.set(pid, []);
-      if (cat) categoriesMap.get(pid).push({ id: cat.id, name: cat.name });
-    }
-
-    // brands
-    let pbData = [];
-    if (productIds.length > 0) {
-      const { data: _pbData, error: pbErr } = await this.supabase
-        .from("product_brands")
-        .select("product_id, brands(id, name)")
-        .in("product_id", productIds);
-      if (pbErr) {
-        logger?.error("Supabase: failed fetching product_brands", pbErr);
-        throw pbErr;
-      }
-      pbData = _pbData || [];
-    }
-    const brandsMap = new Map();
-    for (const r of pbData) {
-      const pid = r.product_id;
-      const b = r.brands;
-      if (!brandsMap.has(pid)) brandsMap.set(pid, []);
-      if (b) brandsMap.get(pid).push({ id: b.id, name: b.name });
-    }
-
-    // images (optional: primary image fallback)
-    let piData = [];
-    if (productIds.length > 0) {
-      const { data: _piData, error: piErr } = await this.supabase
-        .from("product_images")
-        .select("product_id, url, is_primary")
-        .in("product_id", productIds);
-      if (piErr) {
-        logger?.error("Supabase: failed fetching product_images", piErr);
-        throw piErr;
-      }
-      piData = _piData || [];
-    }
-    const imagesMap = new Map();
-    for (const r of piData) {
-      const pid = r.product_id;
-      if (!imagesMap.has(pid)) imagesMap.set(pid, []);
-      imagesMap.get(pid).push(r);
-    }
-
-    // --- 6) Assemble variants into productMap and compute final price per variant
-    for (const v of variants) {
-      const product = productMap.get(v.product_id);
-      if (!product) continue; // variant for product outside our page (shouldn't happen)
-
-      // Build option list and sum modifiers
-      const optionList = [];
-      let optionModifiersSum = 0;
-      const optionIds = [v.option_value_1, v.option_value_2, v.option_value_3];
-
-      for (const optId of optionIds) {
-        if (!optId) continue;
-        const ov = optionValueMap.get(optId);
-        if (!ov) continue;
-        const attr = attributeMap.get(ov.attribute_id) || {};
-        const modifier = Number(ov.price_modifier ?? ov.price ?? 0);
-        optionModifiersSum += modifier;
-        optionList.push({
-          attribute_id: ov.attribute_id,
-          attribute_name: attr.name ?? null,
-          option_value_id: ov.id,
-          option_value_label: ov.value,
-          option_value_price: modifier,
-        });
-      }
-
-      // Base price for variant (variant.price preferred, fallback to product.base_price)
-      const basePrice = v.price !== null && v.price !== undefined ? Number(v.price) : Number(product.base_price || 0);
-      const finalPrice = Number((basePrice || 0) + optionModifiersSum);
-
-      const variantObj = {
-        variant_id: v.id,
-        sku: v.sku || null,
-        price: finalPrice,
-        base_price: basePrice,
-        option_modifier_sum: optionModifiersSum,
-        stock: Number(v.stock || 0),
-        options: optionList,
-      };
-
-      product.variants.push(variantObj);
-      if (product.min_price === null || finalPrice < product.min_price) product.min_price = finalPrice;
-    }
-
-    // Attach categories, brands, images and finalize products array
-    const products = [];
-    for (const row of schoolRows) {
-      const prod = row.products;
-      const pid = prod.id;
-      const p = productMap.get(pid);
-      if (!p) continue;
-
-      // choose primary image: prefer product.primary_image, otherwise product_images is checked
-      let primaryImage = p.primary_image;
-      if (!primaryImage) {
-        const imgs = imagesMap.get(pid) || [];
-        const primary = imgs.find((i) => i.is_primary) || imgs[0];
-        primaryImage = primary ? primary.url : null;
-      }
-
-      products.push({
-        product_id: pid,
-        sku: p.sku,
-        title: p.title,
-        description: p.description,
-        product_type: p.product_type,
-        base_price: p.base_price,
-        currency: p.currency,
-        mandatory_for_school: !!row.mandatory,
-        primary_image: primaryImage,
-        categories: categoriesMap.get(pid) || [],
-        brands: brandsMap.get(pid) || [],
-        min_price: p.min_price !== null ? Number(p.min_price) : null,
-        variants: p.variants,
-        schoolInfo: p.schoolInfo,
-        created_at: p.created_at,
-        updated_at: p.updated_at,
-      });
-    }
-
-    // --- 7) In-memory sorting when DB ordering wasn't applied or for price/category sorts
-    if (!dbOrderAttempted || mappedSortBy === "min_price" || mappedSortBy === "category") {
-      const dir = isDescending ? -1 : 1;
-      products.sort((a, b) => {
-        let aValue, bValue;
-        if (mappedSortBy === "min_price" || mappedSortBy === "price") {
-          aValue = Number(a.min_price ?? a.base_price ?? 0);
-          bValue = Number(b.min_price ?? b.base_price ?? 0);
-        } else if (mappedSortBy === "category") {
-          aValue = (a.categories?.[0]?.name || "").toLowerCase();
-          bValue = (b.categories?.[0]?.name || "").toLowerCase();
-        } else if (mappedSortBy === "title") {
-          aValue = (a.title || "").toLowerCase();
-          bValue = (b.title || "").toLowerCase();
-        } else {
-          aValue = (a.title || "").toLowerCase();
-          bValue = (b.title || "").toLowerCase();
-        }
-
-        if (aValue < bValue) return -1 * dir;
-        if (aValue > bValue) return 1 * dir;
-        return 0;
-      });
-    }
-
-    // totalCount: use DB-provided count if available, else fallback to products.length
-    const totalCount = totalCountFromDB ?? products.length;
-    const totalPages = Math.ceil((totalCount || 0) / validLimit);
-
-    return {
-      schoolId,
-      products,
-      pagination: {
-        page: validPage,
-        limit: validLimit,
-        total: totalCount,
-        totalPages,
-        hasNext: validPage < totalPages,
-        hasPrev: validPage > 1,
-      },
-      filters: {
-        grade,
-        mandatory,
-        category: filterCategory,
-        priceMin: priceMin !== null ? Number(priceMin) : null,
-        priceMax: priceMax !== null ? Number(priceMax) : null,
-        search,
-        sortBy,
-        sortOrder,
-        onlyAvailable,
-      },
-      meta: {
-        appliedFilters: {
-          hasGradeFilter: !!grade,
-          hasMandatoryFilter: mandatory !== null && mandatory !== undefined,
-          hasCategoryFilter: !!filterCategory,
-          hasPriceFilter: priceMin !== null || priceMax !== null,
-          hasSearchFilter: !!search,
-          hasOnlyAvailable: !!onlyAvailable,
-        },
-      },
-    };
-  } catch (error) {
-    logger?.error("Error getting school catalog:", error);
-    if (!error.status) error.status = 500;
-    throw error;
   }
-}
 
-  
-  
+
+
 
   /**
    * Deactivate school (soft delete)
@@ -1031,8 +1041,6 @@ async getSchoolCatalog(schoolId, filters = {}) {
         .from("schools")
         .update({
           is_active: false,
-          deactivated_at: new Date().toISOString(),
-          deactivation_reason: reason,
         })
         .eq("id", schoolId);
 
@@ -1056,9 +1064,7 @@ async getSchoolCatalog(schoolId, filters = {}) {
         .from("schools")
         .update({
           is_active: true,
-          deactivated_at: null,
-          deactivation_reason: null,
-          updated_at: new Date().toISOString(),
+
         })
         .eq("id", schoolId);
 
@@ -1098,6 +1104,7 @@ async getSchoolCatalog(schoolId, filters = {}) {
     };
 
     return {
+      ...row, // Include all original DB fields to capture any new columns
       id: row.id,
       name: row.name,
       type: row.type,
@@ -1116,5 +1123,42 @@ async getSchoolCatalog(schoolId, filters = {}) {
       deactivatedAt: row.deactivated_at,
       deactivationReason: row.deactivation_reason,
     };
+  }
+  /**
+   * Upload school image to Supabase Storage
+   * @param {Object} file - File object (from multer)
+   * @param {string} token - User's JWT token
+   * @returns {Promise<string>} Public URL of the uploaded image
+   */
+  async uploadImage(file, token) {
+    try {
+      const fileName = `schools/${Date.now()}-${file.originalname}`;
+
+      // Use Service Client to bypass RLS policies for admin uploads
+      // This is more reliable for admin operations than user-scoped RLS
+      const supabase = createServiceClient();
+
+      // Upload file toSupabase Storage
+      const { data, error } = await supabase.storage
+        .from("school-images") // Ensure this bucket exists
+        .upload(fileName, file.buffer, {
+          contentType: file.mimetype,
+          upsert: true,
+        });
+
+      if (error) throw error;
+
+
+
+      // Get public URL (always uses public client as read is public)
+      const {
+        data: { publicUrl },
+      } = this.supabase.storage.from("school-images").getPublicUrl(fileName);
+
+      return publicUrl;
+    } catch (error) {
+      logger.error("Error uploading file to Supabase:", error);
+      throw error;
+    }
   }
 }

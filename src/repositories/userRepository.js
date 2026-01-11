@@ -82,6 +82,31 @@ export class UserRepository {
   }
 
   /**
+   * Find user by verification token
+   */
+  async findByVerificationToken(tokenHash) {
+    try {
+      const { data, error } = await this.supabase
+        .from("users")
+        .select("*")
+        .eq("verification_token", tokenHash)
+        .eq("is_active", true)
+        .single();
+
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+
+      // Return raw data or formatted
+      return data;
+    } catch (error) {
+      logger.error("Error finding user by verification token:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Update user profile
    */
   async update(userId, updateData) {

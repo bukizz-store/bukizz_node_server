@@ -46,6 +46,7 @@ export const authenticateToken = async (req, res, next) => {
     // Add user data to request
     req.user = result.user;
     req.tokenData = result.decoded;
+    req.token = token; // Make raw token available for downstream services
     next();
   } catch (error) {
     logger.error("Authentication middleware error:", error);

@@ -4,6 +4,8 @@ import productRoutes from "./productRoutes.js";
 import schoolRoutes from "./schoolRoutes.js";
 import orderRoutes from "./orderRoutes.js";
 import pincodeRoutes from "./pincodeRoutes.js";
+import warehouseRoutes from "./warehouseRoutes.js";
+import categoryRoutes from "./categoryRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
@@ -38,6 +40,8 @@ export function setupRoutes(app, dependencies = {}) {
         schools: `${apiV1}/schools`,
         orders: `${apiV1}/orders`,
         pincodes: `${apiV1}/pincodes`,
+        warehouses: `${apiV1}/warehouses`,
+        categories: `${apiV1}/categories`,
       },
     });
   });
@@ -49,6 +53,8 @@ export function setupRoutes(app, dependencies = {}) {
   app.use(`${apiV1}/schools`, schoolRoutes(dependencies));
   app.use(`${apiV1}/orders`, orderRoutes(dependencies));
   app.use(`${apiV1}/pincodes`, pincodeRoutes(dependencies));
+  app.use(`${apiV1}/warehouses`, warehouseRoutes);
+  app.use(`${apiV1}/categories`, categoryRoutes(dependencies));
 
   // Handle 404 for all other routes
   app.use("*", notFoundHandler);
