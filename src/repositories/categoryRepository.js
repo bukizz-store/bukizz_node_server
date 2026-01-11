@@ -162,7 +162,7 @@ export class CategoryRepository {
             let query = supabase.from("categories").select(`
           *,
           parent:categories!parent_id(id, name, slug),
-          children:categories!parent_id(id, name, slug, description)
+          children:categories!parent_id(id, name, slug, description,image)
       `, { count: "exact" });
 
             query = query.eq("is_active", true);
