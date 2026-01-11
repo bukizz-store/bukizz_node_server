@@ -1,4 +1,4 @@
-import { getSupabase } from "../db/index.js";
+import { getSupabase, createServiceClient } from "../db/index.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -16,6 +16,7 @@ export class CategoryRepository {
             const categoryPayload = {
                 name: categoryData.name,
                 slug: categoryData.slug,
+                image: categoryData.image || null,
                 description: categoryData.description,
                 parent_id: categoryData.parentId || null,
                 is_active: true,
@@ -46,6 +47,7 @@ export class CategoryRepository {
             const updatePayload = {};
             if (updateData.name !== undefined) updatePayload.name = updateData.name;
             if (updateData.slug !== undefined) updatePayload.slug = updateData.slug;
+            if (updateData.image !== undefined) updatePayload.image = updateData.image;
             if (updateData.description !== undefined)
                 updatePayload.description = updateData.description;
             if (updateData.parentId !== undefined)
@@ -223,6 +225,7 @@ export class CategoryRepository {
             id: row.id,
             name: row.name,
             slug: row.slug,
+            image: row.image,
             description: row.description,
             parentId: row.parent_id,
             parent: row.parent ? {
@@ -240,6 +243,35 @@ export class CategoryRepository {
             createdAt: row.created_at,
             updatedAt: row.updated_at,
         };
+    }
+    /**
+     * Upload category image to Supabase Storage
+     */
+    async uploadImage(file) {
+        try {
+            const fileName = `categories/${Date.now()}-${file.originalname}`;
+
+            // Use Service Client to bypass RLS policies for admin uploads
+            const supabase = createServiceClient();
+
+            const { data, error } = await supabase.storage
+                .from("categories")
+                .upload(fileName, file.buffer, {
+                    contentType: file.mimetype,
+                    upsert: true,
+                });
+
+            if (error) throw error;
+
+            const {
+                data: { publicUrl },
+            } = this.supabase.storage.from("categories").getPublicUrl(fileName);
+
+            return publicUrl;
+        } catch (error) {
+            logger.error("Error uploading category image:", error);
+            throw error;
+        }
     }
 }
 

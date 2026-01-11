@@ -16,7 +16,8 @@ export class CategoryController {
      * POST /api/categories
      */
     createCategory = asyncHandler(async (req, res) => {
-        const category = await this.categoryService.createCategory(req.body);
+        const categoryData = { ...req.body };
+        const category = await this.categoryService.createCategory(categoryData, req.file);
 
         logger.info("Category created", { categoryId: category.id });
 
@@ -48,7 +49,8 @@ export class CategoryController {
      */
     updateCategory = asyncHandler(async (req, res) => {
         const { id } = req.params;
-        const category = await this.categoryService.updateCategory(id, req.body);
+        const updateData = { ...req.body };
+        const category = await this.categoryService.updateCategory(id, updateData, req.file);
 
         logger.info("Category updated", { categoryId: id });
 

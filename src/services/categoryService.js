@@ -14,7 +14,7 @@ export class CategoryService {
     /**
      * Create a new category
      */
-    async createCategory(categoryData) {
+    async createCategory(categoryData, imageFile) {
         try {
             // Generate slug if not provided
             if (!categoryData.slug) {
@@ -35,6 +35,12 @@ export class CategoryService {
                 }
             }
 
+            // Upload image if provided
+            if (imageFile) {
+                const imageUrl = await this.categoryRepository.uploadImage(imageFile);
+                categoryData.image = imageUrl;
+            }
+
             return await this.categoryRepository.create(categoryData);
         } catch (error) {
             logger.error("Error creating category:", error);
@@ -45,7 +51,7 @@ export class CategoryService {
     /**
      * Update category
      */
-    async updateCategory(categoryId, updateData) {
+    async updateCategory(categoryId, updateData, imageFile) {
         try {
             const existingCategory = await this.categoryRepository.findById(categoryId);
             if (!existingCategory) {
@@ -75,6 +81,12 @@ export class CategoryService {
                 if (!parentCategory) {
                     throw new AppError("Parent category not found", 404);
                 }
+            }
+
+            // Upload image if provided
+            if (imageFile) {
+                const imageUrl = await this.categoryRepository.uploadImage(imageFile);
+                updateData.image = imageUrl;
             }
 
             return await this.categoryRepository.update(categoryId, updateData);

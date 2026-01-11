@@ -1,4 +1,5 @@
 import express from "express";
+import multer from "multer";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import {
@@ -13,6 +14,22 @@ import categoryController from "../controllers/categoryController.js";
  */
 export default function categoryRoutes() {
     const router = express.Router();
+
+    // Configure multer for file uploads (similar to schoolRoutes)
+    const storage = multer.memoryStorage();
+    const upload = multer({
+        storage,
+        limits: {
+            fileSize: 5 * 1024 * 1024, // 5MB limit
+        },
+        fileFilter: (req, file, cb) => {
+            if (file.mimetype.startsWith("image/")) {
+                cb(null, true);
+            } else {
+                cb(new Error("Only image files are allowed"), false);
+            }
+        },
+    });
 
     // Public Routes
 
@@ -45,6 +62,7 @@ export default function categoryRoutes() {
     router.post(
         "/",
         authenticateToken,
+        upload.single("image"),
         // Add authorize('admin') if you want to restrict to admins
         validate(categorySchemas.create),
         categoryController.createCategory
@@ -57,6 +75,7 @@ export default function categoryRoutes() {
     router.put(
         "/:id",
         authenticateToken,
+        upload.single("image"),
         // Add authorize('admin') if you want to restrict to admins
         validate(paramSchemas.id, "params"),
         validate(categorySchemas.update),
