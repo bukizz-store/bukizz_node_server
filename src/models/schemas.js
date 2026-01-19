@@ -109,6 +109,7 @@ export const categorySchemas = {
   query: Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
+    isActive: Joi.boolean().optional(),
     search: Joi.string().max(255).allow("").optional(),
     parentId: optionalUuidSchema,
     sortBy: Joi.string().valid("createdAt", "name").default("name"),

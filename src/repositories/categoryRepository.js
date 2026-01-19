@@ -165,8 +165,10 @@ export class CategoryRepository {
           children:categories!parent_id(id, name, slug, description,image)
       `, { count: "exact" });
 
-            query = query.eq("is_active", true);
-
+            if (filters.isActive !== undefined) {
+                query = query.eq("is_active", filters.isActive);
+            }
+            console.log('filters isActive', filters.isActive);
             if (filters.search) {
                 query = query.or(`name.ilike.%${filters.search}%,description.ilike.%${filters.search}%`);
             }
@@ -262,10 +264,9 @@ export class CategoryRepository {
                 });
 
             if (error) throw error;
-
             const {
                 data: { publicUrl },
-            } = this.supabase.storage.from("categories").getPublicUrl(fileName);
+            } = supabase.storage.from("categories").getPublicUrl(fileName);
 
             return publicUrl;
         } catch (error) {
