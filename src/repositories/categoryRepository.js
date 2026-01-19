@@ -107,7 +107,8 @@ export class CategoryRepository {
                 .from("categories")
                 .select(`
           *,
-          parent:categories!parent_id(id, name, slug)
+          parent:categories!parent_id(id, name, slug),
+          children:categories!parent_id(id, name, slug, description,image)
         `)
                 .eq("id", categoryId)
                 .eq("is_active", true)
@@ -164,11 +165,11 @@ export class CategoryRepository {
           parent:categories!parent_id(id, name, slug),
           children:categories!parent_id(id, name, slug, description,image)
       `, { count: "exact" });
-
+            
+            console.log('filters', filters);
             if (filters.isActive !== undefined) {
                 query = query.eq("is_active", filters.isActive);
             }
-            console.log('filters isActive', filters.isActive);
             if (filters.search) {
                 query = query.or(`name.ilike.%${filters.search}%,description.ilike.%${filters.search}%`);
             }
@@ -176,6 +177,7 @@ export class CategoryRepository {
             if (filters.parentId) {
                 query = query.eq("parent_id", filters.parentId);
             } else if (filters.rootOnly === "true" || filters.rootOnly === true) {
+                console.log('rootOnly', filters.rootOnly);
                 query = query.is("parent_id", null);
             }
 
@@ -230,7 +232,7 @@ export class CategoryRepository {
             image: row.image,
             description: row.description,
             parentId: row.parent_id,
-            parent: row.parent ? {
+            parent: row.parent_id ? {
                 id: row.parent.id,
                 name: row.parent.name,
                 slug: row.parent.slug
@@ -239,7 +241,8 @@ export class CategoryRepository {
                 id: c.id,
                 name: c.name,
                 slug: c.slug,
-                description: c.description
+                description: c.description,
+                image: c.image
             })) : [],
             isActive: row.is_active,
             createdAt: row.created_at,

@@ -112,6 +112,7 @@ export const categorySchemas = {
     isActive: Joi.boolean().optional(),
     search: Joi.string().max(255).allow("").optional(),
     parentId: optionalUuidSchema,
+    rootOnly: Joi.boolean().optional(),
     sortBy: Joi.string().valid("createdAt", "name").default("name"),
     sortOrder: Joi.string().valid("asc", "desc").default("asc"),
   }),
