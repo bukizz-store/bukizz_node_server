@@ -84,7 +84,7 @@ export class CategoryController {
      */
     searchCategories = asyncHandler(async (req, res) => {
         const result = await this.categoryService.searchCategories(req.query);
-
+        console.log('result', result);
         res.json({
             success: true,
             data: result,
