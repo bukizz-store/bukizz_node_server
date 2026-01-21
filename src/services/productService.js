@@ -114,6 +114,7 @@ export class ProductService {
         images: data.images,
         productOptions: data.productOptions,
         schoolData: data.schoolData,
+        productType: data.productType,
       };
 
       const result =

@@ -40,6 +40,7 @@ export class ProductController {
       categories = [],
       productOptions = [],
       schoolData = null,
+      productType = null,
     } = req.body;
 
     // Validate required data
@@ -59,6 +60,7 @@ export class ProductController {
       categories,
       productOptions,
       schoolData,
+      productType,
       retailerId: req.user?.role === "retailer" ? req.user.id : null,
     });
 
