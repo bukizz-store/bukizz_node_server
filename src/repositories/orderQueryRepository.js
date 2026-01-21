@@ -1,4 +1,4 @@
-import { executeQuery } from "../db/index.js";
+import { getSupabase } from "../db/index.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -6,26 +6,32 @@ import { logger } from "../utils/logger.js";
  * Handles all database operations for order-related customer queries and support tickets
  */
 export class OrderQueryRepository {
+  constructor() {
+    this.supabase = getSupabase();
+  }
+
   /**
    * Create a new order query
    */
   async create(queryData) {
-    const query = `
-      INSERT INTO order_queries (id, order_id, user_id, subject, message, status, attachments, created_at, updated_at)
-      VALUES (UUID(), ?, ?, ?, ?, 'open', ?, NOW(), NOW())
-    `;
-
-    const params = [
-      queryData.orderId,
-      queryData.userId,
-      queryData.subject,
-      queryData.message,
-      queryData.attachments ? JSON.stringify(queryData.attachments) : null,
-    ];
-
     try {
-      const result = await executeQuery(query, params);
-      return this.findById(result.insertId);
+      const { data, error } = await this.supabase
+        .from("order_queries")
+        .insert({
+          order_id: queryData.orderId,
+          user_id: queryData.userId,
+          subject: queryData.subject,
+          message: queryData.message,
+          status: "open",
+          attachments: queryData.attachments
+            ? queryData.attachments
+            : null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      return this.formatQuery(data);
     } catch (error) {
       logger.error("Error creating order query:", error);
       throw error;
@@ -36,23 +42,19 @@ export class OrderQueryRepository {
    * Find query by ID
    */
   async findById(id) {
-    const query = `
-      SELECT oq.*, 
-             u.full_name as user_name, u.email as user_email,
-             a.full_name as assigned_to_name,
-             o.order_number
-      FROM order_queries oq
-      LEFT JOIN users u ON oq.user_id = u.id
-      LEFT JOIN users a ON oq.assigned_to = a.id
-      LEFT JOIN orders o ON oq.order_id = o.id
-      WHERE oq.id = ?
-    `;
-
     try {
-      const results = await executeQuery(query, [id]);
-      if (results.length === 0) return null;
+      const { data, error } = await this.supabase
+        .from("order_queries")
+        .select("*")
+        .eq("id", id)
+        .single();
 
-      return this.formatQuery(results[0]);
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+
+      return this.formatQuery(data);
     } catch (error) {
       logger.error("Error finding order query by ID:", error);
       throw error;
@@ -63,20 +65,15 @@ export class OrderQueryRepository {
    * Get all queries for an order
    */
   async findByOrderId(orderId) {
-    const query = `
-      SELECT oq.*, 
-             u.full_name as user_name, u.email as user_email,
-             a.full_name as assigned_to_name
-      FROM order_queries oq
-      LEFT JOIN users u ON oq.user_id = u.id
-      LEFT JOIN users a ON oq.assigned_to = a.id
-      WHERE oq.order_id = ?
-      ORDER BY oq.created_at DESC
-    `;
-
     try {
-      const results = await executeQuery(query, [orderId]);
-      return results.map((query) => this.formatQuery(query));
+      const { data, error } = await this.supabase
+        .from("order_queries")
+        .select("*")
+        .eq("order_id", orderId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      return data.map((query) => this.formatQuery(query));
     } catch (error) {
       logger.error("Error finding queries by order ID:", error);
       throw error;
@@ -87,37 +84,33 @@ export class OrderQueryRepository {
    * Get all queries for a user
    */
   async findByUserId(userId, filters = {}) {
-    let query = `
-      SELECT oq.*, 
-             a.full_name as assigned_to_name,
-             o.order_number
-      FROM order_queries oq
-      LEFT JOIN users a ON oq.assigned_to = a.id
-      LEFT JOIN orders o ON oq.order_id = o.id
-      WHERE oq.user_id = ?
-    `;
-    const params = [userId];
-
-    if (filters.status) {
-      query += " AND oq.status = ?";
-      params.push(filters.status);
-    }
-
-    // Apply sorting
-    const sortBy = filters.sortBy || "created_at";
-    const sortOrder = filters.sortOrder || "desc";
-    query += ` ORDER BY oq.${sortBy} ${sortOrder.toUpperCase()}`;
-
-    // Apply pagination
-    const page = parseInt(filters.page) || 1;
-    const limit = parseInt(filters.limit) || 20;
-    const offset = (page - 1) * limit;
-    query += " LIMIT ? OFFSET ?";
-    params.push(limit, offset);
-
     try {
-      const results = await executeQuery(query, params);
-      return results.map((query) => this.formatQueryWithOrder(query));
+      let query = this.supabase
+        .from("order_queries")
+        .select("*")
+        .eq("user_id", userId);
+
+      if (filters.status) {
+        query = query.eq("status", filters.status);
+      }
+
+      // Apply sorting
+      const sortBy = filters.sortBy || "created_at";
+      const ascending = filters.sortOrder === "asc";
+      query = query.order(sortBy, { ascending });
+
+      // Apply pagination
+      const page = parseInt(filters.page) || 1;
+      const limit = parseInt(filters.limit) || 20;
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+
+      query = query.range(from, to);
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+      return data.map((query) => this.formatQueryWithOrder(query));
     } catch (error) {
       logger.error("Error finding queries by user ID:", error);
       throw error;
@@ -128,55 +121,42 @@ export class OrderQueryRepository {
    * Get queries with pagination and filters
    */
   async findAll(filters = {}) {
-    let query = `
-      SELECT oq.*, 
-             u.full_name as user_name, u.email as user_email,
-             a.full_name as assigned_to_name,
-             o.order_number
-      FROM order_queries oq
-      LEFT JOIN users u ON oq.user_id = u.id
-      LEFT JOIN users a ON oq.assigned_to = a.id
-      LEFT JOIN orders o ON oq.order_id = o.id
-      WHERE 1=1
-    `;
-    const params = [];
-
-    // Apply filters
-    if (filters.orderId) {
-      query += " AND oq.order_id = ?";
-      params.push(filters.orderId);
-    }
-
-    if (filters.userId) {
-      query += " AND oq.user_id = ?";
-      params.push(filters.userId);
-    }
-
-    if (filters.assignedTo) {
-      query += " AND oq.assigned_to = ?";
-      params.push(filters.assignedTo);
-    }
-
-    if (filters.status) {
-      query += " AND oq.status = ?";
-      params.push(filters.status);
-    }
-
-    // Apply sorting
-    const sortBy = filters.sortBy || "created_at";
-    const sortOrder = filters.sortOrder || "desc";
-    query += ` ORDER BY oq.${sortBy} ${sortOrder.toUpperCase()}`;
-
-    // Apply pagination
-    const page = parseInt(filters.page) || 1;
-    const limit = parseInt(filters.limit) || 20;
-    const offset = (page - 1) * limit;
-    query += " LIMIT ? OFFSET ?";
-    params.push(limit, offset);
-
     try {
-      const results = await executeQuery(query, params);
-      return results.map((query) => this.formatQueryWithOrder(query));
+      let query = this.supabase
+        .from("order_queries")
+        .select("*");
+
+      // Apply filters
+      if (filters.orderId) {
+        query = query.eq("order_id", filters.orderId);
+      }
+      if (filters.userId) {
+        query = query.eq("user_id", filters.userId);
+      }
+      if (filters.assignedTo) {
+        query = query.eq("assigned_to", filters.assignedTo);
+      }
+      if (filters.status) {
+        query = query.eq("status", filters.status);
+      }
+
+      // Apply sorting
+      const sortBy = filters.sortBy || "created_at";
+      const ascending = filters.sortOrder === "asc";
+      query = query.order(sortBy, { ascending });
+
+      // Apply pagination
+      const page = parseInt(filters.page) || 1;
+      const limit = parseInt(filters.limit) || 20;
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+
+      query = query.range(from, to);
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+      return data.map((query) => this.formatQueryWithOrder(query));
     } catch (error) {
       logger.error("Error finding order queries:", error);
       throw error;
@@ -187,47 +167,23 @@ export class OrderQueryRepository {
    * Update query
    */
   async update(id, updateData) {
-    const fields = [];
-    const params = [];
-
-    if (updateData.subject !== undefined) {
-      fields.push("subject = ?");
-      params.push(updateData.subject);
-    }
-    if (updateData.message !== undefined) {
-      fields.push("message = ?");
-      params.push(updateData.message);
-    }
-    if (updateData.status !== undefined) {
-      fields.push("status = ?");
-      params.push(updateData.status);
-    }
-    if (updateData.assignedTo !== undefined) {
-      fields.push("assigned_to = ?");
-      params.push(updateData.assignedTo);
-    }
-    if (updateData.resolutionNote !== undefined) {
-      fields.push("resolution_note = ?");
-      params.push(updateData.resolutionNote);
-    }
-    if (updateData.attachments !== undefined) {
-      fields.push("attachments = ?");
-      params.push(
-        updateData.attachments ? JSON.stringify(updateData.attachments) : null
-      );
-    }
-
-    if (fields.length === 0) {
-      return this.findById(id);
-    }
-
-    fields.push("updated_at = NOW()");
-    params.push(id);
-
-    const query = `UPDATE order_queries SET ${fields.join(", ")} WHERE id = ?`;
-
     try {
-      await executeQuery(query, params);
+      const updates = {};
+      if (updateData.subject !== undefined) updates.subject = updateData.subject;
+      if (updateData.message !== undefined) updates.message = updateData.message;
+      if (updateData.status !== undefined) updates.status = updateData.status;
+      if (updateData.assignedTo !== undefined) updates.assigned_to = updateData.assignedTo;
+      if (updateData.resolutionNote !== undefined) updates.resolution_note = updateData.resolutionNote;
+      if (updateData.attachments !== undefined) updates.attachments = updateData.attachments;
+
+      updates.updated_at = new Date().toISOString();
+
+      const { error } = await this.supabase
+        .from("order_queries")
+        .update(updates)
+        .eq("id", id);
+
+      if (error) throw error;
       return this.findById(id);
     } catch (error) {
       logger.error("Error updating order query:", error);
@@ -239,11 +195,16 @@ export class OrderQueryRepository {
    * Assign query to user
    */
   async assign(id, assignedTo) {
-    const query =
-      "UPDATE order_queries SET assigned_to = ?, updated_at = NOW() WHERE id = ?";
-
     try {
-      await executeQuery(query, [assignedTo, id]);
+      const { error } = await this.supabase
+        .from("order_queries")
+        .update({
+          assigned_to: assignedTo,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+
+      if (error) throw error;
       return this.findById(id);
     } catch (error) {
       logger.error("Error assigning order query:", error);
@@ -255,14 +216,18 @@ export class OrderQueryRepository {
    * Close query with resolution
    */
   async close(id, resolutionNote, closedBy) {
-    const query = `
-      UPDATE order_queries 
-      SET status = 'closed', resolution_note = ?, assigned_to = ?, updated_at = NOW() 
-      WHERE id = ?
-    `;
-
     try {
-      await executeQuery(query, [resolutionNote, closedBy, id]);
+      const { error } = await this.supabase
+        .from("order_queries")
+        .update({
+          status: "closed",
+          resolution_note: resolutionNote,
+          assigned_to: closedBy, // Assuming closedBy is the resolver? Or keep original assignee?
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", id);
+
+      if (error) throw error;
       return this.findById(id);
     } catch (error) {
       logger.error("Error closing order query:", error);
@@ -274,44 +239,47 @@ export class OrderQueryRepository {
    * Get query statistics
    */
   async getStats(filters = {}) {
-    let query = `
-      SELECT 
-        status,
-        COUNT(*) as count,
-        AVG(TIMESTAMPDIFF(HOUR, created_at, 
-          CASE WHEN status = 'closed' THEN updated_at ELSE NOW() END
-        )) as avg_resolution_hours
-      FROM order_queries
-      WHERE 1=1
-    `;
-    const params = [];
-
-    if (filters.assignedTo) {
-      query += " AND assigned_to = ?";
-      params.push(filters.assignedTo);
-    }
-
-    if (filters.startDate) {
-      query += " AND created_at >= ?";
-      params.push(filters.startDate);
-    }
-
-    if (filters.endDate) {
-      query += " AND created_at <= ?";
-      params.push(filters.endDate);
-    }
-
-    query += " GROUP BY status";
-
     try {
-      const results = await executeQuery(query, params);
-      return results.reduce((acc, row) => {
-        acc[row.status] = {
-          count: row.count,
-          avgResolutionHours: parseFloat(row.avg_resolution_hours) || 0,
-        };
-        return acc;
-      }, {});
+      // Supabase doesn't support complex aggregations like AVG(TIMESTAMPDIFF) easily via client.
+      // We'll fetch basics or use RPC if available. 
+      // For now, let's just get counts by status. 
+      let query = this.supabase
+        .from("order_queries")
+        .select("status, created_at, updated_at");
+
+      if (filters.assignedTo) query = query.eq("assigned_to", filters.assignedTo);
+      if (filters.startDate) query = query.gte("created_at", filters.startDate);
+      if (filters.endDate) query = query.lte("created_at", filters.endDate);
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      // Compute stats in memory (Assuming data volume isn't massive for now)
+      const stats = {};
+
+      data.forEach(row => {
+        if (!stats[row.status]) {
+          stats[row.status] = { count: 0, avgResolutionHours: 0, totalResolutionTime: 0, resolvedCount: 0 };
+        }
+        stats[row.status].count++;
+
+        if (row.status === 'closed' || row.status === 'resolved') {
+          const created = new Date(row.created_at);
+          const updated = new Date(row.updated_at);
+          const hours = (updated - created) / (1000 * 60 * 60);
+          stats[row.status].totalResolutionTime += hours;
+          stats[row.status].resolvedCount++;
+        }
+      });
+
+      // Calculate averages
+      Object.keys(stats).forEach(status => {
+        if (stats[status].resolvedCount > 0) {
+          stats[status].avgResolutionHours = stats[status].totalResolutionTime / stats[status].resolvedCount;
+        }
+      });
+
+      return stats;
     } catch (error) {
       logger.error("Error getting query statistics:", error);
       throw error;
@@ -322,32 +290,19 @@ export class OrderQueryRepository {
    * Count total queries
    */
   async count(filters = {}) {
-    let query = "SELECT COUNT(*) as total FROM order_queries WHERE 1=1";
-    const params = [];
-
-    if (filters.orderId) {
-      query += " AND order_id = ?";
-      params.push(filters.orderId);
-    }
-
-    if (filters.userId) {
-      query += " AND user_id = ?";
-      params.push(filters.userId);
-    }
-
-    if (filters.assignedTo) {
-      query += " AND assigned_to = ?";
-      params.push(filters.assignedTo);
-    }
-
-    if (filters.status) {
-      query += " AND status = ?";
-      params.push(filters.status);
-    }
-
     try {
-      const results = await executeQuery(query, params);
-      return results[0].total;
+      let query = this.supabase
+        .from("order_queries")
+        .select("*", { count: "exact", head: true });
+
+      if (filters.orderId) query = query.eq("order_id", filters.orderId);
+      if (filters.userId) query = query.eq("user_id", filters.userId);
+      if (filters.assignedTo) query = query.eq("assigned_to", filters.assignedTo);
+      if (filters.status) query = query.eq("status", filters.status);
+
+      const { count, error } = await query;
+      if (error) throw error;
+      return count;
     } catch (error) {
       logger.error("Error counting order queries:", error);
       throw error;
@@ -358,19 +313,20 @@ export class OrderQueryRepository {
    * Format query data
    */
   formatQuery(query) {
+    if (!query) return null;
     return {
       id: query.id,
       orderId: query.order_id,
       userId: query.user_id,
-      userName: query.user_name,
-      userEmail: query.user_email,
+      userName: query.user?.full_name,
+      userEmail: query.user?.email,
       subject: query.subject,
       message: query.message,
       status: query.status,
       assignedTo: query.assigned_to,
-      assignedToName: query.assigned_to_name,
+      assignedToName: query.assigned_user?.full_name,
       resolutionNote: query.resolution_note,
-      attachments: query.attachments ? JSON.parse(query.attachments) : null,
+      attachments: query.attachments, // Supabase handles JSON
       createdAt: query.created_at,
       updatedAt: query.updated_at,
     };
@@ -380,9 +336,10 @@ export class OrderQueryRepository {
    * Format query data with order information
    */
   formatQueryWithOrder(query) {
+    if (!query) return null;
     return {
       ...this.formatQuery(query),
-      orderNumber: query.order_number,
+      orderNumber: query.order?.order_number,
     };
   }
 }

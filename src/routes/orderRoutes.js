@@ -4,7 +4,7 @@ import {
   requireRoles,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
-import { orderSchemas } from "../models/schemas.js";
+import { orderSchemas, orderQuerySchemas } from "../models/schemas.js";
 import { createRateLimiter } from "../middleware/rateLimiter.js";
 import { OrderController } from "../controllers/orderController.js";
 
@@ -82,7 +82,7 @@ export default function orderRoutes(dependencies = {}) {
   // Create order query/support ticket
   router.post(
     "/:orderId/queries",
-    validate(orderSchemas.createOrderQuery),
+    validate(orderQuerySchemas.createOrderQuery),
     async (req, res, next) => {
       try {
         const orderController = new OrderController();

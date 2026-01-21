@@ -349,10 +349,20 @@ export class OrderService {
     for (const item of items) {
       try {
         let product = null;
+        let imageUrl = null;
+
+        // Helper to extract best image
+        const getBestImage = (images) => {
+          if (!images || images.length === 0) return null;
+          const primary = images.find(img => img.is_primary);
+          if (primary) return primary.url;
+          const sorted = [...images].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+          return sorted[0]?.url;
+        };
 
         // Get current product/variant information using Supabase client methods
         if (item.variantId) {
-          // Get product with variant data
+          // Get product with variant data and images
           const { data: productData, error: productError } = await connection
             .from("products")
             .select(
@@ -364,7 +374,8 @@ export class OrderService {
                 stock,
                 sku,
                 metadata
-              )
+              ),
+              product_images(url, is_primary, sort_order)
             `
             )
             .eq("id", item.productId)
@@ -386,11 +397,16 @@ export class OrderService {
             variant_sku: productData.product_variants[0]?.sku,
             variant_metadata: productData.product_variants[0]?.metadata,
           };
+
+          imageUrl = getBestImage(productData.product_images);
         } else {
           // Get product without variant
           const { data: productData, error: productError } = await connection
             .from("products")
-            .select("*")
+            .select(`
+              *,
+              product_images(url, is_primary, sort_order)
+            `)
             .eq("id", item.productId)
             .eq("is_active", true)
             .single();
@@ -401,6 +417,7 @@ export class OrderService {
           }
 
           product = productData;
+          imageUrl = getBestImage(productData.product_images);
         }
 
         const availableStock = item.variantId
@@ -454,7 +471,8 @@ export class OrderService {
             productType: product.product_type,
             category: product.category,
             brand: product.brand,
-            image: product.image_url,
+            image_url: imageUrl, // Populating the image field needed by frontend
+            image: imageUrl, // Keeping for backward compatibility
             weight: product.weight,
             dimensions: product.dimensions,
             ...(item.variantId && {

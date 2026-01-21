@@ -38,6 +38,8 @@ export class ProductController {
       warehouseData = null,
       variants = [],
       categories = [],
+      productOptions = [],
+      schoolData = null,
     } = req.body;
 
     // Validate required data
@@ -55,14 +57,15 @@ export class ProductController {
       warehouseData,
       variants,
       categories,
+      productOptions,
+      schoolData,
       retailerId: req.user?.role === "retailer" ? req.user.id : null,
     });
 
     logger.info("Comprehensive product created", {
-      productId: result.product.id,
+      productId: result.id,
       imagesCount: result.images?.length || 0,
       brandsCount: result.brands?.length || 0,
-      hasWarehouse: !!result.warehouse,
       variantsCount: result.variants?.length || 0,
     });
 
