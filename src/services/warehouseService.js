@@ -149,6 +149,48 @@ class WarehouseService {
             throw error;
         }
     }
+
+    /**
+     * Update warehouse details (Admin)
+     */
+    async updateWarehouseByAdmin(id, updates) {
+        try {
+            // No ownership check needed for admin
+            // Prepare updates (sanitize)
+            const allowedUpdates = {};
+            if (updates.name) allowedUpdates.name = updates.name;
+            if (updates.contactEmail) allowedUpdates.contact_email = updates.contactEmail;
+            if (updates.contactPhone) allowedUpdates.contact_phone = updates.contactPhone;
+            if (updates.address) allowedUpdates.address = updates.address;
+            if (updates.website) allowedUpdates.website = updates.website;
+            if (updates.metadata) allowedUpdates.metadata = updates.metadata;
+            if (updates.isVerified !== undefined) allowedUpdates.is_verified = updates.isVerified;
+
+            const warehouse = await warehouseRepository.update(id, allowedUpdates);
+            logger.info("Warehouse updated by admin", { warehouseId: id });
+
+            return warehouse;
+        } catch (error) {
+            logger.error("Error in updateWarehouseByAdmin service:", error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete warehouse (Admin)
+     */
+    async deleteWarehouseByAdmin(id) {
+        try {
+            // No ownership check needed for admin
+            await warehouseRepository.delete(id);
+            logger.info("Warehouse deleted by admin", { warehouseId: id });
+
+            return true;
+        } catch (error) {
+            logger.error("Error in deleteWarehouseByAdmin service:", error);
+            throw error;
+        }
+    }
 }
 
 export default new WarehouseService();

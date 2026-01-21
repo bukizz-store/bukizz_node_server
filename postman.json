@@ -474,6 +474,24 @@
 						"method": "POST",
 						"url": "{{api_base}}/users/admin/{{user_id}}/reactivate"
 					}
+				},
+				{
+					"name": "Admin: Update User Details",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/users/admin/{{user_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fullName\": \"Updated Name Admin\",\n  \"email\": \"updated.email@example.com\",\n  \"phone\": \"+919876543299\",\n  \"role\": \"retailer\",\n  \"gender\": \"male\",\n  \"dateOfBirth\": \"1990-01-01\"\n}"
+						},
+						"description": "Admin endpoint to update full user details"
+					}
 				}
 			]
 		},

@@ -17,6 +17,18 @@ router.post(
 );
 
 /**
+ * @route   POST /api/warehouses/admin
+ * @desc    Add a new warehouse (Admin)
+ * @access  Private (Admin)
+ */
+router.post(
+    "/admin",
+    authenticateToken,
+    // requireRoles("admin"), // Uncomment when roles are implemented
+    warehouseController.addWarehouseByAdmin
+);
+
+/**
  * @route   GET /api/warehouses
  * @desc    Get warehouses for the logged-in user
  * @access  Private (Retailer, Admin)
@@ -26,6 +38,30 @@ router.get(
     authenticateToken,
     // requireRoles("retailer", "admin"), // Uncomment when roles are implemented
     warehouseController.getMyWarehouses
+);
+
+/**
+ * @route   PUT /api/warehouses/admin/:id
+ * @desc    Update a warehouse (Admin)
+ * @access  Private (Admin)
+ */
+router.put(
+    "/admin/:id",
+    authenticateToken,
+    // requireRoles("admin"), // Uncomment when roles are implemented
+    warehouseController.updateWarehouseByAdmin
+);
+
+/**
+ * @route   DELETE /api/warehouses/admin/:id
+ * @desc    Delete a warehouse (Admin)
+ * @access  Private (Admin)
+ */
+router.delete(
+    "/admin/:id",
+    authenticateToken,
+    // requireRoles("admin"), // Uncomment when roles are implemented
+    warehouseController.deleteWarehouseByAdmin
 );
 
 /**
