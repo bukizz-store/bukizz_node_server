@@ -265,7 +265,7 @@ export class CategoryRepository {
 
             const {
                 data: { publicUrl },
-            } = this.supabase.storage.from("categories").getPublicUrl(fileName);
+            } = supabase.storage.from("categories").getPublicUrl(fileName);
 
             return publicUrl;
         } catch (error) {

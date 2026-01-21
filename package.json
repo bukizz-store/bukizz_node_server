@@ -38,6 +38,7 @@
     "multer": "^2.0.2",
     "mysql2": "^3.14.5",
     "nodemailer": "^7.0.12",
+    "razorpay": "^2.9.6",
     "uuid": "^9.0.1",
     "winston": "^3.11.0"
   },

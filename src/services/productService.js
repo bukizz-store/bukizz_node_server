@@ -73,251 +73,47 @@ export class ProductService {
 
   /**
    * Create a comprehensive product with all related data atomically
-   * This method ensures all operations succeed or all fail (ACID compliance)
+   * This method uses a database stored procedure for ACID compliance
    */
   async createComprehensiveProduct(data) {
-    const {
-      productData,
-      images = [],
-      brandData = null,
-      warehouseData = null,
-      variants = [],
-      categories = [],
-      retailerId = null, // Destructure from data object
-    } = data;
-
-    // Declare result outside try block to fix scoping issue
-    let result = {
-      product: null,
-      images: [],
-      brands: [],
-      retailer: null,
-      variants: [],
-      categories: [],
-      errors: [],
-    };
-
     try {
       // Step 1: Validate all input data first
       await this.validateComprehensiveProductData(data);
 
-      // Step 2: Create the main product
-      result.product = await this.productRepository.create({
-        ...productData,
-        categoryIds: categories.map((c) => c.id).filter(Boolean),
-        brandIds: brandData?.type === "existing" ? [brandData.brandId] : [],
+      logger.info("Starting comprehensive product creation via RPC");
+
+      // Step 2: Call the RPC via repository
+      // The payload structure might need adjustment depending on exactly what keys are in 'data' vs what SQL expects
+      // SQL expects: productData, brandData, warehouseData, retailerId, categories, variants, images
+      const payload = {
+        productData: data.productData,
+        brandData: data.brandData,
+        warehouseData: data.warehouseData,
+        retailerId: data.retailerId,
+        categories: data.categories,
+        variants: data.variants,
+        images: data.images,
+        productOptions: data.productOptions,
+        schoolData: data.schoolData,
+      };
+
+      const result =
+        await this.productRepository.createComprehensiveProductViaRPC(payload);
+
+      const productId = result.product_id;
+      logger.info("Comprehensive product creation completed via RPC", {
+        productId,
       });
 
-      const productId = result.product.id;
-      logger.info("Product created in comprehensive operation", { productId });
-
-      // Step 3: Handle brand creation/association
-      if (brandData) {
-        try {
-          if (brandData.type === "new") {
-            // Create new brand first
-            const newBrand = await this.brandRepository.create({
-              name: brandData.name,
-              slug:
-                brandData.slug ||
-                brandData.name.toLowerCase().replace(/\s+/g, "-"),
-              description: brandData.description,
-              country: brandData.country,
-              logoUrl: brandData.logoUrl,
-              metadata: brandData.metadata || {},
-            });
-
-            // Then associate with product
-            await this.productRepository.addProductBrand(productId, {
-              brandId: newBrand.id,
-              isPrimary: true,
-            });
-
-            result.brands.push(newBrand);
-            logger.info("New brand created and associated", {
-              brandId: newBrand.id,
-              productId,
-            });
-          } else if (brandData.type === "existing" && brandData.brandId) {
-            // Associate with existing brand
-            await this.productRepository.addProductBrand(productId, {
-              brandId: brandData.brandId,
-              isPrimary: true,
-            });
-
-            const existingBrand = await this.brandRepository.findById(
-              brandData.brandId
-            );
-            result.brands.push(existingBrand);
-            logger.info("Existing brand associated", {
-              brandId: brandData.brandId,
-              productId,
-            });
-          }
-        } catch (brandError) {
-          logger.error(
-            "Error handling brand in comprehensive product creation:",
-            brandError
-          );
-          result.errors.push(`Brand operation failed: ${brandError.message}`);
-        }
-      }
-
-      // Step 4: Handle warehouse creation/association
-      if (warehouseData) {
-        try {
-          if (warehouseData.type === "new") {
-            const warehouseResult =
-              await this.productRepository.addWarehouseDetails(productId, {
-                name: warehouseData.name,
-                contact_email: warehouseData.contact_email,
-                contact_phone: warehouseData.contact_phone,
-                address: warehouseData.address,
-                website: warehouseData.website,
-                is_verified: warehouseData.is_verified || false,
-                metadata: warehouseData.metadata || {},
-              }, retailerId); // Pass retailerId if available
-
-            result.warehouse = {
-              id: warehouseResult.warehouseId,
-              message: warehouseResult.message,
-            };
-            logger.info("New warehouse created and associated", {
-              warehouseId: warehouseResult.warehouseId,
-              productId,
-            });
-          } else if (
-            warehouseData.type === "existing" &&
-            warehouseData.warehouseId
-          ) {
-            const warehouseResult =
-              await this.productRepository.addWarehouseDetails(productId, {
-                warehouseId: warehouseData.warehouseId,
-              }, retailerId); // Pass retailerId if available
-
-            result.warehouse = {
-              id: warehouseData.warehouseId,
-              message: warehouseResult.message,
-            };
-            logger.info("Existing warehouse associated", {
-              warehouseId: warehouseData.warehouseId,
-              productId,
-            });
-          }
-        } catch (warehouseError) {
-          logger.error(
-            "Error handling warehouse in comprehensive product creation:",
-            warehouseError
-          );
-          result.errors.push(
-            `Warehouse operation failed: ${warehouseError.message}`
-          );
-        }
-      }
-
-      // Step 5: Create variants if provided
-      if (variants && variants.length > 0) {
-        for (const variantData of variants) {
-          try {
-            const variant = await this.productVariantRepository.create({
-              productId,
-              ...variantData,
-            });
-            result.variants.push(variant);
-            logger.info("Variant created", {
-              variantId: variant.id,
-              productId,
-            });
-          } catch (variantError) {
-            logger.error(
-              "Error creating variant in comprehensive product creation:",
-              variantError
-            );
-            result.errors.push(
-              `Variant creation failed: ${variantError.message}`
-            );
-          }
-        }
-      }
-
-      // Step 6: Handle image uploads
-      if (images && images.length > 0) {
-        for (const imageData of images) {
-          try {
-            const image = await this.productRepository.addProductImage(
-              productId,
-              {
-                url: imageData.url,
-                file: imageData.file,
-                variantId: imageData.variantId || null,
-                altText: imageData.altText,
-                sortOrder: imageData.sortOrder || 0,
-                isPrimary: imageData.isPrimary || false,
-                imageType: imageData.imageType || "product",
-                metadata: imageData.metadata || {},
-              }
-            );
-            result.images.push(image);
-            logger.info("Image uploaded", {
-              imageId: image.id,
-              productId,
-              url: imageData.url,
-            });
-          } catch (imageError) {
-            logger.error(
-              "Error uploading image in comprehensive product creation:",
-              imageError
-            );
-            result.errors.push(`Image upload failed: ${imageError.message}`);
-          }
-        }
-      }
-
-      // Step 7: Verify data integrity and get final product with all details
-      const createdProduct = await this.productRepository.getProductWithDetails(
-        productId,
-        {
-          includeImages: true,
-          includeVariantImages: true,
-          includeBrandDetails: true,
-          includeBrandDetails: true,
-          includeWarehouseDetails: true,
-        }
-      );
-
-      result.product = createdProduct;
-
-      // Log the comprehensive operation completion
-      logger.info("Comprehensive product creation completed successfully", {
-        productId,
-        imagesCreated: result.images.length,
-        brandsAssociated: result.brands.length,
-        hasWarehouse: !!result.warehouse,
-        variantsCreated: result.variants.length,
-        errorCount: result.errors.length,
+      // Step 3: Fetch the fully created product to return consistent response format
+      return await this.productRepository.getProductWithDetails(productId, {
+        includeImages: true,
+        includeVariantImages: true,
+        includeBrandDetails: true,
+        includeWarehouseDetails: true,
       });
-
-      // If there were any non-critical errors, include them in the response
-      if (result.errors.length > 0) {
-        logger.warn("Comprehensive product creation had some errors", {
-          productId,
-          errors: result.errors,
-        });
-      }
-
-      return result;
     } catch (error) {
-      logger.error("Critical error in comprehensive product creation:", error);
-
-      // If we have a product ID, we should clean up (implement rollback)
-      if (result?.product?.id) {
-        try {
-          await this.rollbackProductCreation(result.product.id);
-        } catch (rollbackError) {
-          logger.error("Failed to rollback product creation:", rollbackError);
-        }
-      }
-
+      logger.error("Error in comprehensive product creation:", error);
       throw error;
     }
   }

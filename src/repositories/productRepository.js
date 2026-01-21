@@ -78,6 +78,27 @@ export class ProductRepository {
   }
 
   /**
+   * Create comprehensive product via RPC
+   */
+  async createComprehensiveProductViaRPC(payload) {
+    try {
+      const supabase = getSupabase();
+
+      const { data, error } = await supabase.rpc(
+        "create_comprehensive_product",
+        { payload }
+      );
+
+      if (error) throw error;
+
+      return data;
+    } catch (error) {
+      logger.error("Error creating comprehensive product via RPC:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Find product by ID with complete information
    */
   async findById(productId) {
@@ -269,7 +290,6 @@ export class ProductRepository {
       // Build query
       let query = supabase.from("products").select(
         `
-          *,
           *,
           products_warehouse(
             warehouse(name)
@@ -633,7 +653,9 @@ export class ProductRepository {
       basePrice: parseFloat(row.base_price),
       currency: row.currency,
       town: row.city,
-      warehouses: row.products_warehouse?.map(pw => pw.warehouse) || [],
+      warehouses: Array.isArray(row.products_warehouse)
+        ? row.products_warehouse.map((pw) => pw.warehouse)
+        : [],
       isActive: Boolean(row.is_active),
       metadata: row.metadata || {},
       createdAt: row.created_at,

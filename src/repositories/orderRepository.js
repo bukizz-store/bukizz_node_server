@@ -428,13 +428,15 @@ export class OrderRepository {
         throw new Error(`Failed to search orders: ${error.message}`);
       }
 
-      const formattedOrders = await Promise.all(
-        (orders || []).map(async (order) => {
-          const formattedOrder = this._formatOrder(order);
-          formattedOrder.items = await this._getOrderItems(order.id);
-          return formattedOrder;
-        })
-      );
+      // Batch fetch items for all orders to avoid N+1 problem
+      const orderIds = (orders || []).map((o) => o.id);
+      const itemsMap = await this._getItemsForOrders(orderIds);
+
+      const formattedOrders = (orders || []).map((order) => {
+        const formattedOrder = this._formatOrder(order);
+        formattedOrder.items = itemsMap[order.id] || [];
+        return formattedOrder;
+      });
 
       return {
         orders: formattedOrders,
@@ -509,7 +511,7 @@ export class OrderRepository {
         .from("orders")
         .select("*")
         .eq("user_id", userId);
-        
+
 
       // Only apply status filter if it's a valid enum value
       if (status && validOrderStatuses.includes(status)) {
@@ -529,16 +531,17 @@ export class OrderRepository {
       logger.info("Raw orders fetched from DB", {
         userId,
         ordersCount: orders?.length || 0,
-        orders: orders,
       });
 
-      const formattedOrders = await Promise.all(
-        (orders || []).map(async (order) => {
-          const formattedOrder = this._formatOrder(order);
-          formattedOrder.items = await this._getOrderItems(order.id);
-          return formattedOrder;
-        })
-      );
+      // Batch fetch items for all orders to avoid N+1 problem
+      const orderIds = (orders || []).map((o) => o.id);
+      const itemsMap = await this._getItemsForOrders(orderIds);
+
+      const formattedOrders = (orders || []).map((order) => {
+        const formattedOrder = this._formatOrder(order);
+        formattedOrder.items = itemsMap[order.id] || [];
+        return formattedOrder;
+      });
 
       logger.info("Formatted orders", {
         userId,
@@ -574,6 +577,38 @@ export class OrderRepository {
     } catch (error) {
       logger.error("Error getting user orders:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Get items for multiple orders (Batch Fetch)
+   */
+  async _getItemsForOrders(orderIds) {
+    if (!orderIds || orderIds.length === 0) return {};
+
+    try {
+      const { data: items, error } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .in("order_id", orderIds)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        logger.error("Error getting batch order items:", error);
+        return {};
+      }
+
+      // Group by order_id
+      const itemsMap = {};
+      items.forEach((item) => {
+        if (!itemsMap[item.order_id]) itemsMap[item.order_id] = [];
+        itemsMap[item.order_id].push(this._formatOrderItem(item));
+      });
+
+      return itemsMap;
+    } catch (error) {
+      logger.error("Error getting batch order items:", error);
+      return {};
     }
   }
 
