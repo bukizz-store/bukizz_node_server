@@ -109,8 +109,10 @@ export const categorySchemas = {
   query: Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
+    isActive: Joi.boolean().optional(),
     search: Joi.string().max(255).allow("").optional(),
     parentId: optionalUuidSchema,
+    rootOnly: Joi.boolean().optional(),
     sortBy: Joi.string().valid("createdAt", "name").default("name"),
     sortOrder: Joi.string().valid("asc", "desc").default("asc"),
   }),
@@ -308,10 +310,6 @@ export const schoolSchemas = {
     address: Joi.object({
       line1: Joi.string().max(255).required(),
       line2: Joi.string().max(255).optional(),
-      city: Joi.string().max(100).required(),
-      state: Joi.string().max(100).required(),
-      postalCode: Joi.string().max(30).required(),
-      country: Joi.string().max(100).default("India"),
     }).required(),
     city: Joi.string().max(100).required(),
     state: Joi.string().max(100).required(),
@@ -336,10 +334,6 @@ export const schoolSchemas = {
     address: Joi.object({
       line1: Joi.string().max(255).optional(),
       line2: Joi.string().max(255).optional(),
-      city: Joi.string().max(100).optional(),
-      state: Joi.string().max(100).optional(),
-      postalCode: Joi.string().max(30).optional(),
-      country: Joi.string().max(100).optional(),
     }).optional(),
     city: Joi.string().max(100).optional(),
     state: Joi.string().max(100).optional(),
@@ -354,7 +348,7 @@ export const schoolSchemas = {
   query: Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
-    search: Joi.string().max(255).optional(),
+    // search: Joi.string().max(255).optional(),
     city: Joi.string().max(100).optional(),
     state: Joi.string().max(100).optional(),
     type: Joi.string()

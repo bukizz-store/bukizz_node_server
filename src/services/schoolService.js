@@ -19,7 +19,6 @@ export class SchoolService {
       const requiredFields = [
         "name",
         "type",
-        "address",
         "city",
         "state",
         "country",
@@ -29,6 +28,10 @@ export class SchoolService {
         if (!schoolData[field] || schoolData[field].toString().trim() === "") {
           throw new AppError(`${field} is required`, 400);
         }
+      }
+      // check if address has line1 and city
+      if (!schoolData.address.line1) {
+        throw new AppError("Address is required", 400);
       }
 
       // Validate school type
