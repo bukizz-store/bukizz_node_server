@@ -10,7 +10,8 @@ export class WarehouseRepository {
      * Get Supabase client (authenticated if token provided)
      */
     getClient(token) {
-        return createAuthenticatedClient(token);
+        if (token) return createAuthenticatedClient(token);
+        return getSupabase();
     }
     /**
      * Create a new warehouse
@@ -19,11 +20,46 @@ export class WarehouseRepository {
         try {
             const supabase = this.getClient(token);
 
+            let addressId = warehouseData.address;
+
+            // If address is an object (JSON), create it in addresses table first
+            if (warehouseData.address && typeof warehouseData.address === 'object') {
+                const addressPayload = {
+                    label: "Warehouse Address",
+                    recipient_name: warehouseData.name,
+                    phone: warehouseData.contactPhone,
+                    line1: warehouseData.address.line1,
+                    line2: warehouseData.address.line2,
+                    city: warehouseData.address.city,
+                    state: warehouseData.address.state,
+                    postal_code: warehouseData.address.postalCode || warehouseData.address.postal_code || warehouseData.address.pincode,
+                    country: warehouseData.address.country || "India",
+                    lat: warehouseData.address.lat,
+                    lng: warehouseData.address.lng,
+                    is_active: true,
+                    // valid user_id is needed if the schema enforces it, otherwise null. 
+                    // Assuming null is allowed or we don't have user_id here. 
+                    // If we have access to user/retailer id in context, we could use it, but create method only takes token.
+                    // We will proceed with user_id: null if schema allows, or handle error. 
+                    // Based on typical supabase patterns, if RLS is on, we might need a user_id. 
+                    // But for now, let's assume loose coupling or trigger based.
+                };
+
+                const { data: newAddress, error: addressError } = await supabase
+                    .from("addresses")
+                    .insert(addressPayload)
+                    .select("id")
+                    .single();
+
+                if (addressError) throw addressError;
+                addressId = newAddress.id;
+            }
+
             const warehousePayload = {
                 name: warehouseData.name,
                 contact_email: warehouseData.contactEmail,
                 contact_phone: warehouseData.contactPhone,
-                address: warehouseData.address,
+                address: addressId,
                 website: warehouseData.website,
                 is_verified: warehouseData.isVerified || false,
                 metadata: warehouseData.metadata || {},

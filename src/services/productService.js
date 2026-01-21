@@ -5,6 +5,7 @@ import BrandRepository from "../repositories/brandRepository.js";
 import ProductOptionRepository from "../repositories/productOptionRepository.js";
 import ProductVariantRepository from "../repositories/productVariantRepository.js";
 import ProductImageRepository from "../repositories/productImageRepository.js";
+import WarehouseRepository from "../repositories/warehouseRepository.js";
 
 /**
  * Product Service
@@ -85,6 +86,24 @@ export class ProductService {
       // Step 2: Call the RPC via repository
       // The payload structure might need adjustment depending on exactly what keys are in 'data' vs what SQL expects
       // SQL expects: productData, brandData, warehouseData, retailerId, categories, variants, images
+      // Pre-create warehouse if it's new (since RPC might not handle new warehouse creation with address complexity)
+      if (data.warehouseData && data.warehouseData.type === 'new') {
+        try {
+          // Use the validated data
+          const newWarehouse = await WarehouseRepository.create(data.warehouseData); // Token is optional/handled
+          logger.info("Created new warehouse for comprehensive product", { warehouseId: newWarehouse.id });
+
+          // Update data to point to existing warehouse
+          data.warehouseData = {
+            warehouseId: newWarehouse.id,
+            type: 'existing' // ensure downstream treats it as existing
+          };
+        } catch (err) {
+          logger.error("Failed to create new warehouse during comprehensive product creation", err);
+          throw err;
+        }
+      }
+
       const payload = {
         productData: data.productData,
         brandData: data.brandData,

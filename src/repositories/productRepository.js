@@ -1142,11 +1142,41 @@ export class ProductRepository {
 
       // If no warehouseId provided, create new warehouse
       if (!warehouseId) {
+        let addressId = warehouseData.address;
+
+        // If address is an object, create it in addresses table first
+        if (warehouseData.address && typeof warehouseData.address === 'object') {
+          const addressPayload = {
+            user_id: retailerId || null, // Associate with retailer if available
+            label: "Warehouse Address",
+            recipient_name: warehouseData.name,
+            phone: warehouseData.contact_phone,
+            line1: warehouseData.address.line1,
+            line2: warehouseData.address.line2,
+            city: warehouseData.address.city,
+            state: warehouseData.address.state,
+            postal_code: warehouseData.address.postalCode || warehouseData.address.postal_code || warehouseData.address.pincode,
+            country: warehouseData.address.country || "India",
+            lat: warehouseData.address.lat,
+            lng: warehouseData.address.lng,
+            is_active: true,
+          };
+
+          const { data: newAddress, error: addressError } = await supabase
+            .from("addresses")
+            .insert(addressPayload)
+            .select("id")
+            .single();
+
+          if (addressError) throw addressError;
+          addressId = newAddress.id;
+        }
+
         const warehousePayload = {
           name: warehouseData.name,
           contact_email: warehouseData.contact_email,
           contact_phone: warehouseData.contact_phone,
-          address: warehouseData.address,
+          address: addressId,
           website: warehouseData.website,
           is_verified: false, // Default to false for new warehouses
           metadata: warehouseData.metadata || {},

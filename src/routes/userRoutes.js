@@ -76,6 +76,11 @@ export default function userRoutes(dependencies = {}) {
     userController.getUserById
   );
   router.put(
+    "/admin/:userId",
+    validate(paramSchemas.userId, "params"),
+    userController.updateUserByAdmin
+  );
+  router.put(
     "/admin/:userId/role",
     validate(paramSchemas.userId, "params"),
     userController.updateUserRole
