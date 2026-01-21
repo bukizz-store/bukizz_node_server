@@ -117,6 +117,9 @@ export class UserRepository {
       if (updateData.fullName !== undefined) {
         dbUpdateData.full_name = updateData.fullName;
       }
+      if (updateData.email !== undefined) {
+        dbUpdateData.email = updateData.email;
+      }
       if (updateData.phone !== undefined) {
         dbUpdateData.phone = updateData.phone;
       }

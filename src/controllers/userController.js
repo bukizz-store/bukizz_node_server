@@ -296,6 +296,28 @@ export class UserController {
   });
 
   /**
+   * Update user details (admin only)
+   * PUT /api/users/admin/:userId
+   */
+  updateUserByAdmin = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const adminUserId = req.user.id;
+    const updateData = req.body;
+
+    const user = await this.userService.updateUserByAdmin(
+      userId,
+      updateData,
+      adminUserId
+    );
+
+    res.json({
+      success: true,
+      data: { user },
+      message: "User updated successfully",
+    });
+  });
+
+  /**
    * Update user role (admin only)
    * PUT /api/users/:userId/role
    */

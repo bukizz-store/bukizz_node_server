@@ -589,6 +589,80 @@ export class UserService {
   }
 
   /**
+   * Update user details by admin (full access)
+   */
+  async updateUserByAdmin(userId, updateData, adminUserId) {
+    try {
+      const user = await this.userRepository.findById(userId);
+      if (!user) {
+        throw new AppError("User not found", 404);
+      }
+
+      // Check for email uniqueness if changed
+      if (updateData.email && updateData.email !== user.email) {
+        const existingUser = await this.userRepository.findByEmail(updateData.email);
+        if (existingUser && existingUser.id !== userId) {
+          throw new AppError("Email address is already in use", 409);
+        }
+      }
+
+      // Check for phone uniqueness if changed
+      if (updateData.phone && updateData.phone !== user.phone) {
+        const existingUser = await this.userRepository.findByPhone(updateData.phone);
+        if (existingUser && existingUser.id !== userId) {
+          throw new AppError("Phone number is already in use", 409);
+        }
+      }
+
+      // Validate role if changed
+      if (updateData.role) {
+        const validRoles = ["customer", "retailer", "admin"];
+        if (!validRoles.includes(updateData.role)) {
+          throw new AppError(
+            `Invalid role. Must be one of: ${validRoles.join(", ")}`,
+            400
+          );
+        }
+      }
+
+      // Validate date of birth if changed
+      if (updateData.dateOfBirth) {
+        const dob = new Date(updateData.dateOfBirth);
+        const now = new Date();
+        const age = now.getFullYear() - dob.getFullYear();
+
+        if (age < 13) {
+          throw new AppError("User must be at least 13 years old", 400);
+        }
+        if (dob > now) {
+          throw new AppError("Date of birth cannot be in the future", 400);
+        }
+      }
+
+      // Validate gender if changed
+      if (updateData.gender) {
+        const validGenders = ["male", "female", "other", "prefer_not_to_say"];
+        if (!validGenders.includes(updateData.gender)) {
+          throw new AppError(`Invalid gender. Must be one of: ${validGenders.join(", ")}`, 400);
+        }
+      }
+
+      const updatedUser = await this.userRepository.update(userId, updateData);
+
+      logger.info(`User updated by admin ${adminUserId}: ${userId}`, {
+        adminUserId,
+        targetUserId: userId,
+        updates: Object.keys(updateData)
+      });
+
+      return this._sanitizeUser(updatedUser);
+    } catch (error) {
+      logger.error("Error updating user by admin:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Remove sensitive data from user object
    */
   _sanitizeUser(user) {
