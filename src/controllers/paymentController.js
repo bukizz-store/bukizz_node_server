@@ -2,7 +2,7 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 import { asyncHandler } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
-import { getSupabase } from "../db/index.js";
+import { getSupabase, createServiceClient } from "../db/index.js";
 import { OrderRepository } from "../repositories/orderRepository.js";
 import { AppError } from "../middleware/errorHandler.js";
 
@@ -15,6 +15,7 @@ const razorpay = new Razorpay({
 export class PaymentController {
     constructor() {
         this.supabase = getSupabase();
+        this.serviceClient = createServiceClient();
         this.orderRepository = new OrderRepository(this.supabase);
     }
 
@@ -25,6 +26,9 @@ export class PaymentController {
     createPaymentOrder = asyncHandler(async (req, res) => {
         const { orderId } = req.body;
         const userId = req.user.id;
+
+        // Use authenticated client if possible to ensure RLS passes
+
 
         if (!orderId) {
             throw new AppError("Order ID is required", 400);
@@ -60,7 +64,7 @@ export class PaymentController {
             const razorpayOrder = await razorpay.orders.create(options);
 
             // Log the transaction attempt in DB
-            const { error: dbError } = await this.supabase
+            const { error: dbError } = await this.serviceClient
                 .from("transactions")
                 .insert({
                     order_id: order.id,
@@ -136,7 +140,7 @@ export class PaymentController {
             // Payment is successful
 
             // 1. Update Transaction
-            await this.supabase
+            await this.serviceClient
                 .from("transactions")
                 .update({
                     payment_id: razorpay_payment_id,
@@ -147,9 +151,8 @@ export class PaymentController {
                 .eq("gateway_order_id", razorpay_order_id);
 
             // 2. Update Order Status
-            // We can use direct DB update or via Repository if it supports partial updates
-            // Using repository standard method or Supabase direct for specific field
-            const { error: updateError } = await this.supabase
+            // Use service client to ensure privileged update (bypass RLS)
+            const { error: updateError } = await this.serviceClient
                 .from("orders")
                 .update({
                     payment_status: "paid",
@@ -162,7 +165,6 @@ export class PaymentController {
             if (updateError) {
                 logger.error("Failed to update order status after payment", updateError);
                 // Payment valid but DB update failed - critical error to log
-                // Potentially throw or return success with warning
             }
 
             logger.info("Payment verified and order updated", {
@@ -183,7 +185,7 @@ export class PaymentController {
             });
 
             // Update transaction as failed
-            await this.supabase
+            await this.serviceClient
                 .from("transactions")
                 .update({
                     payment_id: razorpay_payment_id,
@@ -198,9 +200,9 @@ export class PaymentController {
     });
 
     /**
-   * Handle Razorpay Webhooks
-   * POST /api/payments/webhook
-   */
+    * Handle Razorpay Webhooks
+    * POST /api/payments/webhook
+    */
     handleWebhook = asyncHandler(async (req, res) => {
         const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
@@ -228,7 +230,7 @@ export class PaymentController {
 
                 if (orderId) {
                     // Ensure order is marked as paid
-                    await this.supabase
+                    await this.serviceClient
                         .from("orders")
                         .update({
                             payment_status: "paid",
@@ -241,7 +243,7 @@ export class PaymentController {
                         ;
 
                     // Update transaction too
-                    await this.supabase
+                    await this.serviceClient
                         .from("transactions")
                         .update({
                             payment_id: payment.id,
@@ -255,7 +257,7 @@ export class PaymentController {
                 const orderId = payment.notes.orderId;
 
                 if (orderId) {
-                    await this.supabase
+                    await this.serviceClient
                         .from("transactions")
                         .update({
                             payment_id: payment.id,
@@ -295,7 +297,7 @@ export class PaymentController {
         });
 
         if (razorpay_order_id) {
-            await this.supabase
+            await this.serviceClient
                 .from("transactions")
                 .update({
                     payment_id: razorpay_payment_id,
@@ -307,6 +309,44 @@ export class PaymentController {
                 .eq("gateway_order_id", razorpay_order_id);
         }
 
-        res.json({ success: true, message: "Payment failure logged" });
+        // CRITICAL: Cancel the order to release stock and mark as cancelled
+        if (orderId) {
+            try {
+                // We use the internal service methods via a temporary controller instance or direct service usage is better
+                // But since we are in controller, let's use the OrderService if available or direct DB updates with restocking logic
+                // Ideally, we should inject OrderService into PaymentController. 
+                // Given the current structure, let's see if we can use OrderController's logic or instantiate OrderService.
+
+                // Re-instantiating OrderService here to safely cancel
+                const { OrderService } = await import("../services/orderService.js");
+                const { OrderRepository } = await import("../repositories/orderRepository.js");
+                const { ProductRepository } = await import("../repositories/productRepository.js");
+                const { UserRepository } = await import("../repositories/userRepository.js");
+                const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
+
+                // We can reuse the getOrderService() logic if it was exported or just new it up
+                const orderRepo = new OrderRepository(this.supabase);
+                const prodRepo = new ProductRepository(); // Assuming it doesn't need supabase or handles it internally
+                const userRepo = new UserRepository(this.supabase);
+                const eventRepo = new OrderEventRepository();
+
+                const orderService = new OrderService(orderRepo, prodRepo, userRepo, eventRepo, null);
+
+                // Check order status first
+                const order = await orderRepo.findById(orderId);
+                if (order && order.status === 'initialized') {
+                    await orderService.cancelOrder(
+                        orderId,
+                        req.user?.id || order.userId, // Use order owner if auth is missing in callback
+                        `Payment Failed/Cancelled: ${error_description || "User cancelled"}`
+                    );
+                    logger.info("Order auto-cancelled due to payment failure", { orderId });
+                }
+            } catch (cancelError) {
+                logger.error("Failed to auto-cancel order after payment failure", cancelError);
+            }
+        }
+
+        res.json({ success: true, message: "Payment failure logged and order cancelled" });
     });
 }

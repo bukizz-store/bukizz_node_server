@@ -1241,6 +1241,79 @@
 					}
 				}
 			]
+		},
+		{
+			"name": "🏷️ Brands",
+			"item": [
+				{
+					"name": "Search Brands",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/brands?page=1&limit=20&search=Nike&sortBy=name&sortOrder=asc"
+					}
+				},
+				{
+					"name": "Get Brand by ID",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/brands/{{brand_id}}"
+					}
+				},
+				{
+					"name": "Create Brand",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.collectionVariables.set('brand_id', jsonData.data.brand.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/brands",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Nike\",\n  \"slug\": \"nike\",\n  \"description\": \"Just do it.\",\n  \"country\": \"USA\",\n  \"logoUrl\": \"https://example.com/nike.png\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Update Brand",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/brands/{{brand_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"description\": \"Updated brand description\",\n  \"isActive\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Delete Brand",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/brands/{{brand_id}}"
+					}
+				}
+			]
 		}
 	]
 }

@@ -7,6 +7,7 @@ import pincodeRoutes from "./pincodeRoutes.js";
 import warehouseRoutes from "./warehouseRoutes.js";
 import categoryRoutes from "./categoryRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
+import brandRoutes from "./brandRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
@@ -44,6 +45,7 @@ export function setupRoutes(app, dependencies = {}) {
         warehouses: `${apiV1}/warehouses`,
         categories: `${apiV1}/categories`,
         payments: `${apiV1}/payments`,
+        brands: `${apiV1}/brands`,
       },
     });
   });
@@ -58,6 +60,7 @@ export function setupRoutes(app, dependencies = {}) {
   app.use(`${apiV1}/warehouses`, warehouseRoutes);
   app.use(`${apiV1}/categories`, categoryRoutes(dependencies));
   app.use(`${apiV1}/payments`, paymentRoutes(dependencies));
+  app.use(`${apiV1}/brands`, brandRoutes(dependencies));
 
   // Handle 404 for all other routes
   app.use("*", notFoundHandler);
