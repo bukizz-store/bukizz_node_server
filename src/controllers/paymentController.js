@@ -27,8 +27,15 @@ export class PaymentController {
         const { orderId } = req.body;
         const userId = req.user.id;
 
-        // Use authenticated client if possible to ensure RLS passes
+        // DEBUG: Check if keys are loaded
+        if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+            logger.error("Razorpay keys are missing in environment variables");
+            throw new AppError("Server configuration error: Missing Payment Keys", 500);
+        }
 
+        logger.info("Initiating payment with key:", {
+            keyId: process.env.RAZORPAY_KEY_ID ? `${process.env.RAZORPAY_KEY_ID.substring(0, 8)}...` : "missing"
+        });
 
         if (!orderId) {
             throw new AppError("Order ID is required", 400);
@@ -47,6 +54,11 @@ export class PaymentController {
 
         if (order.paymentStatus === "paid") {
             throw new AppError("Order is already paid", 400);
+        }
+
+        // Validate amount
+        if (!order.totalAmount || isNaN(order.totalAmount)) {
+            throw new AppError(`Invalid order amount: ${order.totalAmount}`, 400);
         }
 
         // Options for Razorpay order
@@ -101,10 +113,20 @@ export class PaymentController {
                 },
             });
         } catch (error) {
-            logger.error("Razorpay order creation failed", error);
-            // Return specific error if available to help debugging
-            const errorMessage = error.error?.description || error.message || "Failed to initiate payment";
-            throw new AppError(errorMessage, 500);
+            logger.error("Razorpay order creation failed FULL ERROR:", error);
+
+            // Construct detailed error message
+            let errorMessage = "Failed to initiate payment";
+            if (error.error && error.error.description) {
+                errorMessage = `Razorpay Error: ${error.error.description}`;
+            } else if (error.message) {
+                errorMessage = error.message;
+            }
+
+            // Include status code if available
+            const statusCode = error.statusCode || 500;
+
+            throw new AppError(errorMessage, statusCode);
         }
     });
 
