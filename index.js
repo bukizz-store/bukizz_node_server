@@ -1,4 +1,8 @@
 import dotenv from "dotenv";
+// CRITICAL: Load environment variables BEFORE any other imports
+// This ensures Razorpay and other services have access to env vars
+dotenv.config();
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -37,9 +41,6 @@ import { UserRepository } from "./src/repositories/userRepository.js";
 // Import middleware and utilities
 import { errorHandler } from "./src/middleware/errorHandler.js";
 import { logger } from "./src/utils/logger.js";
-
-// Load environment variables
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
