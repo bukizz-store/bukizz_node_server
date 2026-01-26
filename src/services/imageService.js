@@ -1,0 +1,136 @@
+import { getSupabase } from "../db/index.js";
+import { logger } from "../utils/logger.js";
+import { AppError } from "../middleware/errorHandler.js";
+
+/**
+ * Image Service
+ * Handles generic image upload/delete operations
+ */
+export class ImageService {
+    constructor() {
+        this.bucketName = "products";
+        this.uploadFolder = "temp"; // Temporary folder for uploads before product creation
+    }
+
+    /**
+     * Upload an image to Supabase storage
+     * @param {Object} file - File object from multer
+     * @returns {Object} { url, path, name }
+     */
+    async uploadImage(file) {
+        try {
+            const supabase = getSupabase();
+
+            if (!file) {
+                throw new AppError("No file provided", 400);
+            }
+
+            // Generate unique filename
+            // structure: temp/TIMESTAMP-RANDOM-FILENAME
+            const timestamp = Date.now();
+            const random = Math.random().toString(36).substring(2, 8);
+            const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_");
+            const fileName = `${this.uploadFolder}/${timestamp}-${random}-${cleanName}`;
+
+            const { data, error } = await supabase.storage
+                .from(this.bucketName)
+                .upload(fileName, file.buffer, {
+                    contentType: file.mimetype,
+                    cacheControl: "3600",
+                });
+
+            if (error) {
+                const msg = error.message || "Unknown Supabase Error";
+                logger.error("Supabase storage upload error:", error);
+                throw new AppError(`Failed to upload image: ${msg}`, 500);
+            }
+
+            // Get public URL
+            const { data: publicUrlData } = supabase.storage
+                .from(this.bucketName)
+                .getPublicUrl(fileName);
+
+            return {
+                url: publicUrlData.publicUrl,
+                path: fileName,
+                name: file.originalname,
+                size: file.size,
+                type: file.mimetype,
+            };
+        } catch (error) {
+            if (error instanceof AppError) throw error;
+            logger.error("Error uploading image:", error);
+            throw new AppError("Image upload failed", 500);
+        }
+    }
+
+    /**
+     * Delete an image from Supabase storage by URL or Path
+     * @param {string} identifier - Full URL or storage path
+     * @returns {boolean} Success status
+     */
+    async deleteImage(identifier) {
+        try {
+            if (!identifier) {
+                throw new AppError("Image identifier is required", 400);
+            }
+
+            const supabase = getSupabase();
+            let path = identifier;
+
+            // If full URL is provided, extract the path
+            // Example URL: https://xyz.supabase.co/storage/v1/object/public/product-images/temp/123-file.jpg
+            if (identifier.startsWith("http")) {
+                const urlParts = identifier.split(`/${this.bucketName}/`);
+                if (urlParts.length === 2) {
+                    path = urlParts[1];
+                } else {
+                    // It might be a different structure or bucket, but let's try to assume it is the path if not matching
+                    logger.warn("Could not extract path from URL, assuming identifier is path or invalid URL");
+                }
+            }
+
+            // Decode URI components in case the path has %20 etc
+            path = decodeURIComponent(path);
+
+            const { error } = await supabase.storage
+                .from(this.bucketName)
+                .remove([path]);
+
+            if (error) {
+                logger.error("Supabase storage delete error:", error);
+                throw new AppError("Failed to delete image", 500);
+            }
+
+            return true;
+        } catch (error) {
+            if (error instanceof AppError) throw error;
+            logger.error("Error deleting image:", error);
+            throw new AppError("Image deletion failed", 500);
+        }
+    }
+
+    /**
+     * Replace an existing image with a new one
+     * @param {string} oldIdentifier - URL or path of old image
+     * @param {Object} newFile - New file object
+     * @returns {Object} New image details
+     */
+    async replaceImage(oldIdentifier, newFile) {
+        try {
+            // 1. Delete old image
+            if (oldIdentifier) {
+                await this.deleteImage(oldIdentifier);
+            }
+
+            // 2. Upload new image
+            return await this.uploadImage(newFile);
+        } catch (error) {
+            if (error instanceof AppError) throw error;
+            logger.error("Error replacing image:", error);
+            throw new AppError("Image replacement failed", 500);
+        }
+    }
+}
+
+export const imageService = new ImageService();

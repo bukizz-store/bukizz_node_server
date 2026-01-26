@@ -152,6 +152,117 @@ export class AuthService {
     }
   }
 
+  async googleLogin(token) {
+    try {
+      // Verify the token with Supabase Auth
+      const { data: { user: supabaseUser }, error: verifyError } = await this.supabase.auth.getUser(token);
+
+      if (verifyError || !supabaseUser) {
+        throw new Error("Invalid Google token");
+      }
+
+      const email = supabaseUser.email;
+      const fullName = supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || email.split('@')[0];
+
+      // Check if user already exists in our users table
+      const { data: existingUser, error: checkError } = await this.supabase
+        .from("users")
+        .select("id, full_name, email, email_verified, phone, is_active, role")
+        .eq("email", email)
+        .single();
+
+      let userId;
+      let user;
+
+      if (existingUser) {
+        userId = existingUser.id;
+        user = existingUser;
+
+        // Update email_verified if it's not verified (since Google verified it)
+        if (!existingUser.email_verified) {
+          await this.supabase
+            .from("users")
+            .update({ email_verified: true, updated_at: new Date().toISOString() })
+            .eq("id", userId);
+          user.email_verified = true;
+        }
+
+        // Ensure user_auth record exists for google provider
+        const { data: existingAuth } = await this.supabase
+          .from("user_auths")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("provider", "google")
+          .single();
+
+        if (!existingAuth) {
+          await this.supabase
+            .from("user_auths")
+            .insert({
+              id: uuidv4(),
+              user_id: userId,
+              provider: "google",
+              provider_user_id: supabaseUser.id,
+              created_at: new Date().toISOString(),
+            });
+        }
+
+      } else {
+        // Create new user
+        userId = uuidv4();
+
+        const { error: userError } = await this.supabase.from("users").insert({
+          id: userId,
+          full_name: fullName,
+          email: email,
+          email_verified: true, // Trusted from Google
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        if (userError) throw userError;
+
+        // Create user_auth record
+        const { error: authError } = await this.supabase
+          .from("user_auths")
+          .insert({
+            id: uuidv4(),
+            user_id: userId,
+            provider: "google",
+            provider_user_id: supabaseUser.id,
+            created_at: new Date().toISOString(),
+          });
+
+        if (authError) throw authError;
+
+        user = {
+          id: userId,
+          full_name: fullName,
+          email: email,
+          email_verified: true,
+          is_active: true
+        };
+      }
+
+      if (!user.is_active) {
+        throw new Error("User account is inactive");
+      }
+
+      // Generate tokens
+      const tokens = await this.generateTokens(userId);
+
+      return {
+        user,
+        ...tokens,
+      };
+
+    } catch (error) {
+      logger.error("Google login service error:", error);
+      throw error;
+    }
+  }
+
   async generateTokens(userId, deviceInfo = null) {
     try {
       // Generate access token

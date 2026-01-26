@@ -42,6 +42,7 @@ export default function authRoutes(dependencies = {}) {
     validate(authSchemas.resetPassword),
     authController.resetPassword
   );
+  router.post("/google-login", authController.googleLogin);
   router.post("/verify-token", authController.verifyToken);
 
   // Protected routes (require authentication)

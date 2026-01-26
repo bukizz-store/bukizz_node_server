@@ -46,6 +46,33 @@ export class AuthController {
     }
   }
 
+  async googleLogin(req, res) {
+    try {
+      const { token } = req.body;
+
+      if (!token) {
+        return res.status(400).json({
+          success: false,
+          message: "Token is required",
+        });
+      }
+
+      const result = await authService.googleLogin(token);
+
+      res.status(200).json({
+        success: true,
+        message: "Google login successful",
+        data: result,
+      });
+    } catch (error) {
+      logger.error("Google login error:", error);
+      res.status(401).json({
+        success: false,
+        message: error.message || "Google login failed",
+      });
+    }
+  }
+
   async refreshToken(req, res) {
     try {
       const { refreshToken } = req.body;
@@ -104,8 +131,8 @@ export class AuthController {
         message: result.message,
         ...(process.env.NODE_ENV === "development" &&
           result.resetToken && {
-            resetToken: result.resetToken,
-          }),
+          resetToken: result.resetToken,
+        }),
       });
     } catch (error) {
       logger.error("Password reset request error:", error);
@@ -139,7 +166,7 @@ export class AuthController {
     try {
       const userId = req.user?.id;
       console.log("userId", userId);
-      
+
       if (!userId) {
         return res.status(401).json({
           success: false,

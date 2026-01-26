@@ -178,7 +178,7 @@ export class PaymentController {
                 .from("orders")
                 .update({
                     payment_status: "paid",
-                    status: "processing", // Move to processing after payment
+                    status: "processed", // Move to processing after payment
                     updated_at: new Date().toISOString(),
                 })
                 .eq("id", orderId)
@@ -256,7 +256,7 @@ export class PaymentController {
                         .from("orders")
                         .update({
                             payment_status: "paid",
-                            status: "processing",
+                            status: "processed",
                             updated_at: new Date().toISOString(),
                         })
                         .eq("id", orderId)

@@ -1,5 +1,5 @@
 import express from "express";
-import multer from "multer";
+
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import {
@@ -9,22 +9,7 @@ import {
   paramSchemas,
 } from "../models/schemas.js";
 
-// Configure multer for file uploads
-const storage = multer.memoryStorage();
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-  },
-  fileFilter: (req, file, cb) => {
-    // Accept only image files
-    if (file.mimetype.startsWith("image/")) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only image files are allowed"), false);
-    }
-  },
-});
+import { upload } from "../middleware/upload.js";
 
 /**
  * Product Routes Factory
