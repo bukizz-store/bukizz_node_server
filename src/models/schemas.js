@@ -188,7 +188,7 @@ export const productSchemas = {
     shortDescription: Joi.string().max(512).optional(),
     description: Joi.string().optional(),
     productType: Joi.string()
-      .valid("bookset", "uniform", "stationary", "general")
+      .valid("bookset", "uniform", "stationary","school", "general")
       .default("general"),
     basePrice: Joi.number().min(0).precision(2).required(),
     currency: Joi.string().length(3).default("INR"),
@@ -205,7 +205,7 @@ export const productSchemas = {
     shortDescription: Joi.string().max(512).optional(),
     description: Joi.string().optional(),
     productType: Joi.string()
-      .valid("bookset", "uniform", "stationary", "general")
+      .valid("bookset", "uniform", "stationary", "school", "general")
       .optional(),
     basePrice: Joi.number().min(0).precision(2).optional(),
     currency: Joi.string().length(3).optional(),
@@ -221,7 +221,7 @@ export const productSchemas = {
     category: optionalUuidSchema,
     brand: optionalUuidSchema,
     productType: Joi.string()
-      .valid("bookset", "uniform", "stationary", "general")
+      .valid("bookset", "uniform", "stationary", "school", "general")
       .optional(),
     minPrice: Joi.number().min(0).optional(),
     maxPrice: Joi.number().min(0).optional(),

@@ -153,7 +153,7 @@ export class ProductService {
       throw new AppError("Product price cannot be negative", 400);
     }
 
-    const validTypes = ["bookset", "uniform", "stationary", "general"];
+    const validTypes = ["bookset", "uniform", "stationary","school", "general"];
     if (!validTypes.includes(productData.productType)) {
       throw new AppError(
         `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
