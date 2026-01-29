@@ -324,7 +324,7 @@ export class ProductService {
 
       // Validate product type if provided
       if (filters.productType) {
-        const validTypes = ["bookset", "uniform", "stationary", "general"];
+        const validTypes = ["bookset", "uniform", "stationary","school", "general"];
         if (!validTypes.includes(filters.productType)) {
           throw new AppError(
             `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
