@@ -15,7 +15,9 @@ export class ImageController {
             });
         }
 
-        const result = await imageService.uploadImage(req.file);
+        const { bucket, folder } = req.body;
+
+        const result = await imageService.uploadImage(req.file, bucket, folder);
 
         logger.info("Image uploaded successfully", { path: result.path });
 
@@ -33,6 +35,7 @@ export class ImageController {
      */
     deleteImage = asyncHandler(async (req, res) => {
         const url = req.body.url || req.query.url;
+        const bucket = req.body.bucket || req.query.bucket;
 
         if (!url) {
             return res.status(400).json({
@@ -41,7 +44,7 @@ export class ImageController {
             });
         }
 
-        await imageService.deleteImage(url);
+        await imageService.deleteImage(url, bucket);
 
         logger.info("Image deleted successfully", { url });
 
@@ -59,7 +62,7 @@ export class ImageController {
      * File: image
      */
     replaceImage = asyncHandler(async (req, res) => {
-        const { oldUrl } = req.body;
+        const { oldUrl, bucket, folder } = req.body;
 
         if (!req.file) {
             return res.status(400).json({
@@ -70,7 +73,7 @@ export class ImageController {
 
         if (!oldUrl) {
             // If no old URL, just treat as upload
-            const result = await imageService.uploadImage(req.file);
+            const result = await imageService.uploadImage(req.file, bucket, folder);
             return res.status(201).json({
                 success: true,
                 data: result,
@@ -78,7 +81,7 @@ export class ImageController {
             });
         }
 
-        const result = await imageService.replaceImage(oldUrl, req.file);
+        const result = await imageService.replaceImage(oldUrl, req.file, bucket, folder);
 
         logger.info("Image replaced successfully", { oldUrl, newPath: result.path });
 
