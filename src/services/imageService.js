@@ -17,7 +17,7 @@ export class ImageService {
      * @param {Object} file - File object from multer
      * @returns {Object} { url, path, name }
      */
-    async uploadImage(file) {
+    async uploadImage(file, bucketName = this.bucketName, folderPath = this.uploadFolder) {
         try {
             const supabase = getSupabase();
 
@@ -30,10 +30,12 @@ export class ImageService {
             const timestamp = Date.now();
             const random = Math.random().toString(36).substring(2, 8);
             const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, "_");
-            const fileName = `${this.uploadFolder}/${timestamp}-${random}-${cleanName}`;
+            const finalBucket = bucketName || this.bucketName;
+            const finalFolder = folderPath || this.uploadFolder;
+            const fileName = `${finalFolder}/${timestamp}-${random}-${cleanName}`;
 
             const { data, error } = await supabase.storage
-                .from(this.bucketName)
+                .from(finalBucket)
                 .upload(fileName, file.buffer, {
                     contentType: file.mimetype,
                     cacheControl: "3600",
@@ -47,7 +49,7 @@ export class ImageService {
 
             // Get public URL
             const { data: publicUrlData } = supabase.storage
-                .from(this.bucketName)
+                .from(finalBucket)
                 .getPublicUrl(fileName);
 
             return {
@@ -69,7 +71,7 @@ export class ImageService {
      * @param {string} identifier - Full URL or storage path
      * @returns {boolean} Success status
      */
-    async deleteImage(identifier) {
+    async deleteImage(identifier, bucketName = this.bucketName) {
         try {
             if (!identifier) {
                 throw new AppError("Image identifier is required", 400);
@@ -81,7 +83,7 @@ export class ImageService {
             // If full URL is provided, extract the path
             // Example URL: https://xyz.supabase.co/storage/v1/object/public/product-images/temp/123-file.jpg
             if (identifier.startsWith("http")) {
-                const urlParts = identifier.split(`/${this.bucketName}/`);
+                const urlParts = identifier.split(`/${bucketName}/`);
                 if (urlParts.length === 2) {
                     path = urlParts[1];
                 } else {
@@ -94,7 +96,7 @@ export class ImageService {
             path = decodeURIComponent(path);
 
             const { error } = await supabase.storage
-                .from(this.bucketName)
+                .from(bucketName)
                 .remove([path]);
 
             if (error) {
@@ -116,15 +118,15 @@ export class ImageService {
      * @param {Object} newFile - New file object
      * @returns {Object} New image details
      */
-    async replaceImage(oldIdentifier, newFile) {
+    async replaceImage(oldIdentifier, newFile, bucketName = this.bucketName, folderPath = this.uploadFolder) {
         try {
             // 1. Delete old image
             if (oldIdentifier) {
-                await this.deleteImage(oldIdentifier);
+                await this.deleteImage(oldIdentifier, bucketName);
             }
 
             // 2. Upload new image
-            return await this.uploadImage(newFile);
+            return await this.uploadImage(newFile, bucketName, folderPath);
         } catch (error) {
             if (error instanceof AppError) throw error;
             logger.error("Error replacing image:", error);

@@ -293,6 +293,12 @@ export class ProductRepository {
           *,
           products_warehouse(
             warehouse(name)
+          ),
+          product_brands(
+            brands(id, name, slug)
+          ),
+          product_images(
+            id, url, alt_text, sort_order, is_primary
           )
         `,
         { count: "exact" }
@@ -313,8 +319,6 @@ export class ProductRepository {
 
       if (filters.warehouseId) {
         query = query.eq("products_warehouse.warehouse_id", filters.warehouseId);
-        // Note: You might need to adjust the select to include the join for filtering if Supabase doesn't auto-join on filter
-        // Or filter on the join table directly if possible
       }
 
       if (filters.minPrice !== undefined) {
@@ -643,6 +647,12 @@ export class ProductRepository {
   formatProduct(row) {
     if (!row) return null;
 
+    // Pick primary image, or first image, or null
+    const primaryImage =
+      row.product_images?.find((img) => img.is_primary) ||
+      row.product_images?.[0] ||
+      null;
+
     return {
       id: row.id,
       sku: row.sku,
@@ -663,6 +673,22 @@ export class ProductRepository {
       // Include additional data if present
       categories: row.product_categories?.map((pc) => pc.categories) || [],
       brands: row.product_brands?.map((pb) => pb.brands) || [],
+      primaryImage: primaryImage
+        ? {
+          id: primaryImage.id,
+          url: primaryImage.url,
+          altText: primaryImage.alt_text,
+          isPrimary: primaryImage.is_primary,
+        }
+        : null,
+      images: Array.isArray(row.product_images)
+        ? row.product_images.map((img) => ({
+          id: img.id,
+          url: img.url,
+          altText: img.alt_text,
+          isPrimary: img.is_primary,
+        }))
+        : [],
     };
   }
 
