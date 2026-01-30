@@ -306,7 +306,11 @@ export class ProductRepository {
       );
 
       // Apply filters
-      query = query.eq("is_active", true);
+      if (filters.isActive !== undefined) {
+        query = query.eq("is_active", filters.isActive);
+      } else {
+        query = query.eq("is_active", true);
+      }
 
       if (filters.search) {
         query = query.or(
