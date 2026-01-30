@@ -188,7 +188,7 @@ export const productSchemas = {
     shortDescription: Joi.string().max(512).optional(),
     description: Joi.string().optional(),
     productType: Joi.string()
-      .valid("bookset", "uniform", "stationary","school", "general")
+      .valid("bookset", "uniform", "stationary", "school", "general")
       .default("general"),
     basePrice: Joi.number().min(0).precision(2).required(),
     currency: Joi.string().length(3).default("INR"),
@@ -215,6 +215,7 @@ export const productSchemas = {
   }),
 
   query: Joi.object({
+    isActive: Joi.boolean().optional(),
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
     search: Joi.string().max(255).optional(),
@@ -383,7 +384,7 @@ export const schoolSchemas = {
         "9th",
         "10th",
         "11th",
-        "12th"
+        "12th",
       )
       .required(),
     mandatory: Joi.boolean().default(false),
@@ -416,7 +417,7 @@ export const orderSchemas = {
           productId: uuidSchema,
           variantId: optionalUuidSchema,
           quantity: Joi.number().integer().min(1).max(1000).required(),
-        })
+        }),
       )
       .min(1)
       .max(50) // Maximum 50 items per order
@@ -463,7 +464,7 @@ export const orderSchemas = {
           productId: uuidSchema,
           variantId: optionalUuidSchema,
           quantity: Joi.number().integer().min(1).max(1000).required(),
-        })
+        }),
       )
       .min(1)
       .max(50)
@@ -479,7 +480,7 @@ export const orderSchemas = {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "refunded"
+        "refunded",
       )
       .required(),
     note: Joi.string().max(1000).optional(),
@@ -514,7 +515,7 @@ export const orderSchemas = {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "refunded"
+        "refunded",
       )
       .optional(),
     paymentStatus: Joi.string()
@@ -562,7 +563,7 @@ export const orderEventSchemas = {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "refunded"
+        "refunded",
       )
       .optional(),
     newStatus: Joi.string()
@@ -573,7 +574,7 @@ export const orderEventSchemas = {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "refunded"
+        "refunded",
       )
       .required(),
     changedBy: optionalUuidSchema,
@@ -597,7 +598,7 @@ export const orderEventSchemas = {
         "out_for_delivery",
         "delivered",
         "cancelled",
-        "refunded"
+        "refunded",
       )
       .optional(),
     startDate: Joi.date().optional(),
@@ -629,7 +630,7 @@ export const orderQuerySchemas = {
           url: Joi.string().uri().required(),
           mimeType: Joi.string().optional(),
           size: Joi.number().integer().min(1).optional(),
-        })
+        }),
       )
       .max(5)
       .optional(),
@@ -651,7 +652,7 @@ export const orderQuerySchemas = {
           url: Joi.string().uri().required(),
           mimeType: Joi.string().optional(),
           size: Joi.number().integer().min(1).optional(),
-        })
+        }),
       )
       .max(5)
       .optional(),
@@ -840,7 +841,7 @@ export const paramSchemas = {
         "9th",
         "10th",
         "11th",
-        "12th"
+        "12th",
       )
       .required(),
   }),
