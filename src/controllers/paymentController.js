@@ -160,9 +160,14 @@ export class PaymentController {
 
         if (generated_signature === razorpay_signature) {
             // Payment is successful
+            logger.info("Payment signature verified successfully", {
+                orderId,
+                razorpay_order_id,
+                razorpay_payment_id,
+            });
 
             // 1. Update Transaction
-            await this.serviceClient
+            const { error: txnError } = await this.serviceClient
                 .from("transactions")
                 .update({
                     payment_id: razorpay_payment_id,
@@ -172,9 +177,18 @@ export class PaymentController {
                 })
                 .eq("gateway_order_id", razorpay_order_id);
 
+            if (txnError) {
+                logger.error("Failed to update transaction", {
+                    error: txnError,
+                    gateway_order_id: razorpay_order_id
+                });
+            } else {
+                logger.info("Transaction updated successfully", { gateway_order_id: razorpay_order_id });
+            }
+
             // 2. Update Order Status
             // Use service client to ensure privileged update (bypass RLS)
-            const { error: updateError } = await this.serviceClient
+            const { data: updateData, error: updateError } = await this.serviceClient
                 .from("orders")
                 .update({
                     payment_status: "paid",
@@ -182,11 +196,23 @@ export class PaymentController {
                     updated_at: new Date().toISOString(),
                 })
                 .eq("id", orderId)
-                .eq("user_id", userId);
+                .eq("user_id", userId)
+                .select();
 
             if (updateError) {
-                logger.error("Failed to update order status after payment", updateError);
-                // Payment valid but DB update failed - critical error to log
+                logger.error("Failed to update order status after payment", {
+                    error: updateError,
+                    orderId,
+                    userId
+                });
+                // Payment valid but DB update failed - critical error
+                throw new AppError("Payment verified but failed to update order. Please contact support.", 500);
+            } else {
+                logger.info("Order status updated successfully", {
+                    orderId,
+                    updatedData: updateData,
+                    newStatus: "paid"
+                });
             }
 
             logger.info("Payment verified and order updated", {

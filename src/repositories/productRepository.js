@@ -27,6 +27,7 @@ export class ProductRepository {
         description: productData.description,
         product_type: productData.productType || "general",
         base_price: productData.basePrice,
+        delivery_charge: productData.deliveryCharge || 0,
         currency: productData.currency || "INR",
         city: productData.city,
         metadata: productData.metadata || {},
@@ -459,6 +460,8 @@ export class ProductRepository {
         updatePayload.is_active = updateData.isActive;
       if (updateData.metadata !== undefined)
         updatePayload.metadata = updateData.metadata;
+      if (updateData.deliveryCharge !== undefined)
+        updatePayload.delivery_charge = updateData.deliveryCharge;
 
       if (Object.keys(updatePayload).length === 0) {
         return this.findById(productId);
@@ -661,6 +664,7 @@ export class ProductRepository {
       description: row.description,
       productType: row.product_type,
       basePrice: parseFloat(row.base_price),
+      deliveryCharge: parseFloat(row.delivery_charge) || 0,
       currency: row.currency,
       town: row.city,
       warehouses: Array.isArray(row.products_warehouse)
