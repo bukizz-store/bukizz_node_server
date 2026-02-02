@@ -25,6 +25,7 @@ export class ProductRepository {
         title: productData.title,
         short_description: productData.shortDescription,
         description: productData.description,
+        highlight: productData.highlight,
         product_type: productData.productType || "general",
         base_price: productData.basePrice,
         delivery_charge: productData.deliveryCharge || 0,
@@ -136,15 +137,15 @@ export class ProductRepository {
             option_value_1, option_value_2, option_value_3, 
             metadata, created_at, updated_at,
             option_value_1_ref:product_option_values!option_value_1(
-              id, value, price_modifier, attribute_id,
+              id, value, price_modifier, attribute_id, image_url,
               product_option_attributes!inner(id, name, position)
             ),
             option_value_2_ref:product_option_values!option_value_2(
-              id, value, price_modifier, attribute_id,
+              id, value, price_modifier, attribute_id, image_url,
               product_option_attributes!inner(id, name, position)
             ),
             option_value_3_ref:product_option_values!option_value_3(
-              id, value, price_modifier, attribute_id,
+              id, value, price_modifier, attribute_id, image_url,
               product_option_attributes!inner(id, name, position)
             )
           ),
@@ -192,6 +193,7 @@ export class ProductRepository {
                 id: v.option_value_1_ref.id,
                 value: v.option_value_1_ref.value,
                 price_modifier: v.option_value_1_ref.price_modifier,
+                imageUrl: v.option_value_1_ref.image_url,
                 attribute_name:
                   v.option_value_1_ref.product_option_attributes?.name,
                 attribute_position:
@@ -203,6 +205,7 @@ export class ProductRepository {
                 id: v.option_value_2_ref.id,
                 value: v.option_value_2_ref.value,
                 price_modifier: v.option_value_2_ref.price_modifier,
+                imageUrl: v.option_value_2_ref.image_url,
                 attribute_name:
                   v.option_value_2_ref.product_option_attributes?.name,
                 attribute_position:
@@ -214,6 +217,7 @@ export class ProductRepository {
                 id: v.option_value_3_ref.id,
                 value: v.option_value_3_ref.value,
                 price_modifier: v.option_value_3_ref.price_modifier,
+                imageUrl: v.option_value_3_ref.image_url,
                 attribute_name:
                   v.option_value_3_ref.product_option_attributes?.name,
                 attribute_position:
@@ -452,6 +456,8 @@ export class ProductRepository {
         updatePayload.short_description = updateData.shortDescription;
       if (updateData.description !== undefined)
         updatePayload.description = updateData.description;
+      if (updateData.highlight !== undefined)
+        updatePayload.highlight = updateData.highlight;
       if (updateData.productType !== undefined)
         updatePayload.product_type = updateData.productType;
       if (updateData.basePrice !== undefined)
@@ -666,6 +672,7 @@ export class ProductRepository {
       title: row.title,
       shortDescription: row.short_description,
       description: row.description,
+      highlight: row.highlight,
       productType: row.product_type,
       basePrice: parseFloat(row.base_price),
       deliveryCharge: parseFloat(row.delivery_charge) || 0,

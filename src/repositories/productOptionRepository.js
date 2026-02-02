@@ -47,6 +47,7 @@ export class ProductOptionRepository {
         value: valueData.value,
         price_modifier: valueData.priceModifier || 0,
         sort_order: valueData.sortOrder || 0,
+        image_url: valueData.imageUrl || null,
       };
 
       const { data, error } = await supabase
@@ -174,7 +175,8 @@ export class ProductOptionRepository {
             id,
             value,
             price_modifier,
-            sort_order
+            sort_order,
+            image_url
           )
         `
         )
@@ -198,9 +200,11 @@ export class ProductOptionRepository {
           })
           .map((value) => ({
             id: value.id,
+            title: value.value,
             value: value.value,
             priceModifier: parseFloat(value.price_modifier || 0),
             sortOrder: value.sort_order,
+            imageUrl: value.image_url,
           })),
       }));
     } catch (error) {
@@ -250,6 +254,7 @@ export class ProductOptionRepository {
           value: updateData.value,
           price_modifier: updateData.priceModifier || 0,
           sort_order: updateData.sortOrder || 0,
+          image_url: updateData.imageUrl,
           updated_at: new Date().toISOString(),
         })
         .eq("id", id)
@@ -331,6 +336,7 @@ export class ProductOptionRepository {
       value: value.value,
       priceModifier: parseFloat(value.price_modifier || 0),
       sortOrder: value.sort_order,
+      imageUrl: value.image_url,
       createdAt: value.created_at,
     };
   }
