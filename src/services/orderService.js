@@ -828,6 +828,76 @@ export class OrderService {
     }
   }
 
+
+  /**
+   * Update order item status with event tracking
+   */
+  async updateOrderItemStatus(
+    orderId,
+    itemId,
+    status,
+    changedBy,
+    note = null,
+    metadata = {}
+  ) {
+    try {
+      // Validate status
+      const validStatuses = [
+        "initialized",
+        "processed",
+        "shipped",
+        "out_for_delivery",
+        "delivered",
+        "cancelled",
+        "refunded",
+        "returned",
+      ];
+
+      if (!validStatuses.includes(status)) {
+        throw new AppError(
+          `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+          400
+        );
+      }
+
+      // Check order existence and access rights if needed
+      const order = await this.orderRepository.findById(orderId);
+      if (!order) {
+        throw new AppError("Order not found", 404);
+      }
+
+      // Find the item to ensure it belongs to the order
+      const item = order.items.find((i) => i.id === itemId);
+      if (!item) {
+        throw new AppError("Order item not found in this order", 404);
+      }
+
+      const currentStatus = item.status;
+
+      // Update item status
+      const updatedItem = await this.orderRepository.updateOrderItemStatus(
+        itemId,
+        status
+      );
+
+      // Create event
+      await this.orderEventRepository.create({
+        orderId,
+        orderItemId: itemId,
+        previousStatus: currentStatus,
+        newStatus: status,
+        changedBy,
+        note: note || `Item status updated to ${status}`,
+        metadata,
+      });
+
+      return updatedItem;
+    } catch (error) {
+      logger.error("Failed to update order item status:", error);
+      throw error;
+    }
+  }
+
   /**
    * Cancel order with enhanced validation
    */
@@ -860,6 +930,82 @@ export class OrderService {
       return await this.updateOrderStatus(orderId, "cancelled", userId, reason);
     } catch (error) {
       logger.error("Error cancelling order:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Cancel single order item with automated restocking and partial refund
+   */
+  async cancelOrderItem(orderId, itemId, userId, reason = "Cancelled by user") {
+    try {
+      const order = await this.orderRepository.findById(orderId);
+      if (!order) {
+        throw new AppError("Order not found", 404);
+      }
+
+      // Check permissions
+      if (order.userId !== userId) {
+        throw new AppError("You can only cancel items from your own orders", 403);
+      }
+
+      const item = order.items.find((i) => i.id === itemId);
+      if (!item) {
+        throw new AppError("Item not found in order", 404);
+      }
+
+      // Check if item can be cancelled
+      const nonCancellableStatuses = [
+        "shipped",
+        "out_for_delivery",
+        "delivered",
+        "cancelled",
+        "refunded",
+        "returned"
+      ];
+
+      if (nonCancellableStatuses.includes(item.status)) {
+        throw new AppError(
+          `Cannot cancel item with status: ${item.status}`,
+          400
+        );
+      }
+
+      // 1. Update item status
+      const updatedItem = await this.updateOrderItemStatus(
+        orderId,
+        itemId,
+        "cancelled",
+        userId,
+        reason
+      );
+
+      // 2. Restock inventory automatically
+      try {
+        await this._restockCancelledItem(item);
+      } catch (restockError) {
+        // Log but don't fail the cancellation
+        logger.error("Failed to restock cancelled item", {
+          orderId,
+          itemId,
+          error: restockError.message
+        });
+      }
+
+      // 3. Process partial refund (stub)
+      try {
+        await this._processPartialRefund(order, item, reason);
+      } catch (refundError) {
+        logger.error("Failed to process partial refund", {
+          orderId,
+          itemId,
+          error: refundError.message
+        });
+      }
+
+      return updatedItem;
+    } catch (error) {
+      logger.error("Error cancelling order item:", error);
       throw error;
     }
   }
@@ -1237,6 +1383,78 @@ export class OrderService {
         `Successfully restocked ${order.items.length} items for cancelled order ${orderId}`
       );
     });
+  }
+
+  /**
+   * Restock a single item
+   */
+  async _restockCancelledItem(item) {
+    if (!item) return;
+
+    return await this.orderRepository.executeTransaction(async (connection) => {
+      if (item.variantId) {
+        // Get current variant stock
+        const { data: variantData, error: fetchError } = await connection
+          .from("product_variants")
+          .select("stock")
+          .eq("id", item.variantId)
+          .single();
+
+        if (fetchError || !variantData) {
+          throw new Error(`Variant not found for restocking: ${item.variantId}`);
+        }
+
+        const newStock = variantData.stock + item.quantity;
+
+        // Update variant stock
+        await connection
+          .from("product_variants")
+          .update({ stock: newStock })
+          .eq("id", item.variantId);
+
+      } else {
+        // Get current product stock
+        const { data: productData, error: fetchError } = await connection
+          .from("products")
+          .select("stock")
+          .eq("id", item.productId)
+          .single();
+
+        if (fetchError || !productData) {
+          throw new Error(`Product not found for restocking: ${item.productId}`);
+        }
+
+        const newStock = productData.stock + item.quantity;
+
+        // Update product stock
+        await connection
+          .from("products")
+          .update({ stock: newStock })
+          .eq("id", item.productId);
+      }
+
+      logger.info(`Restocked item: ${item.title} (Qty: ${item.quantity})`);
+    });
+  }
+
+  /**
+   * Process partial refund (Stub)
+   */
+  async _processPartialRefund(order, item, reason) {
+    // This is a placeholder for actual payment gateway integration
+    // In a real implementation, you would:
+    // 1. Check payment status (if paid)
+    // 2. Call Razorpay/Stripe API to refund 'item.totalPrice'
+    // 3. Update order payment record
+
+    if (order.paymentStatus === 'paid') {
+      logger.info(`[REFUND REQUIRED] Process partial refund of ₹${item.totalPrice} for Item ${item.id} in Order ${order.id}`);
+      logger.info(`Refund Reason: ${reason}`);
+
+      // We could ideally create a 'refund_request' record in DB here
+    } else {
+      logger.info(`Skipping refund for Item ${item.id} - Order payment status is ${order.paymentStatus}`);
+    }
   }
 }
 

@@ -636,6 +636,38 @@ export class OrderController {
   });
 
   /**
+   * Update order item status
+   * PUT /api/orders/:orderId/items/:itemId/status
+   */
+  updateOrderItemStatus = asyncHandler(async (req, res) => {
+    const { orderId, itemId } = req.params;
+    const { status, note, metadata = {} } = req.body;
+    const changedBy = req.user.id;
+
+    const item = await this.orderService.updateOrderItemStatus(
+      orderId,
+      itemId,
+      status,
+      changedBy,
+      note,
+      metadata
+    );
+
+    logger.info("Order item status updated", {
+      orderId,
+      itemId,
+      newStatus: status,
+      changedBy,
+    });
+
+    res.json({
+      success: true,
+      data: { item },
+      message: "Order item status updated successfully",
+    });
+  });
+
+  /**
    * Cancel order
    * PUT /api/orders/:id/cancel
    */
@@ -656,6 +688,31 @@ export class OrderController {
       success: true,
       data: { order },
       message: "Order cancelled successfully",
+    });
+  });
+
+  /**
+   * Cancel order item
+   * PUT /api/orders/:orderId/items/:itemId/cancel
+   */
+  cancelOrderItem = asyncHandler(async (req, res) => {
+    const { orderId, itemId } = req.params;
+    const { reason } = req.body;
+    const userId = req.user.id;
+
+    const item = await this.orderService.cancelOrderItem(orderId, itemId, userId, reason);
+
+    logger.info("Order item cancelled", {
+      orderId,
+      itemId,
+      userId,
+      reason,
+    });
+
+    res.json({
+      success: true,
+      data: { item },
+      message: "Order item cancelled successfully",
     });
   });
 

@@ -27,6 +27,7 @@ export class OrderEventRepository {
           changed_by: eventData.changedBy || null,
           note: eventData.note || null,
           metadata: eventData.metadata || null,
+          order_item_id: eventData.orderItemId || null,
         })
         .select()
         .single();
@@ -58,6 +59,7 @@ export class OrderEventRepository {
           changed_by: eventData.changedBy || null,
           note: eventData.note || null,
           metadata: eventData.metadata || null,
+          order_item_id: eventData.orderItemId || null,
         })
         .select()
         .single();
@@ -344,6 +346,7 @@ export class OrderEventRepository {
       changedByName: event.users?.full_name,
       note: event.note,
       metadata: event.metadata || {},
+      orderItemId: event.order_item_id,
       createdAt: event.created_at,
     };
   }

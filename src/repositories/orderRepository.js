@@ -89,6 +89,7 @@ export class OrderRepository {
         total_price: item.totalPrice,
         product_snapshot: item.productSnapshot,
         retailer_id: item.retailerId,
+        status: status, // Initialize with order status or defaults
       }));
 
       const { error: itemsError } = await this.supabase
@@ -213,7 +214,10 @@ export class OrderRepository {
               description: product.short_description,
               productType: product.product_type,
               basePrice: product.base_price,
+              productType: product.product_type,
+              basePrice: product.base_price,
             },
+            status: "initialized",
           });
 
         if (itemError) {
@@ -581,6 +585,31 @@ export class OrderRepository {
   }
 
   /**
+   * Update order item status
+   */
+  async updateOrderItemStatus(itemId, status) {
+    try {
+      const { data, error } = await this.supabase
+        .from("order_items")
+        .update({
+          status,
+        })
+        .eq("id", itemId)
+        .select()
+        .single();
+
+      if (error) {
+        throw new Error(`Failed to update order item status: ${error.message}`);
+      }
+
+      return this._formatOrderItem(data);
+    } catch (error) {
+      logger.error("Failed to update order item status:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Get items for multiple orders (Batch Fetch)
    */
   async _getItemsForOrders(orderIds) {
@@ -705,6 +734,7 @@ export class OrderRepository {
       totalPrice: parseFloat(row.total_price || 0),
       productSnapshot: row.product_snapshot || {},
       retailerId: row.retailer_id,
+      status: row.status || "initialized", // Default for backward compatibility
       createdAt: row.created_at,
     };
   }

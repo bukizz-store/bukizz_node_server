@@ -41,18 +41,15 @@ import { UserRepository } from "./src/repositories/userRepository.js";
 // Import middleware and utilities
 import { errorHandler } from "./src/middleware/errorHandler.js";
 import { logger } from "./src/utils/logger.js";
+import { config } from "./src/config/index.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Security middleware
 app.use(helmet());
-app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
-    credentials: true,
-  })
-);
+// Use the dynamic CORS config that supports local network IPs
+app.use(cors(config.cors));
 
 // Rate limiting
 const limiter = rateLimit({

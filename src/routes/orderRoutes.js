@@ -79,6 +79,20 @@ export default function orderRoutes(dependencies = {}) {
     OrderController.cancelOrder
   );
 
+  // Cancel specific order item (customer self-service)
+  router.put(
+    "/:orderId/items/:itemId/cancel",
+    validate(orderSchemas.cancelOrder), // Reusing strict validation for reason
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.cancelOrderItem(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
   // Create order query/support ticket
   router.post(
     "/:orderId/queries",
@@ -146,6 +160,22 @@ export default function orderRoutes(dependencies = {}) {
       try {
         const orderController = new OrderController();
         await orderController.updateOrderStatus(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    }
+  );
+
+  // Update order item status (admin/retailer operation)
+  router.put(
+    "/:orderId/items/:itemId/status",
+    requireRoles("admin", "retailer"),
+    // reusing updateOrderStatus validator as structure is same (status, note)
+    validate(orderSchemas.updateOrderStatus),
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.updateOrderItemStatus(req, res, next);
       } catch (error) {
         next(error);
       }
