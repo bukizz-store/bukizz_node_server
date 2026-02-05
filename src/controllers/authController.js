@@ -49,8 +49,10 @@ export class AuthController {
   async googleLogin(req, res) {
     try {
       const { token } = req.body;
+      logger.info("Google login request received");
 
       if (!token) {
+        logger.warn("Google login failed: No token provided");
         return res.status(400).json({
           success: false,
           message: "Token is required",
@@ -58,6 +60,7 @@ export class AuthController {
       }
 
       const result = await authService.googleLogin(token);
+      logger.info(`Google login successful for user: ${result.user?.email}`);
 
       res.status(200).json({
         success: true,

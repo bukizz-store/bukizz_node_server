@@ -154,14 +154,17 @@ export class AuthService {
 
   async googleLogin(token) {
     try {
+      logger.info("Verifying Google token with Supabase");
       // Verify the token with Supabase Auth
       const { data: { user: supabaseUser }, error: verifyError } = await this.supabase.auth.getUser(token);
 
       if (verifyError || !supabaseUser) {
+        logger.error("Google token verification failed:", verifyError);
         throw new Error("Invalid Google token");
       }
 
       const email = supabaseUser.email;
+      logger.info(`Google token verified for email: ${email}`);
       const fullName = supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || email.split('@')[0];
 
       // Check if user already exists in our users table
@@ -175,11 +178,13 @@ export class AuthService {
       let user;
 
       if (existingUser) {
+        logger.info(`Existing user found for email: ${email}`);
         userId = existingUser.id;
         user = existingUser;
 
         // Update email_verified if it's not verified (since Google verified it)
         if (!existingUser.email_verified) {
+          logger.info(`Updating email verification status for user: ${userId}`);
           await this.supabase
             .from("users")
             .update({ email_verified: true, updated_at: new Date().toISOString() })
@@ -196,6 +201,7 @@ export class AuthService {
           .single();
 
         if (!existingAuth) {
+          logger.info(`Creating google auth record for existing user: ${userId}`);
           await this.supabase
             .from("user_auths")
             .insert({
@@ -208,6 +214,7 @@ export class AuthService {
         }
 
       } else {
+        logger.info(`Creating new user for email: ${email}`);
         // Create new user
         userId = uuidv4();
 
@@ -221,7 +228,10 @@ export class AuthService {
           updated_at: new Date().toISOString(),
         });
 
-        if (userError) throw userError;
+        if (userError) {
+          logger.error("Failed to create new user:", userError);
+          throw userError;
+        }
 
         // Create user_auth record
         const { error: authError } = await this.supabase
@@ -234,7 +244,10 @@ export class AuthService {
             created_at: new Date().toISOString(),
           });
 
-        if (authError) throw authError;
+        if (authError) {
+          logger.error("Failed to create auth record for new user:", authError);
+          throw authError;
+        }
 
         user = {
           id: userId,
@@ -243,13 +256,16 @@ export class AuthService {
           email_verified: true,
           is_active: true
         };
+        logger.info(`New user created successfully: ${userId}`);
       }
 
       if (!user.is_active) {
+        logger.warn(`Inactive user attempted login: ${email}`);
         throw new Error("User account is inactive");
       }
 
       // Generate tokens
+      logger.info(`Generating tokens for user: ${userId}`);
       const tokens = await this.generateTokens(userId);
 
       return {
