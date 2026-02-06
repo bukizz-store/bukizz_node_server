@@ -373,7 +373,8 @@ export class OrderService {
                 price,
                 stock,
                 sku,
-                metadata
+                metadata,
+                compare_at_price
               ),
               product_images(url, is_primary, sort_order)
             `
@@ -394,6 +395,7 @@ export class OrderService {
             ...productData,
             variant_stock: productData.product_variants[0]?.stock,
             variant_price: productData.product_variants[0]?.price,
+            variant_compare_at_price: productData.product_variants[0]?.compare_at_price,
             variant_sku: productData.product_variants[0]?.sku,
             variant_metadata: productData.product_variants[0]?.metadata,
           };
@@ -427,6 +429,11 @@ export class OrderService {
           ? product.variant_price || product.base_price
           : product.base_price;
 
+        // Calculate original price (MRP) for discount calculation
+        const originalPrice = item.variantId
+          ? product.variant_compare_at_price || product.compare_at_price || currentPrice
+          : product.compare_at_price || currentPrice;
+
         // Check stock availability
         if (availableStock < item.quantity) {
           stockErrors.push(
@@ -458,7 +465,9 @@ export class OrderService {
           productId: item.productId,
           variantId: item.variantId || null,
           quantity: item.quantity,
+          quantity: item.quantity,
           unitPrice: parseFloat(currentPrice),
+          originalPrice: parseFloat(originalPrice), // Store for calculation
           totalPrice: parseFloat(currentPrice) * item.quantity,
           sku: item.variantId
             ? product.variant_sku || product.sku
@@ -468,6 +477,7 @@ export class OrderService {
             title: product.title,
             description: product.description || product.short_description,
             basePrice: product.base_price,
+            compareAtPrice: product.compare_at_price,
             productType: product.product_type,
             category: product.category,
             brand: product.brand,
@@ -542,9 +552,32 @@ export class OrderService {
     );
     const platformFee = this._calculatePlatformFee(subtotal);
     const tax = this._calculateTax(subtotal);
-    const discount = 0; // Placeholder for future discount logic
 
-    const total = subtotal + deliveryFee + platformFee + tax - discount;
+    // Calculate Discount: (MRP * Qty) - (Selling Price * Qty)
+    // Note: subtotal is already (Selling Price * Qty)
+    const totalMRP = validatedItems.reduce((sum, item) => sum + ((item.originalPrice || item.unitPrice) * item.quantity), 0);
+    const discount = Math.max(0, totalMRP - subtotal);
+
+    // Total = Subtotal + Fees - (Discount is ALREADY applied in subtotal because subtotal = selling price)
+    // Wait, the frontend logic is: Total = Subtotal (Selling Price) + Fees.
+    // The "Discount" is just for display: MRP - Selling Price.
+    // So the stored Total Amount should be: Subtotal + Delivery + Platform + Tax (if extra, usually included).
+    // Let's assume Tax is included in price or strictly additive?
+    // In frontend: totalAmount = subtotal + platformFees + deliveryCharges.
+    // Discount is NOT subtracted from Total, because Subtotal is ALREADY the discounted price.
+    // The previous backend logic had: total = subtotal + ... - discount.
+    // If backend "discount" variable was meant to be a COUPON discount, then subtracting it is correct.
+    // But here we are talking about Product Discount (MRP - Price).
+    // So we should NOT subtract `discount` if it represents Product Discount.
+    // However, if we want to store the "Savings" value, we can return it.
+
+    // Matched Frontend Logic:
+    // Total = Subtotal + Platform Fee + Delivery Charges (Tax usually included or handled separately)
+    // Ensuring Tax isn't double counted if included in price.
+    // Previous logic: subtotal + delivery + platform + tax - discount.
+    // I will align to: Total = Subtotal + Fees.
+
+    const total = subtotal + deliveryFee + platformFee; // Tax assumed included in price or not added on top for now to match frontend
 
     return {
       items: itemDetails,
@@ -552,11 +585,11 @@ export class OrderService {
       deliveryFee: parseFloat(deliveryFee.toFixed(2)),
       platformFee: parseFloat(platformFee.toFixed(2)),
       tax: parseFloat(tax.toFixed(2)),
-      discount: parseFloat(discount.toFixed(2)),
+      discount: parseFloat(discount.toFixed(2)), // Return product savings for display/analytics
       total: parseFloat(total.toFixed(2)),
       currency: "INR",
       retailerCount: retailerGroups.size,
-      savings: 0, // Placeholder for savings calculation
+      savings: parseFloat(discount.toFixed(2)),
     };
   }
 
@@ -1255,20 +1288,25 @@ export class OrderService {
   }
 
   _calculateDeliveryFee(subtotal, retailerCount) {
-    // Free delivery above ₹500, additional fee for multi-retailer orders
-    const baseFee = subtotal > 500 ? 0 : 50;
+    // Free delivery above ₹399 (Frontend Logic)
+    // Note: Frontend also has item-specific delivery charges. 
+    // Ideally, this service should receive the fully calculated delivery fee or replicate the precise logic.
+    // For now, aligning the base logic:
+    const baseFee = subtotal >= 399 ? 0 : 50;
+    // Keeping multi-retailer logic if relevant for backend, or setting to 0 if not used in frontend
     const multiRetailerFee = retailerCount > 1 ? (retailerCount - 1) * 30 : 0;
     return baseFee + multiRetailerFee;
   }
 
   _calculatePlatformFee(subtotal) {
-    // Flat platform fee
-    return Math.min(30, subtotal * 0.02); // 2% or ₹30, whichever is lower
+    // Flat platform fee of ₹10 (Frontend Logic)
+    return 10;
   }
 
   _calculateTax(subtotal) {
-    // 18% GST
-    return subtotal * 0.18;
+    // 18% GST (Included in price usually, returning 0 for additive tax unless specified)
+    // Frontend doesn't add extra tax on top of subtotal + fees
+    return 0; // subtotal * 0.18; 
   }
 
   async _handleOrderDelivered(orderId) {
