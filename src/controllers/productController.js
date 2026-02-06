@@ -108,21 +108,21 @@ export class ProductController {
   });
 
   /**
-   * Get products by retailer name
+   * Get products by retailer ID
    * GET /api/products/retailer-search
    */
   getProductsByRetailer = asyncHandler(async (req, res) => {
-    const { retailerName, ...filters } = req.query;
+    const { retailerId, ...filters } = req.query;
 
-    if (!retailerName) {
+    if (!retailerId) {
       return res.status(400).json({
         success: false,
-        message: "Retailer name is required",
+        message: "Retailer ID is required",
       });
     }
 
-    const result = await this.productService.getProductsByRetailer(
-      retailerName,
+    const result = await this.productService.getProductsByRetailerId(
+      retailerId,
       filters
     );
 
