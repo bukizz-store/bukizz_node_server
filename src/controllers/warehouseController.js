@@ -111,6 +111,21 @@ export class WarehouseController {
     });
 
     /**
+     * Get warehouse by ID
+     * GET /api/warehouses/:id
+     */
+    getWarehouseById = asyncHandler(async (req, res) => {
+        const { id } = req.params;
+        const warehouse = await this.warehouseService.getWarehouseById(id);
+
+        res.json({
+            success: true,
+            data: { warehouse },
+            message: "Warehouse retrieved successfully",
+        });
+    });
+
+    /**
      * Get warehouses for a specific retailer (Admin)
      * @route GET /api/v1/warehouses/retailer/:retailerId
      */
