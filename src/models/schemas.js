@@ -221,7 +221,7 @@ export const productSchemas = {
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
     search: Joi.string().max(255).optional(),
-    category: optionalUuidSchema,
+    category: Joi.string().max(100).optional(),
     brand: optionalUuidSchema,
     productType: Joi.string()
       .valid("bookset", "uniform", "stationary", "school", "general")

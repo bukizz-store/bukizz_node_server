@@ -300,10 +300,13 @@ export class ProductRepository {
         `
           *,
           products_warehouse(
-            warehouse(name)
+            warehouse(id, name)
           ),
           product_brands(
             brands(id, name, slug)
+          ),
+          product_categories(
+            categories(id, name, slug)
           ),
           product_images(
             id, url, alt_text, sort_order, is_primary
@@ -352,36 +355,15 @@ export class ProductRepository {
         query = query.ilike("city", `%${filters.city}%`);
       }
 
-      // Filter by Category ID (direct UUID match)
-      if (filters.category) {
-        const { data: productIds } = await supabase
-          .from("product_categories")
-          .select("product_id")
-          .eq("category_id", filters.category);
+      // Filter by Category Slug (unified)
+      const categorySlug = filters.category || filters.categorySlug;
 
-        if (productIds && productIds.length > 0) {
-          const ids = productIds.map((p) => p.product_id);
-          query = query.in("id", ids);
-        } else {
-          return {
-            products: [],
-            pagination: {
-              page: filters.page || 1,
-              limit: filters.limit || 20,
-              total: 0,
-              totalPages: 0,
-            },
-          };
-        }
-      }
-
-      // Apply category filter if provided
-      if (filters.categorySlug) {
+      if (categorySlug) {
         // First, get the category ID from the slug
         const { data: categoryData } = await supabase
           .from("categories")
           .select("id")
-          .eq("slug", filters.categorySlug)
+          .eq("slug", categorySlug)
           .single();
 
         if (!categoryData) {
@@ -561,10 +543,13 @@ export class ProductRepository {
         `
           *,
           products_warehouse(
-            warehouse(name)
+            warehouse(id, name)
           ),
           product_brands(
             brands(id, name, slug)
+          ),
+          product_categories(
+            categories(id, name, slug)
           ),
           product_images(
             id, url, alt_text, sort_order, is_primary
@@ -815,19 +800,19 @@ export class ProductRepository {
   /**
    * Activate product
    */
-  async activate(productId , deliveryCharge) {
+  async activate(productId, deliveryCharge) {
     try {
       const supabase = getSupabase();
 
-      if (deliveryCharge != null || deliveryCharge != undefined){
-          const { error } = await supabase
-            .from("products")
-            .update({ is_active: true , delivery_charge: deliveryCharge})
-            .eq("id", productId);
+      if (deliveryCharge != null || deliveryCharge != undefined) {
+        const { error } = await supabase
+          .from("products")
+          .update({ is_active: true, delivery_charge: deliveryCharge })
+          .eq("id", productId);
 
-          if (error) throw error;
+        if (error) throw error;
 
-          return true;
+        return true;
       }
 
       const { error } = await supabase

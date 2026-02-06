@@ -815,7 +815,7 @@
 					"name": "Search Products",
 					"request": {
 						"method": "GET",
-						"url": "{{api_base}}/products?page=1&limit=20&search=notebook&productType=stationary&minPrice=10&maxPrice=500&sortBy=basePrice&sortOrder=asc&city=Mumbai&category={{category_id}}"
+						"url": "{{api_base}}/products?page=1&limit=20&search=notebook&productType=stationary&minPrice=10&maxPrice=500&sortBy=basePrice&sortOrder=asc&city=Mumbai&category=school-supplies"
 					}
 				},
 				{
