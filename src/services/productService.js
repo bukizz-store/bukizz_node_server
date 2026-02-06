@@ -418,6 +418,7 @@ export class ProductService {
       warehouseData = null,
       variants = [],
       categories = [],
+      productOptions = [],
     } = data;
 
     // Declare result outside try block to fix scoping issue
@@ -428,6 +429,7 @@ export class ProductService {
       retailer: null,
       variants: [],
       categories: [],
+      productOptions: [],
       errors: [],
     };
 
@@ -686,6 +688,78 @@ export class ProductService {
         variantsUpdated: result.variants.length,
         errorCount: result.errors.length,
       });
+
+      // Step 8: Handle product option updates
+      if (productOptions && productOptions.length > 0) {
+        for (const option of productOptions) {
+          try {
+            let attribute;
+            if (option.id) {
+              // Update existing attribute
+              attribute = await this.productOptionRepository.updateAttribute(
+                option.id,
+                {
+                  name: option.name,
+                  position: option.position,
+                  isRequired: option.isRequired,
+                }
+              );
+            } else {
+              // Create new attribute
+              attribute = await this.productOptionRepository.createAttribute({
+                productId,
+                name: option.name,
+                position: option.position,
+                isRequired: option.isRequired,
+              });
+            }
+
+            // Handle option values
+            if (option.values && option.values.length > 0) {
+              const updatedValues = [];
+              for (const value of option.values) {
+                try {
+                  let val;
+                  if (value.id) {
+                    // Update existing value
+                    val = await this.productOptionRepository.updateValue(
+                      value.id,
+                      {
+                        value: value.value,
+                        priceModifier: value.priceModifier,
+                        sortOrder: value.sortOrder,
+                        imageUrl: value.imageUrl,
+                      }
+                    );
+                  } else {
+                    // Create new value
+                    val = await this.productOptionRepository.createValue({
+                      attributeId: attribute.id,
+                      value: value.value,
+                      priceModifier: value.priceModifier,
+                      sortOrder: value.sortOrder,
+                      imageUrl: value.imageUrl,
+                    });
+                  }
+                  updatedValues.push(val);
+                } catch (valError) {
+                  logger.error("Error handling option value in update:", valError);
+                  result.errors.push(
+                    `Option value operation failed: ${valError.message}`
+                  );
+                }
+              }
+              attribute.values = updatedValues;
+            }
+            result.productOptions.push(attribute);
+          } catch (optError) {
+            logger.error("Error handling product option in update:", optError);
+            result.errors.push(
+              `Product option operation failed: ${optError.message}`
+            );
+          }
+        }
+      }
 
       // If there were any non-critical errors, include them in the response
       if (result.errors.length > 0) {
