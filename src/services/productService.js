@@ -153,7 +153,7 @@ export class ProductService {
       throw new AppError("Product price cannot be negative", 400);
     }
 
-    const validTypes = ["bookset", "uniform", "stationary","school", "general"];
+    const validTypes = ["bookset", "uniform", "stationary", "school", "general"];
     if (!validTypes.includes(productData.productType)) {
       throw new AppError(
         `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
@@ -324,7 +324,7 @@ export class ProductService {
 
       // Validate product type if provided
       if (filters.productType) {
-        const validTypes = ["bookset", "uniform", "stationary","school", "general"];
+        const validTypes = ["bookset", "uniform", "stationary", "school", "general"];
         if (!validTypes.includes(filters.productType)) {
           throw new AppError(
             `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
@@ -346,6 +346,30 @@ export class ProductService {
       return await this.productRepository.search(searchFilters);
     } catch (error) {
       logger.error("Error searching products:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get products by retailer name
+   */
+  async getProductsByRetailer(retailerName, filters = {}) {
+    try {
+      if (!retailerName) {
+        throw new AppError("Retailer name is required", 400);
+      }
+
+      // Validate pagination
+      const page = Math.max(1, parseInt(filters.page) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
+
+      return await this.productRepository.findByRetailerName(retailerName, {
+        ...filters,
+        page,
+        limit,
+      });
+    } catch (error) {
+      logger.error("Error getting products by retailer:", error);
       throw error;
     }
   }
@@ -691,6 +715,23 @@ export class ProductService {
       return await this.productRepository.delete(productId);
     } catch (error) {
       logger.error("Error deleting product:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Activate product
+   */
+  async activateProduct(productId , deliveryCharge) {
+    try {
+      const existingProduct = await this.productRepository.findById(productId);
+      if (!existingProduct) {
+        throw new AppError("Product not found", 404);
+      }
+
+      return await this.productRepository.activate(productId , deliveryCharge);
+    } catch (error) {
+      logger.error("Error activating product:", error);
       throw error;
     }
   }

@@ -211,11 +211,13 @@ export const productSchemas = {
     currency: Joi.string().length(3).optional(),
     city: Joi.string().max(100).optional(),
     isActive: Joi.boolean().optional(),
+    isDeleted: Joi.boolean().optional(),
     metadata: Joi.object().optional(),
   }),
 
   query: Joi.object({
     isActive: Joi.boolean().optional(),
+    // isDeleted removed for public query to enforce controller-level defaults
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
     search: Joi.string().max(255).optional(),
@@ -229,6 +231,31 @@ export const productSchemas = {
     schoolId: optionalUuidSchema,
     warehouseId: optionalUuidSchema,
     city: Joi.string().max(100).optional(),
+    retailerName: Joi.string().max(255).optional(),
+    sortBy: Joi.string()
+      .valid("createdAt", "title", "basePrice", "rating")
+      .default("createdAt"),
+    sortOrder: Joi.string().valid("asc", "desc").default("desc"),
+  }),
+
+  // Admin query schema with full visibility controls
+  adminQuery: Joi.object({
+    isActive: Joi.boolean().optional(),
+    isDeleted: Joi.boolean().optional(),
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(20),
+    search: Joi.string().max(255).optional(),
+    category: optionalUuidSchema,
+    brand: optionalUuidSchema,
+    productType: Joi.string()
+      .valid("bookset", "uniform", "stationary", "school", "general")
+      .optional(),
+    minPrice: Joi.number().min(0).optional(),
+    maxPrice: Joi.number().min(0).optional(),
+    schoolId: optionalUuidSchema,
+    warehouseId: optionalUuidSchema,
+    city: Joi.string().max(100).optional(),
+    retailerName: Joi.string().max(255).optional(),
     sortBy: Joi.string()
       .valid("createdAt", "title", "basePrice", "rating")
       .default("createdAt"),

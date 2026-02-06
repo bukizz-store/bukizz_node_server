@@ -41,6 +41,16 @@ export default function productRoutes(dependencies = {}) {
   );
 
   /**
+   * Search products by retailer name
+   * GET /api/v1/products/retailer-search
+   */
+  router.get(
+    "/retailer-search",
+    validate(productSchemas.query, "query"),
+    productController.getProductsByRetailer
+  );
+
+  /**
    * Get featured products
    * GET /api/v1/products/featured
    */
@@ -209,6 +219,17 @@ export default function productRoutes(dependencies = {}) {
   // Protected routes (require authentication)
 
   /**
+   * Admin Search Products
+   * GET /api/v1/products/admin/search
+   */
+  router.get(
+    "/admin/search",
+    authenticateToken,
+    validate(productSchemas.adminQuery, "query"),
+    productController.adminSearchProducts
+  );
+
+  /**
    * Create a new product
    * POST /api/v1/products
    */
@@ -261,6 +282,17 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.id, "params"),
     productController.deleteProduct
+  );
+
+  /**
+   * Activate product
+   * PATCH /api/v1/products/:id/activate
+   */
+  router.patch(
+    "/:id/activate",
+    authenticateToken,
+    validate(paramSchemas.id, "params"),
+    productController.activateProduct
   );
 
   /**

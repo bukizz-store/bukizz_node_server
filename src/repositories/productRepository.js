@@ -33,6 +33,7 @@ export class ProductRepository {
         city: productData.city,
         metadata: productData.metadata || {},
         is_active: true,
+        is_deleted: false,
       };
 
       // Insert product
@@ -155,7 +156,9 @@ export class ProductRepository {
         `
         )
         .eq("id", productId)
-        .eq("is_active", true)
+        .eq("id", productId)
+        .eq("is_deleted", false)
+        // .eq("is_active", true) // removed strict active check to allow fetching inactive products for editing/viewing by admin
         .limit(1);
 
       // console.log("Fetched product with optimized query:", products);
@@ -312,8 +315,14 @@ export class ProductRepository {
       // Apply filters
       if (filters.isActive !== undefined) {
         query = query.eq("is_active", filters.isActive);
+      }
+      // Removed default is_active=true to allow filtering by status. 
+      // But we should default to is_deleted=false unless specified.
+
+      if (filters.isDeleted !== undefined) {
+        query = query.eq("is_deleted", filters.isDeleted);
       } else {
-        query = query.eq("is_active", true);
+        query = query.eq("is_deleted", false);
       }
 
       if (filters.search) {
@@ -336,6 +345,34 @@ export class ProductRepository {
 
       if (filters.maxPrice !== undefined) {
         query = query.lte("base_price", filters.maxPrice);
+      }
+
+      // Filter by City (partial match)
+      if (filters.city) {
+        query = query.ilike("city", `%${filters.city}%`);
+      }
+
+      // Filter by Category ID (direct UUID match)
+      if (filters.category) {
+        const { data: productIds } = await supabase
+          .from("product_categories")
+          .select("product_id")
+          .eq("category_id", filters.category);
+
+        if (productIds && productIds.length > 0) {
+          const ids = productIds.map((p) => p.product_id);
+          query = query.in("id", ids);
+        } else {
+          return {
+            products: [],
+            pagination: {
+              page: filters.page || 1,
+              limit: filters.limit || 20,
+              total: 0,
+              totalPages: 0,
+            },
+          };
+        }
       }
 
       // Apply category filter if provided
@@ -441,6 +478,147 @@ export class ProductRepository {
   }
 
   /**
+   * Find products by retailer name
+   */
+  async findByRetailerName(retailerName, filters = {}) {
+    try {
+      const supabase = getSupabase();
+
+      // Step 1: Find retailers (users) matching the name
+      const { data: retailers, error: retailerError } = await supabase
+        .from("users")
+        .select("id")
+        .ilike("full_name", `%${retailerName}%`)
+        .eq("role", "retailer"); // Assuming 'retailer' role exists
+
+      if (retailerError) throw retailerError;
+
+      if (!retailers || retailers.length === 0) {
+        return {
+          products: [],
+          pagination: {
+            page: filters.page || 1,
+            limit: filters.limit || 20,
+            total: 0,
+            totalPages: 0,
+          },
+        };
+      }
+
+      const retailerIds = retailers.map((r) => r.id);
+
+      // Step 2: Find warehouses owned by these retailers
+      const { data: warehouses, error: warehouseError } = await supabase
+        .from("retailer_warehouse")
+        .select("warehouse_id")
+        .in("retailer_id", retailerIds);
+
+      if (warehouseError) throw warehouseError;
+
+      if (!warehouses || warehouses.length === 0) {
+        return {
+          products: [],
+          pagination: {
+            page: filters.page || 1,
+            limit: filters.limit || 20,
+            total: 0,
+            totalPages: 0,
+          },
+        };
+      }
+
+      const warehouseIds = warehouses.map((w) => w.warehouse_id);
+
+      // Step 3: Find products in these warehouses
+      const { data: productWarehouses, error: pwError } = await supabase
+        .from("products_warehouse")
+        .select("product_id")
+        .in("warehouse_id", warehouseIds);
+
+      if (pwError) throw pwError;
+
+      if (!productWarehouses || productWarehouses.length === 0) {
+        return {
+          products: [],
+          pagination: {
+            page: filters.page || 1,
+            limit: filters.limit || 20,
+            total: 0,
+            totalPages: 0,
+          },
+        };
+      }
+
+      const productIds = productWarehouses.map((pw) => pw.product_id);
+
+      // Step 4: Search products with these IDs (reusing search logic for consistency)
+      // We pass the IDs as a special filter or construct a new query here.
+      // Since search() doesn't support 'ids' array directly in current implementation (it generates query),
+      // we can reuse the logic but we need to inject the ID filter.
+      // Alternatively, we duplicate the search query construction here.
+
+      let query = supabase.from("products").select(
+        `
+          *,
+          products_warehouse(
+            warehouse(name)
+          ),
+          product_brands(
+            brands(id, name, slug)
+          ),
+          product_images(
+            id, url, alt_text, sort_order, is_primary
+          )
+        `,
+        { count: "exact" }
+      );
+
+      // Apply ID filter
+      query = query.in("id", productIds);
+      // query = query.eq("is_active", true); // Removed hardcode
+
+      if (filters.isActive !== undefined) {
+        query = query.eq("is_active", filters.isActive);
+      }
+
+      if (filters.isDeleted !== undefined) {
+        query = query.eq("is_deleted", filters.isDeleted);
+      } else {
+        query = query.eq("is_deleted", false);
+      }
+
+      // Apply other filters if needed (optional)
+      // For now, just return the products found
+
+      // Pagination
+      const page = Math.max(1, parseInt(filters.page) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
+      const offset = (page - 1) * limit;
+
+      query = query.range(offset, offset + limit - 1);
+
+      const { data: products, error, count } = await query;
+
+      if (error) throw error;
+
+      return {
+        products: (products || []).map((product) =>
+          this.formatProduct(product)
+        ),
+        pagination: {
+          page,
+          limit,
+          total: count || 0,
+          totalPages: Math.ceil((count || 0) / limit),
+        },
+      };
+    } catch (error) {
+      logger.error("Error finding products by retailer name:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Update product
    */
   async update(productId, updateData) {
@@ -468,6 +646,8 @@ export class ProductRepository {
         updatePayload.city = updateData.city;
       if (updateData.isActive !== undefined)
         updatePayload.is_active = updateData.isActive;
+      if (updateData.isDeleted !== undefined)
+        updatePayload.is_deleted = updateData.isDeleted;
       if (updateData.metadata !== undefined)
         updatePayload.metadata = updateData.metadata;
       if (updateData.deliveryCharge !== undefined)
@@ -512,8 +692,19 @@ export class ProductRepository {
           )
         `
         )
-        .eq("school_id", schoolId)
-        .eq("products.is_active", true);
+        .eq("school_id", schoolId);
+      // .eq("products.is_active", true); // Removed hardcode, using filters below
+
+      if (filters.isActive !== undefined) {
+        query = query.eq("products.is_active", filters.isActive);
+      }
+
+      if (filters.isDeleted !== undefined) {
+        query = query.eq("products.is_deleted", filters.isDeleted);
+      } else {
+        // Default to not deleted if not specified (though controller should enforcing it)
+        query = query.eq("products.is_deleted", false);
+      }
 
       if (filters.grade) {
         query = query.eq("grade", filters.grade);
@@ -609,7 +800,7 @@ export class ProductRepository {
 
       const { error } = await supabase
         .from("products")
-        .update({ is_active: false })
+        .update({ is_active: false, is_deleted: true })
         .eq("id", productId);
 
       if (error) throw error;
@@ -617,6 +808,38 @@ export class ProductRepository {
       return true;
     } catch (error) {
       logger.error("Error deleting product:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Activate product
+   */
+  async activate(productId , deliveryCharge) {
+    try {
+      const supabase = getSupabase();
+
+      if (deliveryCharge != null || deliveryCharge != undefined){
+          const { error } = await supabase
+            .from("products")
+            .update({ is_active: true , delivery_charge: deliveryCharge})
+            .eq("id", productId);
+
+          if (error) throw error;
+
+          return true;
+      }
+
+      const { error } = await supabase
+        .from("products")
+        .update({ is_active: true })
+        .eq("id", productId);
+
+      if (error) throw error;
+
+      return true;
+    } catch (error) {
+      logger.error("Error activating product:", error);
       throw error;
     }
   }
@@ -630,8 +853,18 @@ export class ProductRepository {
 
       let query = supabase
         .from("products")
-        .select("*", { count: "exact", head: true })
-        .eq("is_active", true);
+        .select("*", { count: "exact", head: true });
+      // .eq("is_active", true); // Removed hardcode
+
+      if (filters.isActive !== undefined) {
+        query = query.eq("is_active", filters.isActive);
+      }
+
+      if (filters.isDeleted !== undefined) {
+        query = query.eq("is_deleted", filters.isDeleted);
+      } else {
+        query = query.eq("is_deleted", false);
+      }
 
       if (filters.productType) {
         query = query.eq("product_type", filters.productType);

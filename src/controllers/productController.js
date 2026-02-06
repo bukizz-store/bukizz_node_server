@@ -108,6 +108,32 @@ export class ProductController {
   });
 
   /**
+   * Get products by retailer name
+   * GET /api/products/retailer-search
+   */
+  getProductsByRetailer = asyncHandler(async (req, res) => {
+    const { retailerName, ...filters } = req.query;
+
+    if (!retailerName) {
+      return res.status(400).json({
+        success: false,
+        message: "Retailer name is required",
+      });
+    }
+
+    const result = await this.productService.getProductsByRetailer(
+      retailerName,
+      filters
+    );
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Retailer products retrieved successfully",
+    });
+  });
+
+  /**
    * Update product
    * PUT /api/products/:id
    */
@@ -201,6 +227,24 @@ export class ProductController {
       success: true,
       data: { deleted: success },
       message: "Product deleted successfully",
+    });
+  });
+
+  /**
+   * Activate product
+   * PATCH /api/products/:id/activate
+   */
+  activateProduct = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const {deliveryCharge} = req.body;
+    const success = await this.productService.activateProduct(id , deliveryCharge);
+
+    logger.info("Product activated", { productId: id });
+
+    res.json({
+      success: true,
+      data: { activated: success },
+      message: "Product activated successfully",
     });
   });
 
