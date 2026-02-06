@@ -165,6 +165,54 @@ export class WarehouseRepository {
             throw error;
         }
     }
+
+    /**
+     * Find warehouse by ID with Retailer info
+     */
+    async findByIdWithRetailer(id) {
+        try {
+            const supabase = getSupabase();
+
+            // 1. Get warehouse details
+            const { data: warehouse, error: warehouseError } = await supabase
+                .from("warehouse")
+                .select("*")
+                .eq("id", id)
+                .single();
+
+            if (warehouseError) throw warehouseError;
+
+            // 2. Get linked retailer
+            const { data: link, error: linkError } = await supabase
+                .from("retailer_warehouse")
+                .select("retailer_id")
+                .eq("warehouse_id", id)
+                .single();
+
+            if (linkError && linkError.code !== "PGRST116") throw linkError;
+
+            let retailer = null;
+            if (link) {
+                // 3. Get retailer user details
+                const { data: userData, error: userError } = await supabase
+                    .from("users")
+                    .select("id, full_name, email, phone, role, is_active")
+                    .eq("id", link.retailer_id)
+                    .single();
+
+                if (userError && userError.code !== "PGRST116") throw userError;
+                retailer = userData;
+            }
+
+            return {
+                ...warehouse,
+                retailer
+            };
+        } catch (error) {
+            logger.error("Error finding warehouse with retailer by ID:", error);
+            throw error;
+        }
+    }
     /**
      * Update warehouse details
      */

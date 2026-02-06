@@ -522,7 +522,7 @@ export class ProductRepository {
         `
           *,
           products_warehouse(
-            warehouse(id, name, contact_email, contact_phone, address, metadata)
+            warehouse(id, name)
           ),
           product_brands(
             brands(id, name, slug)

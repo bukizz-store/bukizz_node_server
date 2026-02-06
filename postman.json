@@ -555,6 +555,13 @@
 					}
 				},
 				{
+					"name": "Get Warehouse by ID",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/warehouses/{{warehouse_id}}"
+					}
+				},
+				{
 					"name": "Update Warehouse",
 					"request": {
 						"method": "PUT",

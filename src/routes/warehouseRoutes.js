@@ -87,6 +87,17 @@ router.put(
 );
 
 /**
+ * @route   GET /api/warehouses/:id
+ * @desc    Get warehouse by ID
+ * @access  Private (Retailer, Admin)
+ */
+router.get(
+    "/:id",
+    authenticateToken,
+    warehouseController.getWarehouseById
+);
+
+/**
  * @route   DELETE /api/warehouses/:id
  * @desc    Delete a warehouse
  * @access  Private (Retailer, Admin)

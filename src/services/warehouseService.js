@@ -73,7 +73,7 @@ class WarehouseService {
      */
     async getWarehouseById(id) {
         try {
-            const warehouse = await warehouseRepository.findById(id);
+            const warehouse = await warehouseRepository.findByIdWithRetailer(id);
             if (!warehouse) {
                 throw new AppError("Warehouse not found", 404);
             }
