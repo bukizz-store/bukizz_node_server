@@ -351,25 +351,25 @@ export class ProductService {
   }
 
   /**
-   * Get products by retailer name
+   * Get products by retailer ID
    */
-  async getProductsByRetailer(retailerName, filters = {}) {
+  async getProductsByRetailerId(retailerId, filters = {}) {
     try {
-      if (!retailerName) {
-        throw new AppError("Retailer name is required", 400);
+      if (!retailerId) {
+        throw new AppError("Retailer ID is required", 400);
       }
 
       // Validate pagination
       const page = Math.max(1, parseInt(filters.page) || 1);
       const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
 
-      return await this.productRepository.findByRetailerName(retailerName, {
+      return await this.productRepository.findByRetailerId(retailerId, {
         ...filters,
         page,
         limit,
       });
     } catch (error) {
-      logger.error("Error getting products by retailer:", error);
+      logger.error("Error getting products by retailer ID:", error);
       throw error;
     }
   }
@@ -722,14 +722,14 @@ export class ProductService {
   /**
    * Activate product
    */
-  async activateProduct(productId , deliveryCharge) {
+  async activateProduct(productId, deliveryCharge) {
     try {
       const existingProduct = await this.productRepository.findById(productId);
       if (!existingProduct) {
         throw new AppError("Product not found", 404);
       }
 
-      return await this.productRepository.activate(productId , deliveryCharge);
+      return await this.productRepository.activate(productId, deliveryCharge);
     } catch (error) {
       logger.error("Error activating product:", error);
       throw error;

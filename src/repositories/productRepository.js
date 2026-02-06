@@ -462,38 +462,22 @@ export class ProductRepository {
   /**
    * Find products by retailer name
    */
-  async findByRetailerName(retailerName, filters = {}) {
+  /**
+   * Find products by retailer ID
+   */
+  async findByRetailerId(retailerId, filters = {}) {
     try {
       const supabase = getSupabase();
 
-      // Step 1: Find retailers (users) matching the name
-      const { data: retailers, error: retailerError } = await supabase
-        .from("users")
-        .select("id")
-        .ilike("full_name", `%${retailerName}%`)
-        .eq("role", "retailer"); // Assuming 'retailer' role exists
-
-      if (retailerError) throw retailerError;
-
-      if (!retailers || retailers.length === 0) {
-        return {
-          products: [],
-          pagination: {
-            page: filters.page || 1,
-            limit: filters.limit || 20,
-            total: 0,
-            totalPages: 0,
-          },
-        };
+      if (!retailerId) {
+        throw new Error("Retailer ID is required");
       }
 
-      const retailerIds = retailers.map((r) => r.id);
-
-      // Step 2: Find warehouses owned by these retailers
+      // Step 1: Find warehouses owned by this retailer
       const { data: warehouses, error: warehouseError } = await supabase
         .from("retailer_warehouse")
         .select("warehouse_id")
-        .in("retailer_id", retailerIds);
+        .eq("retailer_id", retailerId);
 
       if (warehouseError) throw warehouseError;
 
@@ -511,7 +495,7 @@ export class ProductRepository {
 
       const warehouseIds = warehouses.map((w) => w.warehouse_id);
 
-      // Step 3: Find products in these warehouses
+      // Step 2: Find products in these warehouses
       const { data: productWarehouses, error: pwError } = await supabase
         .from("products_warehouse")
         .select("product_id")
@@ -531,19 +515,14 @@ export class ProductRepository {
         };
       }
 
-      const productIds = productWarehouses.map((pw) => pw.product_id);
+      const productIds = [...new Set(productWarehouses.map((pw) => pw.product_id))];
 
-      // Step 4: Search products with these IDs (reusing search logic for consistency)
-      // We pass the IDs as a special filter or construct a new query here.
-      // Since search() doesn't support 'ids' array directly in current implementation (it generates query),
-      // we can reuse the logic but we need to inject the ID filter.
-      // Alternatively, we duplicate the search query construction here.
-
+      // Step 3: Search products with these IDs
       let query = supabase.from("products").select(
         `
           *,
           products_warehouse(
-            warehouse(id, name)
+            warehouse(id, name, contact_email, contact_phone, address, metadata)
           ),
           product_brands(
             brands(id, name, slug)
@@ -560,7 +539,6 @@ export class ProductRepository {
 
       // Apply ID filter
       query = query.in("id", productIds);
-      // query = query.eq("is_active", true); // Removed hardcode
 
       if (filters.isActive !== undefined) {
         query = query.eq("is_active", filters.isActive);
@@ -571,9 +549,6 @@ export class ProductRepository {
       } else {
         query = query.eq("is_deleted", false);
       }
-
-      // Apply other filters if needed (optional)
-      // For now, just return the products found
 
       // Pagination
       const page = Math.max(1, parseInt(filters.page) || 1);
@@ -598,7 +573,7 @@ export class ProductRepository {
         },
       };
     } catch (error) {
-      logger.error("Error finding products by retailer name:", error);
+      logger.error("Error finding products by retailer ID:", error);
       throw error;
     }
   }
