@@ -134,6 +134,21 @@ export class ProductController {
   });
 
   /**
+   * Admin Search Products (Flexible filtering)
+   * GET /api/products/admin/search
+   */
+  adminSearchProducts = asyncHandler(async (req, res) => {
+    // Admin can filter by anything, no enforcement
+    const result = await this.productService.searchProducts(req.query);
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Products retrieved successfully (Admin)",
+    });
+  });
+
+  /**
    * Update product
    * PUT /api/products/:id
    */
@@ -236,8 +251,8 @@ export class ProductController {
    */
   activateProduct = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const {deliveryCharge} = req.body;
-    const success = await this.productService.activateProduct(id , deliveryCharge);
+    const { deliveryCharge } = req.body;
+    const success = await this.productService.activateProduct(id, deliveryCharge);
 
     logger.info("Product activated", { productId: id });
 
