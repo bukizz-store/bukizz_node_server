@@ -232,6 +232,7 @@ export const productSchemas = {
     warehouseId: optionalUuidSchema,
     city: Joi.string().max(100).optional(),
     retailerName: Joi.string().max(255).optional(),
+    retailerId: optionalUuidSchema,
     sortBy: Joi.string()
       .valid("createdAt", "title", "basePrice", "rating")
       .default("createdAt"),

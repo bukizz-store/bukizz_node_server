@@ -822,7 +822,7 @@
 					"name": "Search Products by Retailer",
 					"request": {
 						"method": "GET",
-						"url": "{{api_base}}/products/retailer-search?retailerName=John&page=1&limit=20"
+						"url": "{{api_base}}/products/retailer-search?retailerId={{user_id}}&page=1&limit=20"
 					}
 				},
 				{
