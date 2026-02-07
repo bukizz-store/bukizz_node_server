@@ -53,7 +53,8 @@ export const config = {
         "http://localhost:3000",
         "https://bukizz.in",
         "https://www.bukizz.in",
-        "http://192.168.1.33:3000"
+        "http://192.168.1.33:3000",
+        "http://localhost:5173",
       ];
       // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
