@@ -54,9 +54,9 @@ export class ProductVariantRepository {
           `
           *,
           products!inner(title, sku, base_price),
-          option_value_1_ref:product_option_values!option_value_1(id, value),
-          option_value_2_ref:product_option_values!option_value_2(id, value),
-          option_value_3_ref:product_option_values!option_value_3(id, value)
+          option_value_1_ref:product_option_values!option_value_1(id, value, product_option_attributes(name)),
+          option_value_2_ref:product_option_values!option_value_2(id, value, product_option_attributes(name)),
+          option_value_3_ref:product_option_values!option_value_3(id, value, product_option_attributes(name))
         `
         )
         .eq("id", variantId)
@@ -86,9 +86,9 @@ export class ProductVariantRepository {
         .select(
           `
           *,
-          option_value_1_ref:product_option_values!option_value_1(id, value),
-          option_value_2_ref:product_option_values!option_value_2(id, value),
-          option_value_3_ref:product_option_values!option_value_3(id, value)
+          option_value_1_ref:product_option_values!option_value_1(id, value, product_option_attributes(name)),
+          option_value_2_ref:product_option_values!option_value_2(id, value, product_option_attributes(name)),
+          option_value_3_ref:product_option_values!option_value_3(id, value, product_option_attributes(name))
         `
         )
         .eq("product_id", productId)
@@ -102,6 +102,8 @@ export class ProductVariantRepository {
       throw error;
     }
   }
+
+
 
   /**
    * Update variant
@@ -287,9 +289,27 @@ export class ProductVariantRepository {
       stock: parseInt(row.stock || 0),
       weight: row.weight ? parseFloat(row.weight) : null,
       optionValues: {
-        value1: row.option_value_1_ref || null,
-        value2: row.option_value_2_ref || null,
-        value3: row.option_value_3_ref || null,
+        value1: row.option_value_1_ref
+          ? {
+            ...row.option_value_1_ref,
+            attributeName:
+              row.option_value_1_ref.product_option_attributes?.name,
+          }
+          : null,
+        value2: row.option_value_2_ref
+          ? {
+            ...row.option_value_2_ref,
+            attributeName:
+              row.option_value_2_ref.product_option_attributes?.name,
+          }
+          : null,
+        value3: row.option_value_3_ref
+          ? {
+            ...row.option_value_3_ref,
+            attributeName:
+              row.option_value_3_ref.product_option_attributes?.name,
+          }
+          : null,
       },
       metadata: row.metadata || {},
       createdAt: row.created_at,
@@ -297,11 +317,11 @@ export class ProductVariantRepository {
       // Include product info if available
       product: row.products
         ? {
-            title: row.products.title,
-            sku: row.products.sku,
-            basePrice: parseFloat(row.products.base_price),
-            productType: row.products.product_type,
-          }
+          title: row.products.title,
+          sku: row.products.sku,
+          basePrice: parseFloat(row.products.base_price),
+          productType: row.products.product_type,
+        }
         : null,
     };
   }
