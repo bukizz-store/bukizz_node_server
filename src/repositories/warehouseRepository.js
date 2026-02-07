@@ -182,6 +182,20 @@ export class WarehouseRepository {
 
             if (warehouseError) throw warehouseError;
 
+            // 1.5 Get Address details if exists
+            let addressData = warehouse.address;
+            if (warehouse.address && typeof warehouse.address === 'string') {
+                const { data: addr, error: addrError } = await supabase
+                    .from("addresses")
+                    .select("*")
+                    .eq("id", warehouse.address)
+                    .single();
+
+                if (!addrError && addr) {
+                    addressData = addr;
+                }
+            }
+
             // 2. Get linked retailer
             const { data: link, error: linkError } = await supabase
                 .from("retailer_warehouse")
@@ -206,6 +220,7 @@ export class WarehouseRepository {
 
             return {
                 ...warehouse,
+                address: addressData,
                 retailer
             };
         } catch (error) {
