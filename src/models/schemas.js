@@ -7,6 +7,7 @@ const emailSchema = Joi.string().email().required();
 const passwordSchema = Joi.string().min(6).max(128).required();
 const phoneSchema = Joi.string()
   .pattern(/^\+?[\d\s\-\(\)]{10,}$/)
+  .allow(null, "")
   .optional();
 
 /**
@@ -753,31 +754,39 @@ export const addressSchemas = {
     label: Joi.string().max(50).optional(),
     recipientName: Joi.string().max(255).required(),
     phone: phoneSchema.required(),
+    alternatePhone: phoneSchema,
     line1: Joi.string().max(255).required(),
-    line2: Joi.string().max(255).optional(),
+    line2: Joi.string().max(255).allow(null, "").optional(),
     city: Joi.string().max(100).required(),
     state: Joi.string().max(100).required(),
     postalCode: Joi.string().max(30).required(),
     country: Joi.string().max(100).default("India"),
     isDefault: Joi.boolean().default(false),
-    lat: Joi.number().optional(),
-    lng: Joi.number().optional(),
+    lat: Joi.number().allow(null, "").optional(),
+    lng: Joi.number().allow(null, "").optional(),
+    landmark: Joi.string().max(255).allow(null, "").optional(),
+    neighborhood: Joi.string().max(255).allow(null, "").optional(),
+    district: Joi.string().max(255).allow(null, "").optional(),
   }),
 
   update: Joi.object({
     label: Joi.string().max(50).optional(),
     recipientName: Joi.string().max(255).optional(),
     phone: phoneSchema,
+    alternatePhone: phoneSchema,
     line1: Joi.string().max(255).optional(),
-    line2: Joi.string().max(255).optional(),
+    line2: Joi.string().max(255).allow(null, "").optional(),
     city: Joi.string().max(100).optional(),
     state: Joi.string().max(100).optional(),
     postalCode: Joi.string().max(30).optional(),
     country: Joi.string().max(100).optional(),
     isDefault: Joi.boolean().optional(),
     isActive: Joi.boolean().optional(),
-    lat: Joi.number().optional(),
-    lng: Joi.number().optional(),
+    lat: Joi.number().allow(null, "").optional(),
+    lng: Joi.number().allow(null, "").optional(),
+    landmark: Joi.string().max(255).allow(null, "").optional(),
+    neighborhood: Joi.string().max(255).allow(null, "").optional(),
+    district: Joi.string().max(255).allow(null, "").optional(),
   }),
 };
 

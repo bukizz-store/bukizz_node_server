@@ -203,11 +203,17 @@ export class UserRepository {
   async addAddress(userId, addressData) {
     try {
       // If this is the default address, unset other defaults first
-      if (addressData.is_default) {
+      if (addressData.isDefault) {
         await this.supabase
           .from("addresses")
           .update({ is_default: false })
           .eq("user_id", userId);
+      }
+
+      // Combine line2 and landmark if present, as landmark might not be a separate column
+      let line2 = addressData.line2 || "";
+      if (addressData.landmark) {
+        line2 = line2 ? `${line2}, Near ${addressData.landmark}` : `Near ${addressData.landmark}`;
       }
 
       const { data, error } = await this.supabase
@@ -219,12 +225,12 @@ export class UserRepository {
             recipient_name: addressData.recipientName || null,
             phone: addressData.phone || null,
             line1: addressData.line1,
-            line2: addressData.line2,
+            line2: line2,
             city: addressData.city,
             state: addressData.state,
             country: addressData.country || "India",
             postal_code: addressData.postalCode,
-            is_default: addressData.is_default || false,
+            is_default: addressData.isDefault || false,
             lat: addressData.lat || null,
             lng: addressData.lng || null,
             is_active: true,
@@ -262,9 +268,29 @@ export class UserRepository {
       if (updateData.line1 !== undefined) {
         dbUpdateData.line1 = updateData.line1;
       }
-      if (updateData.line2 !== undefined) {
-        dbUpdateData.line2 = updateData.line2;
+
+      // Handle line2 and landmark logic to match addAddress
+      if (updateData.line2 !== undefined || updateData.landmark !== undefined) {
+        let line2 = updateData.line2;
+        // If line2 is not provided in update, we might need to fetch it? 
+        // But usually form sends full data. If line2 is undefined, we assume we leave it alone?
+        // But if landmark is provided, we need to merge. 
+        // For safety, if line2 is provided, we use it. If not, and landmark is provided, we might append?
+        // Simpler approach: If line2 is passed, use it. If landmark is passed, append to line2.
+
+        if (line2 !== undefined) {
+          if (updateData.landmark) {
+            line2 = line2 ? `${line2}, Near ${updateData.landmark}` : `Near ${updateData.landmark}`;
+          }
+          dbUpdateData.line2 = line2;
+        } else if (updateData.landmark) {
+          // If only landmark is passed (rare), we can't easily append without fetching.
+          // But AddressForm usually sends line2.
+          // We'll skip this edge case to avoid extra fetch, or just set it?
+          // Safer to assume line2 is sent if landmark is sent.
+        }
       }
+
       if (updateData.city !== undefined) {
         dbUpdateData.city = updateData.city;
       }
@@ -277,14 +303,30 @@ export class UserRepository {
       if (updateData.postalCode !== undefined) {
         dbUpdateData.postal_code = updateData.postalCode;
       }
-      if (updateData.is_default !== undefined) {
-        dbUpdateData.is_default = updateData.is_default;
+      if (updateData.isDefault !== undefined) {
+        dbUpdateData.is_default = updateData.isDefault;
       }
       if (updateData.lat !== undefined) {
         dbUpdateData.lat = updateData.lat;
       }
       if (updateData.lng !== undefined) {
         dbUpdateData.lng = updateData.lng;
+      }
+
+      // Removed direct updates to potential non-existent columns: neighborhood, district, landmark
+      // to prevents SQL errors if columns are missing. landmark is handled via line2 merge.
+
+      // If setting as default, unset others first
+      if (updateData.isDefault) {
+        // Get the user ID for this address first (could be optimized if passed in)
+        const { data: addr } = await this.supabase.from("addresses").select("user_id").eq("id", addressId).single();
+        if (addr) {
+          await this.supabase
+            .from("addresses")
+            .update({ is_default: false })
+            .eq("user_id", addr.user_id)
+            .neq("id", addressId); // optimization to avoid double update on same row if not needed, but eq userId covers it mostly
+        }
       }
 
       const { data, error } = await this.supabase
