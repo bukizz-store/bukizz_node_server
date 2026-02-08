@@ -96,6 +96,7 @@ export const categorySchemas = {
     slug: Joi.string().min(2).max(255).required(),
     description: Joi.string().optional(),
     parentId: optionalUuidSchema,
+    productAttributes: Joi.object().optional(),
   }),
 
   update: Joi.object({
@@ -104,6 +105,7 @@ export const categorySchemas = {
     description: Joi.string().optional(),
     parentId: optionalUuidSchema,
     isActive: Joi.boolean().optional(),
+    productAttributes: Joi.object().optional(),
   }),
 
   query: Joi.object({

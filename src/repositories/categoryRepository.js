@@ -19,6 +19,7 @@ export class CategoryRepository {
                 image: categoryData.image || null,
                 description: categoryData.description,
                 parent_id: categoryData.parentId || null,
+                product_attributes: categoryData.productAttributes || {},
                 is_active: true,
             };
 
@@ -52,6 +53,8 @@ export class CategoryRepository {
                 updatePayload.description = updateData.description;
             if (updateData.parentId !== undefined)
                 updatePayload.parent_id = updateData.parentId;
+            if (updateData.productAttributes !== undefined)
+                updatePayload.product_attributes = updateData.productAttributes;
             if (updateData.isActive !== undefined)
                 updatePayload.is_active = updateData.isActive;
 
@@ -165,7 +168,7 @@ export class CategoryRepository {
           parent:categories!parent_id(id, name, slug),
           children:categories!parent_id(id, name, slug, description,image)
       `, { count: "exact" });
-            
+
             console.log('filters', filters);
             if (filters.isActive !== undefined) {
                 query = query.eq("is_active", filters.isActive);
@@ -231,6 +234,7 @@ export class CategoryRepository {
             slug: row.slug,
             image: row.image,
             description: row.description,
+            productAttributes: row.product_attributes,
             parentId: row.parent_id,
             parent: row.parent_id ? {
                 id: row.parent.id,
