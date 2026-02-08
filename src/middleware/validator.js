@@ -8,8 +8,37 @@ import { AppError } from "./errorHandler.js";
  * @param {string} property - Request property to validate (body, query, params)
  * @returns {Function} Validation middleware
  */
+/**
+ * Pre-process request body to parse JSON strings (for FormData submissions)
+ * @param {Object} body - Request body
+ * @returns {Object} Processed body with parsed JSON strings
+ */
+function preprocessBody(body) {
+  if (!body || typeof body !== "object") return body;
+
+  const processed = { ...body };
+  for (const [key, value] of Object.entries(processed)) {
+    if (
+      typeof value === "string" &&
+      (value.startsWith("[") || value.startsWith("{"))
+    ) {
+      try {
+        processed[key] = JSON.parse(value);
+      } catch (e) {
+        // Keep original value if parsing fails
+      }
+    }
+  }
+  return processed;
+}
+
 export function validate(schema, property = "body") {
   return (req, res, next) => {
+    // Pre-process body to parse JSON strings from FormData
+    if (property === "body") {
+      req.body = preprocessBody(req.body);
+    }
+
     const { error, value } = schema.validate(req[property], {
       abortEarly: false,
       stripUnknown: true,

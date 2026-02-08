@@ -7,90 +7,115 @@ import categoryService from "../services/categoryService.js";
  * Handles HTTP requests for category management
  */
 export class CategoryController {
-    constructor(service) {
-        this.categoryService = service || categoryService;
+  constructor(service) {
+    this.categoryService = service || categoryService;
+  }
+
+  /**
+   * Create a new category
+   * POST /api/categories
+   */
+  createCategory = asyncHandler(async (req, res) => {
+    const categoryData = { ...req.body };
+    // Parse productAttributes if sent as JSON string (from FormData)
+    if (typeof categoryData.productAttributes === "string") {
+      try {
+        categoryData.productAttributes = JSON.parse(
+          categoryData.productAttributes,
+        );
+      } catch (e) {
+        categoryData.productAttributes = [];
+      }
     }
+    const category = await this.categoryService.createCategory(
+      categoryData,
+      req.file,
+    );
 
-    /**
-     * Create a new category
-     * POST /api/categories
-     */
-    createCategory = asyncHandler(async (req, res) => {
-        const categoryData = { ...req.body };
-        const category = await this.categoryService.createCategory(categoryData, req.file);
+    logger.info("Category created", { categoryId: category.id });
 
-        logger.info("Category created", { categoryId: category.id });
-
-        res.status(201).json({
-            success: true,
-            data: { category },
-            message: "Category created successfully",
-        });
+    res.status(201).json({
+      success: true,
+      data: { category },
+      message: "Category created successfully",
     });
+  });
 
-    /**
-     * Get category by ID
-     * GET /api/categories/:id
-     */
-    getCategory = asyncHandler(async (req, res) => {
-        const { id } = req.params;
-        const category = await this.categoryService.getCategory(id);
+  /**
+   * Get category by ID
+   * GET /api/categories/:id
+   */
+  getCategory = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const category = await this.categoryService.getCategory(id);
 
-        res.json({
-            success: true,
-            data: { category },
-            message: "Category retrieved successfully",
-        });
+    res.json({
+      success: true,
+      data: { category },
+      message: "Category retrieved successfully",
     });
+  });
 
-    /**
-     * Update category
-     * PUT /api/categories/:id
-     */
-    updateCategory = asyncHandler(async (req, res) => {
-        const { id } = req.params;
-        const updateData = { ...req.body };
-        const category = await this.categoryService.updateCategory(id, updateData, req.file);
+  /**
+   * Update category
+   * PUT /api/categories/:id
+   */
+  updateCategory = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const updateData = { ...req.body };
+    // Parse productAttributes if sent as JSON string (from FormData)
+    if (typeof updateData.productAttributes === "string") {
+      try {
+        updateData.productAttributes = JSON.parse(updateData.productAttributes);
+      } catch (e) {
+        updateData.productAttributes = [];
+      }
+    }
+    const category = await this.categoryService.updateCategory(
+      id,
+      updateData,
+      req.file,
+    );
 
-        logger.info("Category updated", { categoryId: id });
+    logger.info("Category updated", { categoryId: id });
 
-        res.json({
-            success: true,
-            data: { category },
-            message: "Category updated successfully",
-        });
+    res.json({
+      success: true,
+      data: { category },
+      message: "Category updated successfully",
     });
+  });
 
-    /**
-     * Delete category
-     * DELETE /api/categories/:id
-     */
-    deleteCategory = asyncHandler(async (req, res) => {
-        const { id } = req.params;
-        const success = await this.categoryService.deleteCategory(id);
+  /**
+   * Delete category
+   * DELETE /api/categories/:id
+   */
+  deleteCategory = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const success = await this.categoryService.deleteCategory(id);
 
-        logger.info("Category deleted", { categoryId: id });
+    logger.info("Category deleted", { categoryId: id });
 
-        res.json({
-            success: true,
-            data: { deleted: success },
-            message: "Category deleted successfully",
-        });
+    res.json({
+      success: true,
+      data: { deleted: success },
+      message: "Category deleted successfully",
     });
+  });
 
-    /**
-     * Search/List categories
-     * GET /api/categories
-     */
-    searchCategories = asyncHandler(async (req, res) => {
-        const result = await this.categoryService.searchCategories(req.query);
-        console.log('result', result);
-        res.json({
-            success: true,
-            data: result,
-            message: "Categories retrieved successfully",
-        });
+  /**
+   * Search/List categories
+   * GET /api/categories
+   */
+  searchCategories = asyncHandler(async (req, res) => {
+    const result = await this.categoryService.searchCategories(req.query);
+    console.log("result", result);
+    res.json({
+      success: true,
+      data: result,
+      message: "Categories retrieved successfully",
     });
+  });
 }
 
 export default new CategoryController();
