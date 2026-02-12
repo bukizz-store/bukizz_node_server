@@ -28,9 +28,9 @@ export class AuthController {
 
   async login(req, res) {
     try {
-      const { email, password } = req.body;
+      const { email, password, loginAs } = req.body;
 
-      const result = await authService.login(email, password);
+      const result = await authService.login(email, password, loginAs);
 
       res.status(200).json({
         success: true,
@@ -39,7 +39,10 @@ export class AuthController {
       });
     } catch (error) {
       logger.error("Login error:", error);
-      res.status(401).json({
+
+      // Use 403 for role-based rejections, 401 for invalid credentials
+      const statusCode = error.message?.startsWith("Unauthorized:") ? 403 : 401;
+      res.status(statusCode).json({
         success: false,
         message: error.message || "Login failed",
       });

@@ -25,6 +25,7 @@ export const userSchemas = {
   login: Joi.object({
     email: emailSchema,
     password: passwordSchema,
+    loginAs: Joi.string().valid("customer", "retailer", "admin").default("customer"),
   }),
 
   googleAuth: Joi.object({

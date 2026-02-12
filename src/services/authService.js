@@ -99,7 +99,7 @@ export class AuthService {
     }
   }
 
-  async login(email, password) {
+  async login(email, password, loginAs = "customer") {
     try {
       // Validate input
       if (!email || !password) {
@@ -134,6 +134,15 @@ export class AuthService {
       const isValidPassword = await bcrypt.compare(password, passwordHash);
       if (!isValidPassword) {
         throw new Error("Invalid credentials");
+      }
+
+      // Role-based login enforcement (strict matching)
+      const userRole = user.role || "customer";
+      if (loginAs === "admin" && userRole !== "admin") {
+        throw new Error("Unauthorized: Admin access required");
+      }
+      if (loginAs === "retailer" && userRole !== "retailer") {
+        throw new Error("Unauthorized: Retailer access required");
       }
 
       // Generate tokens
