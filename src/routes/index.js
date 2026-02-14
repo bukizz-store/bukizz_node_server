@@ -9,6 +9,7 @@ import categoryRoutes from "./categoryRoutes.js";
 import paymentRoutes from "./paymentRoutes.js";
 import brandRoutes from "./brandRoutes.js";
 import imageRoutes from "./imageRoutes.js";
+import retailerRoutes from "./retailerRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
@@ -62,6 +63,7 @@ export function setupRoutes(app, dependencies = {}) {
   app.use(`${apiV1}/categories`, categoryRoutes(dependencies));
   app.use(`${apiV1}/payments`, paymentRoutes(dependencies));
   app.use(`${apiV1}/brands`, brandRoutes(dependencies));
+  app.use(`${apiV1}/retailer`, retailerRoutes);
   app.use(`${apiV1}/images`, imageRoutes);
 
   // Handle 404 for all other routes

@@ -26,6 +26,111 @@ export class AuthController {
     }
   }
 
+  async registerRetailer(req, res) {
+    try {
+      const { fullName, email, password, phone } = req.body;
+
+      const result = await authService.registerRetailer({
+        fullName,
+        email,
+        password,
+        phone,
+      });
+
+      res.status(201).json({
+        success: true,
+        message: result.message,
+        data: result,
+      });
+    } catch (error) {
+      logger.error("Retailer registration error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Retailer registration failed",
+      });
+    }
+  }
+
+  async sendRetailerOtp(req, res) {
+    try {
+      const { email, fullName, password, phone } = req.body;
+
+      const result = await authService.sendRetailerOtp({ email, fullName, password, phone });
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error) {
+      logger.error("Send retailer OTP error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Failed to send OTP",
+      });
+    }
+  }
+
+  async verifyRetailerOtp(req, res) {
+    try {
+      const { email, otp } = req.body;
+
+      const result = await authService.verifyRetailerOtp(email, otp);
+
+      res.status(201).json({
+        success: true,
+        message: result.message,
+        data: result,
+      });
+    } catch (error) {
+      logger.error("Verify retailer OTP error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Failed to verify OTP",
+      });
+    }
+  }
+
+  async verifyRetailer(req, res) {
+    try {
+      const { retailerId, action } = req.body;
+
+      const result = await authService.verifyRetailer(retailerId, action);
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result,
+      });
+    } catch (error) {
+      logger.error("Verify retailer error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Retailer verification failed",
+      });
+    }
+  }
+
+  async loginRetailer(req, res) {
+    try {
+      const { email, password } = req.body;
+
+      const result = await authService.loginRetailer(email, password);
+
+      res.status(200).json({
+        success: true,
+        message: "Retailer login successful",
+        data: result,
+      });
+    } catch (error) {
+      logger.error("Retailer login error:", error);
+      const statusCode = error.message?.startsWith("Unauthorized:") ? 403 : 401;
+      res.status(statusCode).json({
+        success: false,
+        message: error.message || "Retailer login failed",
+      });
+    }
+  }
+
   async login(req, res) {
     try {
       const { email, password, loginAs } = req.body;
@@ -246,6 +351,45 @@ export class AuthController {
       res.status(401).json({
         success: false,
         message: "Token verification failed",
+      });
+    }
+  }
+
+  async sendOtp(req, res) {
+    try {
+      const { email, fullName, password } = req.body;
+
+      const result = await authService.sendOtp({ email, fullName, password });
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error) {
+      logger.error("Send OTP error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Failed to send OTP",
+      });
+    }
+  }
+
+  async verifyOtp(req, res) {
+    try {
+      const { email, otp } = req.body;
+
+      const result = await authService.verifyOtp(email, otp);
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result, // result contains user and tokens now
+      });
+    } catch (error) {
+      logger.error("Verify OTP error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Failed to verify OTP",
       });
     }
   }
