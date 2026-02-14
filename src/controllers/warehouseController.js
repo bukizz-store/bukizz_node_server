@@ -23,10 +23,10 @@ export class WarehouseController {
             });
         }
 
-        if (req.user.role !== "retailer") {
+        if (req.user.role !== "retailer" && req.user.role !== "admin") {
             return res.status(403).json({
                 success: false,
-                message: "Access denied. Only retailers can create warehouses.",
+                message: "Access denied. Only retailers and admins can create warehouses.",
             });
         }
 

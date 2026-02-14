@@ -16,7 +16,7 @@ export class ProductService {
     productRepository,
     brandRepository,
     productOptionRepository,
-    productVariantRepository
+    productVariantRepository,
   ) {
     this.productRepository = productRepository || ProductRepository;
     this.brandRepository = brandRepository || BrandRepository;
@@ -41,7 +41,7 @@ export class ProductService {
       if (!validTypes.includes(productData.productType)) {
         throw new AppError(
           `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
-          400
+          400,
         );
       }
 
@@ -87,19 +87,26 @@ export class ProductService {
       // The payload structure might need adjustment depending on exactly what keys are in 'data' vs what SQL expects
       // SQL expects: productData, brandData, warehouseData, retailerId, categories, variants, images
       // Pre-create warehouse if it's new (since RPC might not handle new warehouse creation with address complexity)
-      if (data.warehouseData && data.warehouseData.type === 'new') {
+      if (data.warehouseData && data.warehouseData.type === "new") {
         try {
           // Use the validated data
-          const newWarehouse = await WarehouseRepository.create(data.warehouseData); // Token is optional/handled
-          logger.info("Created new warehouse for comprehensive product", { warehouseId: newWarehouse.id });
+          const newWarehouse = await WarehouseRepository.create(
+            data.warehouseData,
+          ); // Token is optional/handled
+          logger.info("Created new warehouse for comprehensive product", {
+            warehouseId: newWarehouse.id,
+          });
 
           // Update data to point to existing warehouse
           data.warehouseData = {
             warehouseId: newWarehouse.id,
-            type: 'existing' // ensure downstream treats it as existing
+            type: "existing", // ensure downstream treats it as existing
           };
         } catch (err) {
-          logger.error("Failed to create new warehouse during comprehensive product creation", err);
+          logger.error(
+            "Failed to create new warehouse during comprehensive product creation",
+            err,
+          );
           throw err;
         }
       }
@@ -142,7 +149,8 @@ export class ProductService {
    * Validate comprehensive product data before creation
    */
   async validateComprehensiveProductData(data) {
-    const { productData, brandData, warehouseData, variants, categories } = data;
+    const { productData, brandData, warehouseData, variants, categories } =
+      data;
 
     // Validate product data
     if (!productData) {
@@ -153,11 +161,17 @@ export class ProductService {
       throw new AppError("Product price cannot be negative", 400);
     }
 
-    const validTypes = ["bookset", "uniform", "stationary", "school", "general"];
+    const validTypes = [
+      "bookset",
+      "uniform",
+      "stationary",
+      "school",
+      "general",
+    ];
     if (!validTypes.includes(productData.productType)) {
       throw new AppError(
         `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
-        400
+        400,
       );
     }
 
@@ -178,7 +192,7 @@ export class ProductService {
       }
       if (brandData.type === "existing") {
         const existingBrand = await this.brandRepository.findById(
-          brandData.brandId
+          brandData.brandId,
         );
         if (!existingBrand) {
           throw new AppError("Selected brand does not exist", 404);
@@ -191,7 +205,7 @@ export class ProductService {
       if (warehouseData.type === "existing" && !warehouseData.warehouseId) {
         throw new AppError(
           "Warehouse ID is required for existing warehouse",
-          400
+          400,
         );
       }
       if (warehouseData.type === "new" && !warehouseData.name) {
@@ -252,7 +266,7 @@ export class ProductService {
           productId,
           {
             includeVariantImages: true,
-          }
+          },
         );
 
         product.images = images;
@@ -286,9 +300,8 @@ export class ProductService {
       // Get brand details if available
       if (product.brands && product.brands.length > 0) {
         try {
-          const enhancedBrands = await this.productRepository.getProductBrands(
-            productId
-          );
+          const enhancedBrands =
+            await this.productRepository.getProductBrands(productId);
           product.brandDetails = enhancedBrands;
         } catch (brandError) {
           logger.warn("Error fetching brand details:", brandError);
@@ -318,17 +331,23 @@ export class ProductService {
       ) {
         throw new AppError(
           "Minimum price cannot be greater than maximum price",
-          400
+          400,
         );
       }
 
       // Validate product type if provided
       if (filters.productType) {
-        const validTypes = ["bookset", "uniform", "stationary", "school", "general"];
+        const validTypes = [
+          "bookset",
+          "uniform",
+          "stationary",
+          "school",
+          "general",
+        ];
         if (!validTypes.includes(filters.productType)) {
           throw new AppError(
             `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
-            400
+            400,
           );
         }
       }
@@ -375,6 +394,36 @@ export class ProductService {
   }
 
   /**
+   * Get warehouse products
+   */
+  async getWarehouseProducts(warehouseId, queryParams) {
+    try {
+      if (!warehouseId) {
+        throw new AppError("Warehouse ID is missing or invalid", 400);
+      }
+
+      // Validate pagination
+      const page = Math.max(1, parseInt(queryParams.page) || 1);
+      const limit = Math.min(
+        100,
+        Math.max(1, parseInt(queryParams.limit) || 20),
+      );
+
+      return await this.productRepository.getProductsByWarehouseId(
+        warehouseId,
+        {
+          ...queryParams,
+          page,
+          limit,
+        },
+      );
+    } catch (error) {
+      logger.error("Error getting warehouse products:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Update product with enhanced validation
    */
   async updateProduct(productId, updateData) {
@@ -394,7 +443,7 @@ export class ProductService {
         if (!validTypes.includes(updateData.productType)) {
           throw new AppError(
             `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
-            400
+            400,
           );
         }
       }
@@ -494,7 +543,7 @@ export class ProductService {
             });
 
             const existingBrand = await this.brandRepository.findById(
-              brandData.brandId
+              brandData.brandId,
             );
             result.brands.push(existingBrand);
             logger.info("Existing brand associated in update", {
@@ -505,7 +554,7 @@ export class ProductService {
         } catch (brandError) {
           logger.error(
             "Error handling brand in comprehensive product update:",
-            brandError
+            brandError,
           );
           result.errors.push(`Brand operation failed: ${brandError.message}`);
         }
@@ -516,15 +565,19 @@ export class ProductService {
         try {
           if (warehouseData.type === "new") {
             const warehouseResult =
-              await this.productRepository.addWarehouseDetails(productId, {
-                name: warehouseData.name,
-                contact_email: warehouseData.contact_email,
-                contact_phone: warehouseData.contact_phone,
-                address: warehouseData.address,
-                website: warehouseData.website,
-                is_verified: warehouseData.is_verified || false,
-                metadata: warehouseData.metadata || {},
-              }, data.retailerId); // Pass retailerId if available
+              await this.productRepository.addWarehouseDetails(
+                productId,
+                {
+                  name: warehouseData.name,
+                  contact_email: warehouseData.contact_email,
+                  contact_phone: warehouseData.contact_phone,
+                  address: warehouseData.address,
+                  website: warehouseData.website,
+                  is_verified: warehouseData.is_verified || false,
+                  metadata: warehouseData.metadata || {},
+                },
+                data.retailerId,
+              ); // Pass retailerId if available
 
             result.warehouse = {
               id: warehouseResult.warehouseId,
@@ -535,9 +588,13 @@ export class ProductService {
             warehouseData.warehouseId
           ) {
             const warehouseResult =
-              await this.productRepository.addWarehouseDetails(productId, {
-                warehouseId: warehouseData.warehouseId,
-              }, data.retailerId); // Pass retailerId if available
+              await this.productRepository.addWarehouseDetails(
+                productId,
+                {
+                  warehouseId: warehouseData.warehouseId,
+                },
+                data.retailerId,
+              ); // Pass retailerId if available
 
             result.warehouse = {
               id: warehouseData.warehouseId,
@@ -547,10 +604,10 @@ export class ProductService {
         } catch (warehouseError) {
           logger.error(
             "Error handling warehouse in comprehensive product update:",
-            warehouseError
+            warehouseError,
           );
           result.errors.push(
-            `Warehouse operation failed: ${warehouseError.message}`
+            `Warehouse operation failed: ${warehouseError.message}`,
           );
         }
       }
@@ -570,10 +627,10 @@ export class ProductService {
           } catch (variantDeleteError) {
             logger.error(
               "Error clearing existing variants:",
-              variantDeleteError
+              variantDeleteError,
             );
             result.errors.push(
-              `Failed to clear existing variants: ${variantDeleteError.message}`
+              `Failed to clear existing variants: ${variantDeleteError.message}`,
             );
           }
         }
@@ -589,7 +646,7 @@ export class ProductService {
                 {
                   ...variantData,
                   productId,
-                }
+                },
               );
               logger.info("Variant updated", {
                 variantId: variant.id,
@@ -610,10 +667,10 @@ export class ProductService {
           } catch (variantError) {
             logger.error(
               "Error handling variant in comprehensive product update:",
-              variantError
+              variantError,
             );
             result.errors.push(
-              `Variant operation failed: ${variantError.message}`
+              `Variant operation failed: ${variantError.message}`,
             );
           }
         }
@@ -629,7 +686,7 @@ export class ProductService {
           } catch (imageDeleteError) {
             logger.error("Error clearing existing images:", imageDeleteError);
             result.errors.push(
-              `Failed to clear existing images: ${imageDeleteError.message}`
+              `Failed to clear existing images: ${imageDeleteError.message}`,
             );
           }
         }
@@ -648,7 +705,7 @@ export class ProductService {
                 isPrimary: imageData.isPrimary || false,
                 imageType: imageData.imageType || "product",
                 metadata: imageData.metadata || {},
-              }
+              },
             );
             result.images.push(image);
             logger.info("Image updated", {
@@ -659,7 +716,7 @@ export class ProductService {
           } catch (imageError) {
             logger.error(
               "Error updating image in comprehensive product update:",
-              imageError
+              imageError,
             );
             result.errors.push(`Image update failed: ${imageError.message}`);
           }
@@ -674,7 +731,7 @@ export class ProductService {
           includeVariantImages: true,
           includeBrandDetails: true,
           includeRetailerDetails: true,
-        }
+        },
       );
 
       result.product = updatedProduct;
@@ -702,7 +759,7 @@ export class ProductService {
                   name: option.name,
                   position: option.position,
                   isRequired: option.isRequired,
-                }
+                },
               );
             } else {
               // Create new attribute
@@ -729,7 +786,7 @@ export class ProductService {
                         priceModifier: value.priceModifier,
                         sortOrder: value.sortOrder,
                         imageUrl: value.imageUrl,
-                      }
+                      },
                     );
                   } else {
                     // Create new value
@@ -743,9 +800,12 @@ export class ProductService {
                   }
                   updatedValues.push(val);
                 } catch (valError) {
-                  logger.error("Error handling option value in update:", valError);
+                  logger.error(
+                    "Error handling option value in update:",
+                    valError,
+                  );
                   result.errors.push(
-                    `Option value operation failed: ${valError.message}`
+                    `Option value operation failed: ${valError.message}`,
                   );
                 }
               }
@@ -755,7 +815,7 @@ export class ProductService {
           } catch (optError) {
             logger.error("Error handling product option in update:", optError);
             result.errors.push(
-              `Product option operation failed: ${optError.message}`
+              `Product option operation failed: ${optError.message}`,
             );
           }
         }
@@ -888,7 +948,7 @@ export class ProductService {
       if (!validTypes.includes(productType)) {
         throw new AppError(
           `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
-          400
+          400,
         );
       }
 
@@ -951,7 +1011,7 @@ export class ProductService {
       if (product.variants && product.variants.length > 0) {
         const totalStock = product.variants.reduce(
           (sum, v) => sum + (v.stock || 0),
-          0
+          0,
         );
 
         const isAvailable = totalStock >= quantity;
@@ -1002,7 +1062,7 @@ export class ProductService {
       }
 
       return await this.productOptionRepository.findProductOptionsStructure(
-        productId
+        productId,
       );
     } catch (error) {
       logger.error("Error getting product options:", error);
@@ -1035,9 +1095,8 @@ export class ProductService {
    */
   async addProductOptionValue(attributeId, valueData) {
     try {
-      const attribute = await this.productOptionRepository.findAttributeById(
-        attributeId
-      );
+      const attribute =
+        await this.productOptionRepository.findAttributeById(attributeId);
       if (!attribute) {
         throw new AppError("Product option attribute not found", 404);
       }
@@ -1057,16 +1116,15 @@ export class ProductService {
    */
   async updateProductOption(attributeId, updateData) {
     try {
-      const attribute = await this.productOptionRepository.findAttributeById(
-        attributeId
-      );
+      const attribute =
+        await this.productOptionRepository.findAttributeById(attributeId);
       if (!attribute) {
         throw new AppError("Product option attribute not found", 404);
       }
 
       return await this.productOptionRepository.updateAttribute(
         attributeId,
-        updateData
+        updateData,
       );
     } catch (error) {
       logger.error("Error updating product option:", error);
@@ -1084,7 +1142,10 @@ export class ProductService {
         throw new AppError("Product option value not found", 404);
       }
 
-      return await this.productOptionRepository.updateValue(valueId, updateData);
+      return await this.productOptionRepository.updateValue(
+        valueId,
+        updateData,
+      );
     } catch (error) {
       logger.error("Error updating product option value:", error);
       throw error;
@@ -1096,9 +1157,8 @@ export class ProductService {
    */
   async deleteProductOption(attributeId) {
     try {
-      const attribute = await this.productOptionRepository.findAttributeById(
-        attributeId
-      );
+      const attribute =
+        await this.productOptionRepository.findAttributeById(attributeId);
       if (!attribute) {
         throw new AppError("Product option attribute not found", 404);
       }
@@ -1271,7 +1331,7 @@ export class ProductService {
         if (!variant || variant.productId !== productId) {
           throw new AppError(
             "Product variant not found or doesn't belong to this product",
-            404
+            404,
           );
         }
       }
@@ -1279,7 +1339,7 @@ export class ProductService {
       // Get images using ProductImageRepository
       const images = await ProductImageRepository.getProductImages(
         productId,
-        variantId
+        variantId,
       );
 
       return images;
@@ -1294,9 +1354,8 @@ export class ProductService {
    */
   async updateVariant(variantId, updateData) {
     try {
-      const existingVariant = await this.productVariantRepository.findById(
-        variantId
-      );
+      const existingVariant =
+        await this.productVariantRepository.findById(variantId);
       if (!existingVariant) {
         throw new AppError("Product variant not found", 404);
       }
@@ -1322,9 +1381,8 @@ export class ProductService {
    */
   async deleteVariant(variantId) {
     try {
-      const existingVariant = await this.productVariantRepository.findById(
-        variantId
-      );
+      const existingVariant =
+        await this.productVariantRepository.findById(variantId);
       if (!existingVariant) {
         throw new AppError("Product variant not found", 404);
       }
@@ -1341,9 +1399,8 @@ export class ProductService {
    */
   async updateVariantStock(variantId, quantity, operation = "set") {
     try {
-      const existingVariant = await this.productVariantRepository.findById(
-        variantId
-      );
+      const existingVariant =
+        await this.productVariantRepository.findById(variantId);
       if (!existingVariant) {
         throw new AppError("Product variant not found", 404);
       }
@@ -1356,14 +1413,14 @@ export class ProductService {
       if (operation === "decrement" && existingVariant.stock < quantity) {
         throw new AppError(
           `Insufficient stock. Available: ${existingVariant.stock}, Requested: ${quantity}`,
-          400
+          400,
         );
       }
 
       return await this.productVariantRepository.updateStock(
         variantId,
         quantity,
-        operation
+        operation,
       );
     } catch (error) {
       logger.error("Error updating variant stock:", error);
@@ -1384,7 +1441,7 @@ export class ProductService {
       ) {
         throw new AppError(
           "Minimum price cannot be greater than maximum price",
-          400
+          400,
         );
       }
 
@@ -1425,7 +1482,7 @@ export class ProductService {
           const variant = await this.updateVariantStock(
             variantId,
             quantity,
-            operation
+            operation,
           );
 
           results.push({
@@ -1472,7 +1529,7 @@ export class ProductService {
     try {
       return await this.productRepository.addProductImages(
         productId,
-        imagesData
+        imagesData,
       );
     } catch (error) {
       logger.error("Error adding multiple product images:", error);
@@ -1487,7 +1544,7 @@ export class ProductService {
     try {
       return await this.productRepository.updateProductImage(
         imageId,
-        updateData
+        updateData,
       );
     } catch (error) {
       logger.error("Error updating product image:", error);
@@ -1515,7 +1572,7 @@ export class ProductService {
       return await this.productRepository.setPrimaryImage(
         imageId,
         productId,
-        variantId
+        variantId,
       );
     } catch (error) {
       logger.error("Error setting primary image:", error);
@@ -1542,7 +1599,7 @@ export class ProductService {
     try {
       return await this.productRepository.bulkUploadVariantImages(
         productId,
-        variantImagesData
+        variantImagesData,
       );
     } catch (error) {
       logger.error("Error bulk uploading variant images:", error);
@@ -1571,7 +1628,7 @@ export class ProductService {
     try {
       return await this.productRepository.removeProductBrand(
         productId,
-        brandId
+        brandId,
       );
     } catch (error) {
       logger.error("Error removing product brand:", error);
@@ -1600,7 +1657,7 @@ export class ProductService {
     try {
       return await this.productRepository.addRetailerDetails(
         productId,
-        retailerData
+        retailerData,
       );
     } catch (error) {
       logger.error("Error adding retailer details:", error);
@@ -1646,7 +1703,7 @@ export class ProductService {
     try {
       return await this.productRepository.getProductWithDetails(
         productId,
-        options
+        options,
       );
     } catch (error) {
       logger.error("Error getting product with details:", error);
@@ -1690,13 +1747,13 @@ export class ProductService {
         },
         retailerInfo: product.retailerId
           ? {
-            hasRetailer: true,
-            retailerId: product.retailerId,
-            retailerName: product.retailerName,
-          }
+              hasRetailer: true,
+              retailerId: product.retailerId,
+              retailerName: product.retailerName,
+            }
           : {
-            hasRetailer: false,
-          },
+              hasRetailer: false,
+            },
       };
 
       // Get detailed image statistics
@@ -1727,7 +1784,7 @@ export class ProductService {
           prices.reduce((a, b) => a + b, 0) / prices.length;
         analytics.variantStats.totalStock = stocks.reduce((a, b) => a + b, 0);
         analytics.variantStats.variantsWithImages = Object.keys(
-          analytics.imageStats.imagesByVariant
+          analytics.imageStats.imagesByVariant,
         ).length;
       }
 

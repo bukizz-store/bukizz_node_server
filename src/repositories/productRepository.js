@@ -89,7 +89,7 @@ export class ProductRepository {
 
       const { data, error } = await supabase.rpc(
         "create_comprehensive_product",
-        { payload }
+        { payload },
       );
 
       if (error) throw error;
@@ -112,7 +112,7 @@ export class ProductRepository {
       const isUUID = (s) =>
         typeof s === "string" &&
         /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-          s
+          s,
         );
 
       if (!isUUID(productId)) return null;
@@ -153,7 +153,7 @@ export class ProductRepository {
           product_images(
             id, url, alt_text, sort_order, is_primary, variant_id
           )
-        `
+        `,
         )
         .eq("id", productId)
         .eq("id", productId)
@@ -193,39 +193,39 @@ export class ProductRepository {
             // Add enhanced option value references with attribute data
             option_value_1_ref: v.option_value_1_ref
               ? {
-                id: v.option_value_1_ref.id,
-                value: v.option_value_1_ref.value,
-                price_modifier: v.option_value_1_ref.price_modifier,
-                imageUrl: v.option_value_1_ref.image_url,
-                attribute_name:
-                  v.option_value_1_ref.product_option_attributes?.name,
-                attribute_position:
-                  v.option_value_1_ref.product_option_attributes?.position,
-              }
+                  id: v.option_value_1_ref.id,
+                  value: v.option_value_1_ref.value,
+                  price_modifier: v.option_value_1_ref.price_modifier,
+                  imageUrl: v.option_value_1_ref.image_url,
+                  attribute_name:
+                    v.option_value_1_ref.product_option_attributes?.name,
+                  attribute_position:
+                    v.option_value_1_ref.product_option_attributes?.position,
+                }
               : null,
             option_value_2_ref: v.option_value_2_ref
               ? {
-                id: v.option_value_2_ref.id,
-                value: v.option_value_2_ref.value,
-                price_modifier: v.option_value_2_ref.price_modifier,
-                imageUrl: v.option_value_2_ref.image_url,
-                attribute_name:
-                  v.option_value_2_ref.product_option_attributes?.name,
-                attribute_position:
-                  v.option_value_2_ref.product_option_attributes?.position,
-              }
+                  id: v.option_value_2_ref.id,
+                  value: v.option_value_2_ref.value,
+                  price_modifier: v.option_value_2_ref.price_modifier,
+                  imageUrl: v.option_value_2_ref.image_url,
+                  attribute_name:
+                    v.option_value_2_ref.product_option_attributes?.name,
+                  attribute_position:
+                    v.option_value_2_ref.product_option_attributes?.position,
+                }
               : null,
             option_value_3_ref: v.option_value_3_ref
               ? {
-                id: v.option_value_3_ref.id,
-                value: v.option_value_3_ref.value,
-                price_modifier: v.option_value_3_ref.price_modifier,
-                imageUrl: v.option_value_3_ref.image_url,
-                attribute_name:
-                  v.option_value_3_ref.product_option_attributes?.name,
-                attribute_position:
-                  v.option_value_3_ref.product_option_attributes?.position,
-              }
+                  id: v.option_value_3_ref.id,
+                  value: v.option_value_3_ref.value,
+                  price_modifier: v.option_value_3_ref.price_modifier,
+                  imageUrl: v.option_value_3_ref.image_url,
+                  attribute_name:
+                    v.option_value_3_ref.product_option_attributes?.name,
+                  attribute_position:
+                    v.option_value_3_ref.product_option_attributes?.position,
+                }
               : null,
           };
         });
@@ -289,6 +289,106 @@ export class ProductRepository {
   }
 
   /**
+   * Get products by warehouse ID
+   */
+  async getProductsByWarehouseId(warehouseId, filters) {
+    try {
+      const supabase = getSupabase();
+
+      let query = supabase
+        .from("products_warehouse")
+        .select(
+          `
+        product_id,
+        products!inner(
+          *,
+          product_brands(
+            brands(id, name, slug)
+          ),
+          product_categories(
+            categories(id, name, slug)
+          ),
+          product_images(
+            id, url, alt_text, sort_order, is_primary
+          )
+        )
+      `,
+          { count: "exact" },
+        )
+        .eq("warehouse_id", warehouseId);
+
+      // Apply filters
+      if (filters.status && filters.status !== "all") {
+        const isActive = filters.status === "active";
+        query = query.eq("products.is_active", isActive);
+      } else {
+        // Default to showing only non-deleted products
+        query = query.eq("products.is_deleted", false);
+      }
+
+      if (filters.search) {
+        query = query.or(
+          `title.ilike.%${filters.search}%,products.description.ilike.%${filters.search}%`,
+          { foreignTable: "products" },
+        );
+      }
+
+      if (filters.categoryId) {
+        // Filter by category: First get product IDs for this category
+        const { data: categoryProducts } = await supabase
+          .from("product_categories")
+          .select("product_id")
+          .eq("category_id", filters.categoryId);
+
+        if (categoryProducts && categoryProducts.length > 0) {
+          const productIds = categoryProducts.map((p) => p.product_id);
+          query = query.in("product_id", productIds);
+        } else {
+          // No products in this category, return empty
+          return {
+            products: [],
+            pagination: {
+              page: 1,
+              limit: filters.limit || 20,
+              total: 0,
+              totalPages: 0,
+            },
+          };
+        }
+      }
+
+      // Pagination
+      const page = Math.max(1, parseInt(filters.page) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
+      const offset = (page - 1) * limit;
+
+      query = query.range(offset, offset + limit - 1);
+
+      const { data, error, count } = await query;
+
+      if (error) throw error;
+
+      // Transform result
+      const products = (data || []).map((item) =>
+        this.formatProduct(item.products),
+      );
+
+      return {
+        products,
+        pagination: {
+          page,
+          limit,
+          total: count || 0,
+          totalPages: Math.ceil((count || 0) / limit),
+        },
+      };
+    } catch (error) {
+      logger.error("Error getting products by warehouse ID:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Search products with enhanced filtering
    */
   async search(filters) {
@@ -312,14 +412,14 @@ export class ProductRepository {
             id, url, alt_text, sort_order, is_primary
           )
         `,
-        { count: "exact" }
+        { count: "exact" },
       );
 
       // Apply filters
       if (filters.isActive !== undefined) {
         query = query.eq("is_active", filters.isActive);
       }
-      // Removed default is_active=true to allow filtering by status. 
+      // Removed default is_active=true to allow filtering by status.
       // But we should default to is_deleted=false unless specified.
 
       if (filters.isDeleted !== undefined) {
@@ -330,7 +430,7 @@ export class ProductRepository {
 
       if (filters.search) {
         query = query.or(
-          `title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`
+          `title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`,
         );
       }
 
@@ -339,7 +439,10 @@ export class ProductRepository {
       }
 
       if (filters.warehouseId) {
-        query = query.eq("products_warehouse.warehouse_id", filters.warehouseId);
+        query = query.eq(
+          "products_warehouse.warehouse_id",
+          filters.warehouseId,
+        );
       }
 
       if (filters.minPrice !== undefined) {
@@ -444,7 +547,7 @@ export class ProductRepository {
 
       return {
         products: (products || []).map((product) =>
-          this.formatProduct(product)
+          this.formatProduct(product),
         ),
         pagination: {
           page,
@@ -515,7 +618,9 @@ export class ProductRepository {
         };
       }
 
-      const productIds = [...new Set(productWarehouses.map((pw) => pw.product_id))];
+      const productIds = [
+        ...new Set(productWarehouses.map((pw) => pw.product_id)),
+      ];
 
       // Step 3: Search products with these IDs
       let query = supabase.from("products").select(
@@ -534,7 +639,7 @@ export class ProductRepository {
             id, url, alt_text, sort_order, is_primary
           )
         `,
-        { count: "exact" }
+        { count: "exact" },
       );
 
       // Apply ID filter
@@ -563,7 +668,7 @@ export class ProductRepository {
 
       return {
         products: (products || []).map((product) =>
-          this.formatProduct(product)
+          this.formatProduct(product),
         ),
         pagination: {
           page,
@@ -602,8 +707,7 @@ export class ProductRepository {
         updatePayload.base_price = updateData.basePrice;
       if (updateData.currency !== undefined)
         updatePayload.currency = updateData.currency;
-      if (updateData.city !== undefined)
-        updatePayload.city = updateData.city;
+      if (updateData.city !== undefined) updatePayload.city = updateData.city;
       if (updateData.isActive !== undefined)
         updatePayload.is_active = updateData.isActive;
       if (updateData.isDeleted !== undefined)
@@ -650,7 +754,7 @@ export class ProductRepository {
                warehouse(name)
              )
           )
-        `
+        `,
         )
         .eq("school_id", schoolId);
       // .eq("products.is_active", true); // Removed hardcode, using filters below
@@ -709,7 +813,7 @@ export class ProductRepository {
           categories!inner(
             id, name, slug, description, parent_id
           )
-        `
+        `,
         )
         .eq("product_id", productId)
         .eq("categories.is_active", true);
@@ -737,7 +841,7 @@ export class ProductRepository {
           brands!inner(
             id, name, slug, description, country, logo_url
           )
-        `
+        `,
         )
         .eq("product_id", productId)
         .eq("brands.is_active", true);
@@ -883,19 +987,19 @@ export class ProductRepository {
       brands: row.product_brands?.map((pb) => pb.brands) || [],
       primaryImage: primaryImage
         ? {
-          id: primaryImage.id,
-          url: primaryImage.url,
-          altText: primaryImage.alt_text,
-          isPrimary: primaryImage.is_primary,
-        }
+            id: primaryImage.id,
+            url: primaryImage.url,
+            altText: primaryImage.alt_text,
+            isPrimary: primaryImage.is_primary,
+          }
         : null,
       images: Array.isArray(row.product_images)
         ? row.product_images.map((img) => ({
-          id: img.id,
-          url: img.url,
-          altText: img.alt_text,
-          isPrimary: img.is_primary,
-        }))
+            id: img.id,
+            url: img.url,
+            altText: img.alt_text,
+            isPrimary: img.is_primary,
+          }))
         : [],
     };
   }
@@ -924,7 +1028,7 @@ export class ProductRepository {
 
         if (variantError || !variant) {
           throw new Error(
-            "Product variant not found or doesn't belong to this product"
+            "Product variant not found or doesn't belong to this product",
           );
         }
       }
@@ -934,8 +1038,9 @@ export class ProductRepository {
 
       if (imageData.file && !imageUrl) {
         // If file is provided, upload to Supabase storage
-        const fileName = `products/${productId}/${imageData.variantId || "main"
-          }/${Date.now()}-${imageData.file.name}`;
+        const fileName = `products/${productId}/${
+          imageData.variantId || "main"
+        }/${Date.now()}-${imageData.file.name}`;
 
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("product-images")
@@ -1034,8 +1139,9 @@ export class ProductRepository {
       let imageUrl = updateData.url || existingImage.url;
 
       if (updateData.file) {
-        const fileName = `products/${existingImage.product_id}/${existingImage.variant_id || "main"
-          }/${Date.now()}-${updateData.file.name}`;
+        const fileName = `products/${existingImage.product_id}/${
+          existingImage.variant_id || "main"
+        }/${Date.now()}-${updateData.file.name}`;
 
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("product-images")
@@ -1100,7 +1206,7 @@ export class ProductRepository {
         await this.setPrimaryImage(
           imageId,
           existingImage.product_id,
-          existingImage.variant_id
+          existingImage.variant_id,
         );
       }
 
@@ -1229,7 +1335,7 @@ export class ProductRepository {
       if (error) throw error;
 
       return (data || []).map((image) =>
-        ProductImageRepository.formatImage(image)
+        ProductImageRepository.formatImage(image),
       );
     } catch (error) {
       logger.error("Error getting product images:", error);
@@ -1379,7 +1485,10 @@ export class ProductRepository {
         let addressId = warehouseData.address;
 
         // If address is an object, create it in addresses table first
-        if (warehouseData.address && typeof warehouseData.address === 'object') {
+        if (
+          warehouseData.address &&
+          typeof warehouseData.address === "object"
+        ) {
           const addressPayload = {
             user_id: retailerId || null, // Associate with retailer if available
             label: "Warehouse Address",
@@ -1389,7 +1498,10 @@ export class ProductRepository {
             line2: warehouseData.address.line2,
             city: warehouseData.address.city,
             state: warehouseData.address.state,
-            postal_code: warehouseData.address.postalCode || warehouseData.address.postal_code || warehouseData.address.pincode,
+            postal_code:
+              warehouseData.address.postalCode ||
+              warehouseData.address.postal_code ||
+              warehouseData.address.pincode,
             country: warehouseData.address.country || "India",
             lat: warehouseData.address.lat,
             lng: warehouseData.address.lng,
@@ -1464,7 +1576,9 @@ export class ProductRepository {
             .single();
 
           if (ownershipError || !ownership) {
-            throw new Error("Unauthorized: You do not have access to this warehouse");
+            throw new Error(
+              "Unauthorized: You do not have access to this warehouse",
+            );
           }
         }
       }
@@ -1482,7 +1596,7 @@ export class ProductRepository {
           .from("products_warehouse")
           .insert({
             product_id: productId,
-            warehouse_id: warehouseId
+            warehouse_id: warehouseId,
           });
 
         if (insertError) throw insertError;
@@ -1637,15 +1751,19 @@ export class ProductRepository {
         const supabase = getSupabase();
         const { data: warehouseLinks, error: warehouseError } = await supabase
           .from("products_warehouse")
-          .select(`
+          .select(
+            `
                 warehouse:warehouse_id (
                     id, name, contact_email, contact_phone, address, metadata
                 )
-             `)
+             `,
+          )
           .eq("product_id", productId);
 
         if (!warehouseError && warehouseLinks) {
-          product.warehouseDetails = warehouseLinks.map(link => link.warehouse).filter(Boolean);
+          product.warehouseDetails = warehouseLinks
+            .map((link) => link.warehouse)
+            .filter(Boolean);
         }
       }
 

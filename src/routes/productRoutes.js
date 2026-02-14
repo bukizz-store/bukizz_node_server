@@ -1,12 +1,16 @@
 import express from "express";
 
-import { authenticateToken } from "../middleware/authMiddleware.js";
+import {
+  authenticateToken,
+  requireRoles,
+} from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import {
   productSchemas,
   productOptionSchemas,
   productVariantSchemas,
   paramSchemas,
+  headerSchemas,
 } from "../models/schemas.js";
 
 import { upload } from "../middleware/upload.js";
@@ -37,7 +41,20 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/",
     validate(productSchemas.query, "query"),
-    productController.searchProducts
+    productController.searchProducts,
+  );
+
+  /**
+   * Get products for warehouse (Retailer Dashboard)
+   * GET /api/v1/products/warehouse
+   */
+  router.get(
+    "/warehouse",
+    authenticateToken,
+    // requireRoles("retailer"),
+    validate(headerSchemas.warehouseHeaders, "headers"),
+    validate(productSchemas.warehouseProductQuery, "query"),
+    productController.getProductsByWarehouse,
   );
 
   /**
@@ -47,7 +64,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/retailer-search",
     validate(productSchemas.query, "query"),
-    productController.getProductsByRetailer
+    productController.getProductsByRetailer,
   );
 
   /**
@@ -69,7 +86,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/variants/search",
     validate(productVariantSchemas.update, "query"), // Using update schema as it's optional fields
-    productController.searchVariants
+    productController.searchVariants,
   );
 
   /**
@@ -79,7 +96,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/variants/:variantId",
     validate(paramSchemas.variantId, "params"),
-    productController.getVariant
+    productController.getVariant,
   );
 
   /**
@@ -90,7 +107,7 @@ export default function productRoutes(dependencies = {}) {
     "/category/:categorySlug",
     validate(paramSchemas.categorySlug, "params"),
     validate(productSchemas.query, "query"),
-    productController.getProductsByCategory
+    productController.getProductsByCategory,
   );
 
   /**
@@ -101,7 +118,7 @@ export default function productRoutes(dependencies = {}) {
     "/brand/:brandId",
     validate(paramSchemas.brandId, "params"),
     validate(productSchemas.query, "query"),
-    productController.getProductsByBrand
+    productController.getProductsByBrand,
   );
 
   /**
@@ -112,7 +129,7 @@ export default function productRoutes(dependencies = {}) {
     "/type/:productType",
     validate(paramSchemas.productType, "params"),
     validate(productSchemas.query, "query"),
-    productController.getProductsByType
+    productController.getProductsByType,
   );
 
   /**
@@ -123,7 +140,7 @@ export default function productRoutes(dependencies = {}) {
     "/school/:schoolId",
     validate(paramSchemas.schoolId, "params"),
     validate(productSchemas.query, "query"),
-    productController.getSchoolProducts
+    productController.getSchoolProducts,
   );
 
   /**
@@ -133,7 +150,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id",
     validate(paramSchemas.id, "params"),
-    productController.getProduct
+    productController.getProduct,
   );
 
   /**
@@ -143,7 +160,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id/complete",
     validate(paramSchemas.id, "params"),
-    productController.getProductWithDetails
+    productController.getProductWithDetails,
   );
 
   /**
@@ -153,7 +170,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id/analytics",
     validate(paramSchemas.id, "params"),
-    productController.getProductAnalytics
+    productController.getProductAnalytics,
   );
 
   /**
@@ -163,7 +180,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id/availability",
     validate(paramSchemas.id, "params"),
-    productController.checkAvailability
+    productController.checkAvailability,
   );
 
   /**
@@ -173,7 +190,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id/options",
     validate(paramSchemas.id, "params"),
-    productController.getProductOptions
+    productController.getProductOptions,
   );
 
   /**
@@ -183,7 +200,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id/variants",
     validate(paramSchemas.id, "params"),
-    productController.getProductVariants
+    productController.getProductVariants,
   );
 
   /**
@@ -193,7 +210,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id/images",
     validate(paramSchemas.id, "params"),
-    productController.getProductImages
+    productController.getProductImages,
   );
 
   /**
@@ -203,7 +220,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/variants/:variantId/images",
     validate(paramSchemas.variantId, "params"),
-    productController.getVariantImages
+    productController.getVariantImages,
   );
 
   /**
@@ -213,7 +230,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id/brands",
     validate(paramSchemas.id, "params"),
-    productController.getProductBrands
+    productController.getProductBrands,
   );
 
   // Protected routes (require authentication)
@@ -226,7 +243,7 @@ export default function productRoutes(dependencies = {}) {
     "/admin/search",
     authenticateToken,
     validate(productSchemas.adminQuery, "query"),
-    productController.adminSearchProducts
+    productController.adminSearchProducts,
   );
 
   /**
@@ -237,7 +254,7 @@ export default function productRoutes(dependencies = {}) {
     "/",
     authenticateToken,
     validate(productSchemas.create),
-    productController.createProduct
+    productController.createProduct,
   );
 
   /**
@@ -247,7 +264,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/comprehensive",
     authenticateToken,
-    productController.createComprehensiveProduct
+    productController.createComprehensiveProduct,
   );
 
   /**
@@ -259,7 +276,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.id, "params"),
     validate(productSchemas.update),
-    productController.updateProduct
+    productController.updateProduct,
   );
 
   /**
@@ -270,7 +287,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/comprehensive",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.updateComprehensiveProduct
+    productController.updateComprehensiveProduct,
   );
 
   /**
@@ -281,7 +298,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.deleteProduct
+    productController.deleteProduct,
   );
 
   /**
@@ -292,7 +309,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/activate",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.activateProduct
+    productController.activateProduct,
   );
 
   /**
@@ -304,7 +321,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.id, "params"),
     validate(productOptionSchemas.createAttribute),
-    productController.addProductOption
+    productController.addProductOption,
   );
 
   /**
@@ -316,7 +333,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.attributeId, "params"),
     validate(productOptionSchemas.createValue),
-    productController.addProductOptionValue
+    productController.addProductOptionValue,
   );
 
   /**
@@ -328,7 +345,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.attributeId, "params"),
     validate(productOptionSchemas.updateAttribute),
-    productController.updateProductOption
+    productController.updateProductOption,
   );
 
   /**
@@ -340,7 +357,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.valueId, "params"),
     validate(productOptionSchemas.updateValue),
-    productController.updateProductOptionValue
+    productController.updateProductOptionValue,
   );
 
   /**
@@ -351,7 +368,7 @@ export default function productRoutes(dependencies = {}) {
     "/options/:attributeId",
     authenticateToken,
     validate(paramSchemas.attributeId, "params"),
-    productController.deleteProductOption
+    productController.deleteProductOption,
   );
 
   /**
@@ -362,7 +379,7 @@ export default function productRoutes(dependencies = {}) {
     "/options/values/:valueId",
     authenticateToken,
     validate(paramSchemas.valueId, "params"),
-    productController.deleteProductOptionValue
+    productController.deleteProductOptionValue,
   );
 
   /**
@@ -372,7 +389,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/bulk-update",
     authenticateToken,
-    productController.bulkUpdateProducts
+    productController.bulkUpdateProducts,
   );
 
   // ============ PRODUCT VARIANT ROUTES (Protected) ============
@@ -386,7 +403,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.id, "params"),
     validate(productVariantSchemas.create),
-    productController.createVariant
+    productController.createVariant,
   );
 
   /**
@@ -398,7 +415,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.variantId, "params"),
     validate(productVariantSchemas.update),
-    productController.updateVariant
+    productController.updateVariant,
   );
 
   /**
@@ -409,7 +426,7 @@ export default function productRoutes(dependencies = {}) {
     "/variants/:variantId",
     authenticateToken,
     validate(paramSchemas.variantId, "params"),
-    productController.deleteVariant
+    productController.deleteVariant,
   );
 
   /**
@@ -420,7 +437,7 @@ export default function productRoutes(dependencies = {}) {
     "/variants/:variantId/stock",
     authenticateToken,
     validate(paramSchemas.variantId, "params"),
-    productController.updateVariantStock
+    productController.updateVariantStock,
   );
 
   /**
@@ -430,7 +447,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/variants/bulk-stock-update",
     authenticateToken,
-    productController.bulkUpdateVariantStocks
+    productController.bulkUpdateVariantStocks,
   );
 
   // ============ PRODUCT IMAGE MANAGEMENT ROUTES (Protected) ============
@@ -444,7 +461,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.id, "params"),
     upload.single("image"), // Handle file upload
-    productController.addProductImage
+    productController.addProductImage,
   );
 
   /**
@@ -455,7 +472,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/images/bulk",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.addProductImages
+    productController.addProductImages,
   );
 
   /**
@@ -467,7 +484,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.imageId, "params"),
     upload.single("image"), // Handle file upload
-    productController.updateProductImage
+    productController.updateProductImage,
   );
 
   /**
@@ -478,7 +495,7 @@ export default function productRoutes(dependencies = {}) {
     "/images/:imageId",
     authenticateToken,
     validate(paramSchemas.imageId, "params"),
-    productController.deleteProductImage
+    productController.deleteProductImage,
   );
 
   /**
@@ -490,7 +507,7 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.id, "params"),
     validate(paramSchemas.imageId, "params"),
-    productController.setPrimaryImage
+    productController.setPrimaryImage,
   );
 
   /**
@@ -501,7 +518,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/variants/images/bulk",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.bulkUploadVariantImages
+    productController.bulkUploadVariantImages,
   );
 
   // ============ BRAND MANAGEMENT ROUTES (Protected) ============
@@ -514,7 +531,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/brands",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.addProductBrand
+    productController.addProductBrand,
   );
 
   /**
@@ -525,7 +542,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/brands/:brandId",
     authenticateToken,
     validate(paramSchemas.idAndBrandId, "params"),
-    productController.removeProductBrand
+    productController.removeProductBrand,
   );
 
   // ============ RETAILER MANAGEMENT ROUTES (Protected) ============
@@ -538,7 +555,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/retailer",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.addRetailerDetails
+    productController.addRetailerDetails,
   );
 
   /**
@@ -549,7 +566,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/retailer",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.updateRetailerDetails
+    productController.updateRetailerDetails,
   );
 
   /**
@@ -560,7 +577,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/retailer",
     authenticateToken,
     validate(paramSchemas.id, "params"),
-    productController.removeRetailerDetails
+    productController.removeRetailerDetails,
   );
 
   // ============ COMPREHENSIVE DATA ROUTES (Protected) ============

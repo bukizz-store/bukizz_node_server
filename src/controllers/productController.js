@@ -123,13 +123,42 @@ export class ProductController {
 
     const result = await this.productService.getProductsByRetailerId(
       retailerId,
-      filters
+      filters,
     );
 
     res.json({
       success: true,
       data: result,
       message: "Retailer products retrieved successfully",
+    });
+  });
+
+  /**
+   * Get products for warehouse (Retailer Dashboard)
+   * GET /api/v1/products/warehouse
+   * Headers: x-warehouse-id
+   */
+  getProductsByWarehouse = asyncHandler(async (req, res) => {
+    // Extract x-warehouse-id from req.headers.
+    // Note: Headers are usually lower-cased by Express/Node.
+    const warehouseId = req.headers["x-warehouse-id"];
+
+    if (!warehouseId) {
+      return res.status(400).json({
+        success: false,
+        message: "Warehouse ID header (x-warehouse-id) is required",
+      });
+    }
+
+    const result = await this.productService.getWarehouseProducts(
+      warehouseId,
+      req.query,
+    );
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Warehouse products retrieved successfully",
     });
   });
 
@@ -209,7 +238,7 @@ export class ProductController {
         replaceVariants,
         replaceImages,
       },
-      req.user?.role === "retailer" ? req.user.id : null
+      req.user?.role === "retailer" ? req.user.id : null,
     );
 
     logger.info("Comprehensive product updated", {
@@ -252,7 +281,10 @@ export class ProductController {
   activateProduct = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { deliveryCharge } = req.body;
-    const success = await this.productService.activateProduct(id, deliveryCharge);
+    const success = await this.productService.activateProduct(
+      id,
+      deliveryCharge,
+    );
 
     logger.info("Product activated", { productId: id });
 
@@ -271,7 +303,7 @@ export class ProductController {
     const { schoolId } = req.params;
     const products = await this.productService.getSchoolProducts(
       schoolId,
-      req.query
+      req.query,
     );
 
     res.json({
@@ -288,7 +320,7 @@ export class ProductController {
   getFeaturedProducts = asyncHandler(async (req, res) => {
     const { limit = 10 } = req.query;
     const products = await this.productService.getFeaturedProducts(
-      parseInt(limit)
+      parseInt(limit),
     );
 
     res.json({
@@ -306,7 +338,7 @@ export class ProductController {
     const { categorySlug } = req.params;
     const result = await this.productService.getProductsByCategory(
       categorySlug,
-      req.query
+      req.query,
     );
 
     res.json({
@@ -324,7 +356,7 @@ export class ProductController {
     const { brandId } = req.params;
     const result = await this.productService.getProductsByBrand(
       brandId,
-      req.query
+      req.query,
     );
 
     res.json({
@@ -342,7 +374,7 @@ export class ProductController {
     const { productType } = req.params;
     const result = await this.productService.getProductsByType(
       productType,
-      req.query
+      req.query,
     );
 
     res.json({
@@ -363,7 +395,7 @@ export class ProductController {
     const result = await this.productService.checkAvailability(
       id,
       variantId,
-      parseInt(quantity)
+      parseInt(quantity),
     );
 
     res.json({
@@ -413,7 +445,7 @@ export class ProductController {
     const { attributeId } = req.params;
     const value = await this.productService.addProductOptionValue(
       attributeId,
-      req.body
+      req.body,
     );
 
     logger.info("Product option value added", {
@@ -436,7 +468,7 @@ export class ProductController {
     const { attributeId } = req.params;
     const option = await this.productService.updateProductOption(
       attributeId,
-      req.body
+      req.body,
     );
 
     logger.info("Product option updated", { attributeId });
@@ -456,7 +488,7 @@ export class ProductController {
     const { valueId } = req.params;
     const value = await this.productService.updateProductOptionValue(
       valueId,
-      req.body
+      req.body,
     );
 
     logger.info("Product option value updated", { valueId });
@@ -555,7 +587,7 @@ export class ProductController {
     const { id: productId } = req.params;
     const variant = await this.productService.createVariant(
       productId,
-      req.body
+      req.body,
     );
 
     logger.info("Product variant created", {
@@ -610,7 +642,7 @@ export class ProductController {
 
     const images = await this.productService.getProductImages(
       productId,
-      variantId
+      variantId,
     );
 
     res.json({
@@ -628,7 +660,7 @@ export class ProductController {
     const { variantId } = req.params;
     const variant = await this.productService.updateVariant(
       variantId,
-      req.body
+      req.body,
     );
 
     logger.info("Product variant updated", { variantId });
@@ -675,7 +707,7 @@ export class ProductController {
     const variant = await this.productService.updateVariantStock(
       variantId,
       quantity,
-      operation
+      operation,
     );
 
     logger.info("Variant stock updated", {
@@ -757,7 +789,7 @@ export class ProductController {
 
     const image = await this.productService.addProductImage(
       productId,
-      imageData
+      imageData,
     );
 
     logger.info("Product image added", {
@@ -790,7 +822,7 @@ export class ProductController {
 
     const results = await this.productService.addProductImages(
       productId,
-      images
+      images,
     );
 
     logger.info("Multiple product images added", {
@@ -827,7 +859,7 @@ export class ProductController {
 
     const image = await this.productService.updateProductImage(
       imageId,
-      updateData
+      updateData,
     );
 
     logger.info("Product image updated", { imageId });
@@ -868,7 +900,7 @@ export class ProductController {
     const success = await this.productService.setPrimaryImage(
       imageId,
       productId,
-      variantId
+      variantId,
     );
 
     logger.info("Primary image set", { productId, imageId, variantId });
@@ -913,7 +945,7 @@ export class ProductController {
 
     const results = await this.productService.bulkUploadVariantImages(
       productId,
-      variantImagesData
+      variantImagesData,
     );
 
     logger.info("Bulk variant images uploaded", {
@@ -939,7 +971,7 @@ export class ProductController {
 
     const result = await this.productService.addProductBrand(
       productId,
-      req.body
+      req.body,
     );
 
     logger.info("Brand added to product", {
@@ -963,7 +995,7 @@ export class ProductController {
 
     const success = await this.productService.removeProductBrand(
       productId,
-      brandId
+      brandId,
     );
 
     logger.info("Brand removed from product", { productId, brandId });
@@ -1002,7 +1034,7 @@ export class ProductController {
 
     const result = await this.productService.addRetailerDetails(
       productId,
-      req.body
+      req.body,
     );
 
     logger.info("Retailer details added to product", {
@@ -1026,7 +1058,7 @@ export class ProductController {
 
     const result = await this.productService.updateRetailerDetails(
       productId,
-      req.body
+      req.body,
     );
 
     logger.info("Retailer details updated for product", {
@@ -1085,7 +1117,7 @@ export class ProductController {
 
     const product = await this.productService.getProductWithDetails(
       productId,
-      options
+      options,
     );
 
     res.json({
