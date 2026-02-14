@@ -107,6 +107,50 @@ export class UserRepository {
   }
 
   /**
+   * Store OTP for user
+   */
+  async storeOtp(userId, otp) {
+    try {
+      const { error } = await this.supabase
+        .from("users")
+        .update({
+          otp: otp,
+          otp_created_at: new Date().toISOString(),
+          is_verified: false // Reset verification status when new OTP is generated
+        })
+        .eq("id", userId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      logger.error("Error storing OTP:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Verify OTP for user
+   */
+  async verifyOtp(userId) {
+    try {
+      const { error } = await this.supabase
+        .from("users")
+        .update({
+          is_verified: true,
+          otp: null, // Clear OTP after successful verification
+          otp_created_at: null
+        })
+        .eq("id", userId);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      logger.error("Error verifying OTP:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Update user profile
    */
   async update(userId, updateData) {

@@ -4,6 +4,8 @@ import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { createClient } from "@supabase/supabase-js";
 import { logger } from "../utils/logger.js";
+import emailService from "./emailService.js";
+import OtpRepository from "../repositories/otpRepository.js";
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -99,6 +101,203 @@ export class AuthService {
     }
   }
 
+  async registerRetailer(userData) {
+    const { fullName, email, password, phone } = userData;
+
+    try {
+      // Validate input
+      if (!fullName || !email || !password) {
+        throw new Error("Full name, email, and password are required");
+      }
+
+      if (password.length < 6) {
+        throw new Error("Password must be at least 6 characters long");
+      }
+
+      // Check if user already exists
+      const { data: existingUser } = await this.supabase
+        .from("users")
+        .select("id")
+        .eq("email", email)
+        .single();
+
+      if (existingUser) {
+        throw new Error("User already exists with this email");
+      }
+
+      // Hash password
+      const saltRounds = 12;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+
+      // Create user record with role=retailer and deactivation_reason=unauthorized
+      const userId = uuidv4();
+      const { error: userError } = await this.supabase.from("users").insert({
+        id: userId,
+        full_name: fullName,
+        email: email,
+        phone: phone || null,
+        email_verified: false,
+        is_active: false,
+        role: "retailer",
+        deactivation_reason: "unauthorized",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (userError) throw userError;
+
+      // Create user_auth record
+      const { error: authError } = await this.supabase
+        .from("user_auths")
+        .insert({
+          id: uuidv4(),
+          user_id: userId,
+          provider: "email",
+          provider_user_id: email,
+          password_hash: passwordHash,
+          created_at: new Date().toISOString(),
+        });
+
+      if (authError) throw authError;
+
+      // Get user data (do NOT generate tokens — account is not yet approved)
+      const { data: newUser, error: fetchError } = await this.supabase
+        .from("users")
+        .select(
+          "id, full_name, email, email_verified, phone, is_active, role, deactivation_reason, created_at"
+        )
+        .eq("id", userId)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      return {
+        user: newUser,
+        message: "Retailer registered successfully. Account is pending admin approval.",
+      };
+    } catch (error) {
+      logger.error("Retailer registration error:", error);
+      throw error;
+    }
+  }
+
+  async verifyRetailer(retailerId, action) {
+    try {
+      if (!retailerId) {
+        throw new Error("Retailer ID is required");
+      }
+
+      // Fetch the retailer user
+      const { data: user, error: fetchError } = await this.supabase
+        .from("users")
+        .select("id, full_name, email, role, is_active, deactivation_reason")
+        .eq("id", retailerId)
+        .single();
+
+      if (fetchError || !user) {
+        throw new Error("Retailer not found");
+      }
+
+      if (user.role !== "retailer") {
+        throw new Error("User is not a retailer");
+      }
+
+      let updateData;
+      let message;
+
+      if (action === "authorize") {
+        updateData = {
+          is_active: true,
+          deactivation_reason: "authorized",
+          updated_at: new Date().toISOString(),
+        };
+        message = `Retailer '${user.full_name}' has been authorized successfully.`;
+      } else if (action === "deauthorize") {
+        updateData = {
+          is_active: false,
+          deactivation_reason: "unauthorized",
+          updated_at: new Date().toISOString(),
+        };
+        message = `Retailer '${user.full_name}' has been deauthorized.`;
+      } else {
+        throw new Error("Invalid action. Use 'authorize' or 'deauthorize'.");
+      }
+
+      const { data: updatedUser, error: updateError } = await this.supabase
+        .from("users")
+        .update(updateData)
+        .eq("id", retailerId)
+        .select("id, full_name, email, role, is_active, deactivation_reason, updated_at")
+        .single();
+
+      if (updateError) throw updateError;
+
+      return {
+        user: updatedUser,
+        message,
+      };
+    } catch (error) {
+      logger.error("Verify retailer error:", error);
+      throw error;
+    }
+  }
+
+  async loginRetailer(email, password) {
+    try {
+      if (!email || !password) {
+        throw new Error("Email and password are required");
+      }
+
+      // Get user and auth data
+      const { data: users, error: userError } = await this.supabase
+        .from("users")
+        .select(
+          `
+          id, full_name, email, email_verified, phone, is_active, role, deactivation_reason,
+          user_auths!inner(password_hash)
+        `
+        )
+        .eq("email", email)
+        .eq("user_auths.provider", "email");
+
+      if (userError || !users || users.length === 0) {
+        throw new Error("Invalid credentials");
+      }
+
+      const user = users[0];
+      const passwordHash = user.user_auths[0]?.password_hash;
+
+      if (!passwordHash) {
+        throw new Error("Invalid credentials");
+      }
+
+      // Verify password
+      const isValidPassword = await bcrypt.compare(password, passwordHash);
+      if (!isValidPassword) {
+        throw new Error("Invalid credentials");
+      }
+
+      // Only check that the user is a retailer
+      if (user.role !== "retailer") {
+        throw new Error("Unauthorized: Retailer access required");
+      }
+
+      // Generate tokens — no is_active / deactivation_reason checks here
+      const tokens = await this.generateTokens(user.id);
+
+      // Clean response
+      delete user.user_auths;
+
+      return {
+        user,
+        ...tokens,
+      };
+    } catch (error) {
+      logger.error("Retailer login error:", error);
+      throw error;
+    }
+  }
+
   async login(email, password, loginAs = "customer") {
     try {
       // Validate input
@@ -106,18 +305,17 @@ export class AuthService {
         throw new Error("Email and password are required");
       }
 
-      // Get user and auth data with join
+      // Get user and auth data with join (do NOT filter by is_active here — we check it manually)
       const { data: users, error: userError } = await this.supabase
         .from("users")
         .select(
           `
-          id, full_name, email, email_verified, phone, is_active, role,
+          id, full_name, email, email_verified, phone, is_active, role, deactivation_reason,
           user_auths!inner(password_hash)
         `
         )
         .eq("email", email)
-        .eq("user_auths.provider", "email")
-        .eq("is_active", true);
+        .eq("user_auths.provider", "email");
 
       if (userError || !users || users.length === 0) {
         throw new Error("Invalid credentials");
@@ -145,11 +343,27 @@ export class AuthService {
         throw new Error("Unauthorized: Retailer access required");
       }
 
+      // Retailer authorization check
+      if (userRole === "retailer") {
+        if (!user.is_active && user.deactivation_reason === "unauthorized") {
+          throw new Error("Unauthorized: Your account is pending admin approval. Please contact the admin.");
+        }
+        if (!user.is_active) {
+          throw new Error("Unauthorized: Your account has been deactivated. Please contact the admin.");
+        }
+      } else {
+        // For non-retailer users, still check is_active
+        if (!user.is_active) {
+          throw new Error("Your account is inactive. Please contact support.");
+        }
+      }
+
       // Generate tokens
       const tokens = await this.generateTokens(user.id);
 
-      // Remove password_hash from user object
+      // Remove internal fields from user object
       delete user.user_auths;
+      delete user.deactivation_reason;
 
       return {
         user,
@@ -543,18 +757,24 @@ export class AuthService {
     try {
       const decoded = jwt.verify(token, this.jwtSecret);
 
-      // Check if user still exists and is active
+      // Check if user still exists (do NOT filter by is_active here —
+      // retailers may be inactive but still need access to onboarding routes)
       const { data: users, error } = await this.supabase
         .from("users")
-        .select("id, full_name, email, email_verified, phone, is_active, role")
-        .eq("id", decoded.userId)
-        .eq("is_active", true);
+        .select("id, full_name, email, email_verified, phone, is_active, role, deactivation_reason")
+        .eq("id", decoded.userId);
 
       if (error || !users || users.length === 0) {
-        throw new Error("User not found or inactive");
+        throw new Error("User not found");
       }
 
       const user = users[0];
+
+      // Block truly deactivated non-retailer users
+      if (!user.is_active && user.role !== "retailer") {
+        throw new Error("User account is inactive");
+      }
+
       // Map role to roles array for middleware compatibility
       user.roles = user.role ? [user.role] : [];
 
@@ -608,11 +828,267 @@ export class AuthService {
         })
         .eq("id", userId);
 
-      if (error) throw error;
-
       return verificationToken;
     } catch (error) {
       logger.error("Verification token generation error:", error);
+      throw error;
+    }
+  }
+
+  async sendOtp(userData) {
+    const { email, fullName, password } = userData;
+    try {
+      if (!email) {
+        throw new Error("Email is required");
+      }
+
+      // Check if user already exists in main users table
+      const { data: existingUser, error } = await this.supabase
+        .from("users")
+        .select("id")
+        .eq("email", email)
+        .single();
+
+      if (existingUser) {
+        throw new Error("User already exists with this email");
+      }
+
+      // Generate 6-digit OTP use secure random
+      const otp = crypto.randomInt(100000, 999999).toString();
+
+      // Hash password if provided (for new registration)
+      let passwordHash = null;
+      if (password) {
+        const saltRounds = 12;
+        passwordHash = await bcrypt.hash(password, saltRounds);
+      }
+
+      const metadata = {
+        fullName,
+        passwordHash,
+        // Add other fields if needed
+      };
+
+      // Use OtpRepository to upsert OTP
+      const otpRepository = new OtpRepository(this.supabase);
+      await otpRepository.upsertOtp(email, otp, metadata);
+
+      // Send OTP via EmailService
+      await emailService.sendOtpEmail(email, otp);
+
+      return { message: "OTP sent successfully" };
+    } catch (error) {
+      logger.error("Send OTP error:", error);
+      throw error;
+    }
+  }
+
+  async verifyOtp(email, otp) {
+    try {
+      if (!email || !otp) {
+        throw new Error("Email and OTP are required");
+      }
+
+      const otpRepository = new OtpRepository(this.supabase);
+      const otpRecord = await otpRepository.findByEmail(email);
+
+      if (!otpRecord) {
+        throw new Error("Invalid or expired OTP");
+      }
+
+      if (otpRecord.otp !== otp) {
+        throw new Error("Invalid OTP");
+      }
+
+      // Check expiration (10 minutes)
+      const otpCreatedTime = new Date(otpRecord.created_at).getTime();
+      const currentTime = new Date().getTime();
+      if (currentTime - otpCreatedTime > 10 * 60 * 1000) {
+        throw new Error("OTP Expired");
+      }
+
+      // Metadata contains user info
+      const { fullName, passwordHash } = otpRecord.metadata;
+
+      // Create user in users table
+      const userId = uuidv4();
+      const { error: userError } = await this.supabase.from("users").insert({
+        id: userId,
+        full_name: fullName || "User", // Default if missing
+        email: email,
+        email_verified: true,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (userError) throw userError;
+
+      // Create user_auth record IF password exists
+      if (passwordHash) {
+        const { error: authError } = await this.supabase
+          .from("user_auths")
+          .insert({
+            id: uuidv4(),
+            user_id: userId,
+            provider: "email",
+            provider_user_id: email,
+            password_hash: passwordHash,
+            created_at: new Date().toISOString(),
+          });
+
+        if (authError) throw authError;
+      }
+
+      // Delete from otp_verifications
+      await otpRepository.deleteByEmail(email);
+
+      // Generate tokens
+      const tokens = await this.generateTokens(userId);
+
+      // Get complete user data
+      const { data: newUser } = await this.supabase
+        .from("users")
+        .select("*")
+        .eq("id", userId)
+        .single();
+
+      return {
+        message: "OTP verified successfully",
+        user: newUser,
+        ...tokens
+      };
+    } catch (error) {
+      logger.error("Verify OTP error:", error);
+      throw error;
+    }
+  }
+
+  async sendRetailerOtp(userData) {
+    const { email, fullName, password, phone } = userData;
+    try {
+      if (!email || !fullName || !password) {
+        throw new Error("Email, full name, and password are required");
+      }
+
+      if (password.length < 6) {
+        throw new Error("Password must be at least 6 characters long");
+      }
+
+      // Check if user already exists
+      const { data: existingUser } = await this.supabase
+        .from("users")
+        .select("id")
+        .eq("email", email)
+        .single();
+
+      if (existingUser) {
+        throw new Error("User already exists with this email");
+      }
+
+      // Generate 6-digit OTP
+      const otp = crypto.randomInt(100000, 999999).toString();
+
+      // Hash password for storage in metadata
+      const saltRounds = 12;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+
+      const metadata = {
+        fullName,
+        passwordHash,
+        phone: phone || null,
+        role: "retailer",
+      };
+
+      // Upsert OTP record
+      const otpRepository = new OtpRepository(this.supabase);
+      await otpRepository.upsertOtp(email, otp, metadata);
+
+      // Send OTP via email
+      await emailService.sendOtpEmail(email, otp);
+
+      return { message: "OTP sent successfully to " + email };
+    } catch (error) {
+      logger.error("Send retailer OTP error:", error);
+      throw error;
+    }
+  }
+
+  async verifyRetailerOtp(email, otp) {
+    try {
+      if (!email || !otp) {
+        throw new Error("Email and OTP are required");
+      }
+
+      const otpRepository = new OtpRepository(this.supabase);
+      const otpRecord = await otpRepository.findByEmail(email);
+
+      if (!otpRecord) {
+        throw new Error("Invalid or expired OTP");
+      }
+
+      if (otpRecord.otp !== otp) {
+        throw new Error("Invalid OTP");
+      }
+
+      // Check expiration (10 minutes)
+      const otpCreatedTime = new Date(otpRecord.created_at).getTime();
+      const currentTime = Date.now();
+      if (currentTime - otpCreatedTime > 10 * 60 * 1000) {
+        throw new Error("OTP Expired");
+      }
+
+      const { fullName, passwordHash, phone } = otpRecord.metadata;
+
+      // Create retailer user with is_active=false, deactivation_reason=unauthorized
+      const userId = uuidv4();
+      const { error: userError } = await this.supabase.from("users").insert({
+        id: userId,
+        full_name: fullName || "Retailer",
+        email: email,
+        phone: phone || null,
+        email_verified: true,
+        is_active: false,
+        role: "retailer",
+        deactivation_reason: "unauthorized",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (userError) throw userError;
+
+      // Create user_auth record
+      if (passwordHash) {
+        const { error: authError } = await this.supabase
+          .from("user_auths")
+          .insert({
+            id: uuidv4(),
+            user_id: userId,
+            provider: "email",
+            provider_user_id: email,
+            password_hash: passwordHash,
+            created_at: new Date().toISOString(),
+          });
+
+        if (authError) throw authError;
+      }
+
+      // Delete OTP record
+      await otpRepository.deleteByEmail(email);
+
+      // Get created user (do NOT generate tokens — account is pending approval)
+      const { data: newUser } = await this.supabase
+        .from("users")
+        .select("id, full_name, email, email_verified, phone, is_active, role, deactivation_reason, created_at")
+        .eq("id", userId)
+        .single();
+
+      return {
+        message: "Retailer registered successfully. Account is pending admin approval.",
+        user: newUser,
+      };
+    } catch (error) {
+      logger.error("Verify retailer OTP error:", error);
       throw error;
     }
   }

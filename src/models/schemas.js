@@ -30,6 +30,35 @@ export const userSchemas = {
       .default("customer"),
   }),
 
+  retailerLogin: Joi.object({
+    email: emailSchema,
+    password: passwordSchema,
+  }),
+
+  retailerRegister: Joi.object({
+    email: emailSchema,
+    password: passwordSchema,
+    fullName: Joi.string().min(2).max(255).required(),
+    phone: phoneSchema,
+  }),
+
+  sendRetailerOtp: Joi.object({
+    email: emailSchema,
+    password: passwordSchema,
+    fullName: Joi.string().min(2).max(255).required(),
+    phone: phoneSchema,
+  }),
+
+  verifyRetailerOtp: Joi.object({
+    email: emailSchema,
+    otp: Joi.string().length(6).required(),
+  }),
+
+  verifyRetailer: Joi.object({
+    retailerId: uuidSchema,
+    action: Joi.string().valid("authorize", "deauthorize").required(),
+  }),
+
   googleAuth: Joi.object({
     provider: Joi.string().valid("google").required(),
     providerUserId: Joi.string().required(),

@@ -10,6 +10,48 @@ export class ImageService {
     constructor() {
         this.bucketName = "products";
         this.uploadFolder = "temp"; // Temporary folder for uploads before product creation
+        this._bucketCache = new Set(); // Cache of buckets we've already verified exist
+    }
+
+    /**
+     * Ensure a storage bucket exists, create it if it doesn't
+     * @param {string} bucketName - Name of the bucket to ensure exists
+     */
+    async ensureBucketExists(bucketName) {
+        // Skip if we've already verified this bucket in this process lifetime
+        if (this._bucketCache.has(bucketName)) {
+            return;
+        }
+
+        try {
+            const supabase = getSupabase();
+
+            const { data, error } = await supabase.storage.getBucket(bucketName);
+
+            if (error && error.message?.includes("not found")) {
+                logger.info(`Bucket "${bucketName}" not found, creating it...`);
+                const { data: createData, error: createError } = await supabase.storage.createBucket(bucketName, {
+                    public: true,
+                });
+
+                if (createError) {
+                    logger.error(`Failed to create bucket "${bucketName}":`, createError);
+                    throw new AppError(`Failed to create storage bucket: ${createError.message}`, 500);
+                }
+
+                logger.info(`Bucket "${bucketName}" created successfully`);
+            } else if (error) {
+                logger.error(`Error checking bucket "${bucketName}":`, error);
+                throw new AppError(`Failed to check storage bucket: ${error.message}`, 500);
+            }
+
+            // Mark as verified
+            this._bucketCache.add(bucketName);
+        } catch (error) {
+            if (error instanceof AppError) throw error;
+            logger.error(`Error ensuring bucket "${bucketName}" exists:`, error);
+            throw new AppError("Failed to verify storage bucket", 500);
+        }
     }
 
     /**
@@ -33,6 +75,9 @@ export class ImageService {
             const finalBucket = bucketName || this.bucketName;
             const finalFolder = folderPath || this.uploadFolder;
             const fileName = `${finalFolder}/${timestamp}-${random}-${cleanName}`;
+
+            // Ensure the bucket exists before uploading
+            await this.ensureBucketExists(finalBucket);
 
             const { data, error } = await supabase.storage
                 .from(finalBucket)

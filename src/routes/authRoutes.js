@@ -28,6 +28,16 @@ export default function authRoutes(dependencies = {}) {
   );
   router.post("/login", validate(authSchemas.login), authController.login);
   router.post(
+    "/login-retailer",
+    validate(authSchemas.retailerLogin),
+    authController.loginRetailer
+  );
+  router.post(
+    "/register-retailer",
+    validate(authSchemas.retailerRegister),
+    authController.registerRetailer
+  );
+  router.post(
     "/refresh-token",
     validate(authSchemas.refreshToken),
     authController.refreshToken
@@ -44,8 +54,25 @@ export default function authRoutes(dependencies = {}) {
   );
   router.post("/google-login", authController.googleLogin);
   router.post("/verify-token", authController.verifyToken);
+  router.post("/send-otp", authController.sendOtp);
+  router.post("/verify-otp", authController.verifyOtp);
+  router.post(
+    "/send-retailer-otp",
+    validate(authSchemas.sendRetailerOtp),
+    authController.sendRetailerOtp
+  );
+  router.post(
+    "/verify-retailer-otp",
+    validate(authSchemas.verifyRetailerOtp),
+    authController.verifyRetailerOtp
+  );
 
   // Protected routes (require authentication)
+  router.put(
+    "/verify-retailer",
+    authenticateToken,
+    authController.verifyRetailer
+  );
   router.get("/me", authenticateToken, authController.getProfile);
   router.post("/logout", authenticateToken, authController.logout);
 

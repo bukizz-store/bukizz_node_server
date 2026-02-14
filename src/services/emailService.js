@@ -78,6 +78,37 @@ class EmailService {
             throw error;
         }
     }
+
+    async sendOtpEmail(email, otp) {
+        try {
+            const response = await fetch("https://services.theerrors.in/api/services/email/send", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": process.env.OTP_EMAIL_API_KEY
+                },
+                body: JSON.stringify({
+                    templateName: "retailer-email-otp-verification",
+                    to: email,
+                    data: {
+                        otp: otp
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(`External API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+            }
+
+            const result = await response.json();
+            logger.info(`OTP sent to ${email}: ${JSON.stringify(result)}`);
+            return result;
+        } catch (error) {
+            logger.error("Error sending OTP email:", error);
+            throw error;
+        }
+    }
 }
 
 export const emailService = new EmailService();
