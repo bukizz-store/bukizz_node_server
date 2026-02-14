@@ -120,7 +120,6 @@ export class WarehouseRepository {
      */
     async findByRetailerId(retailerId, token) {
         try {
-            console.log("warehouse api called")
             const supabase = this.getClient(token);
 
             const { data: warehouses, error } = await supabase
@@ -132,12 +131,37 @@ export class WarehouseRepository {
         `)
                 .eq("retailer_id", retailerId);
 
-            console.log(retailerId)
-
             if (error) throw error;
 
             // Extract warehouse data from join result
-            return warehouses.map((item) => item.warehouse).filter(Boolean);
+            const warehouseList = warehouses.map((item) => item.warehouse).filter(Boolean);
+
+            // Resolve address IDs to full address data
+            const addressIds = warehouseList
+                .map((w) => w.address)
+                .filter((addr) => addr && typeof addr === "string");
+
+            if (addressIds.length > 0) {
+                const { data: addresses, error: addrError } = await supabase
+                    .from("addresses")
+                    .select("*")
+                    .in("id", addressIds);
+
+                if (!addrError && addresses) {
+                    const addressMap = {};
+                    addresses.forEach((addr) => {
+                        addressMap[addr.id] = addr;
+                    });
+
+                    warehouseList.forEach((w) => {
+                        if (w.address && typeof w.address === "string" && addressMap[w.address]) {
+                            w.address = addressMap[w.address];
+                        }
+                    });
+                }
+            }
+
+            return warehouseList;
         } catch (error) {
             logger.error("Error finding warehouses by retailer ID:", error);
             throw error;
