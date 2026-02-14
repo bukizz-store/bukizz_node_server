@@ -1076,7 +1076,9 @@ export class AuthService {
       // Delete OTP record
       await otpRepository.deleteByEmail(email);
 
-      // Get created user (do NOT generate tokens — account is pending approval)
+      // Generate tokens so retailer can access onboarding routes to submit profile data
+      const tokens = await this.generateTokens(userId);
+
       const { data: newUser } = await this.supabase
         .from("users")
         .select("id, full_name, email, email_verified, phone, is_active, role, deactivation_reason, created_at")
@@ -1086,6 +1088,7 @@ export class AuthService {
       return {
         message: "Retailer registered successfully. Account is pending admin approval.",
         user: newUser,
+        ...tokens,
       };
     } catch (error) {
       logger.error("Verify retailer OTP error:", error);
