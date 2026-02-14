@@ -25,7 +25,9 @@ export const userSchemas = {
   login: Joi.object({
     email: emailSchema,
     password: passwordSchema,
-    loginAs: Joi.string().valid("customer", "retailer", "admin").default("customer"),
+    loginAs: Joi.string()
+      .valid("customer", "retailer", "admin")
+      .default("customer"),
   }),
 
   retailerLogin: Joi.object({
@@ -829,51 +831,42 @@ export const paramSchemas = {
   id: Joi.object({
     id: uuidSchema,
   }),
-
   userId: Joi.object({
     userId: uuidSchema,
   }),
-
   productId: Joi.object({
     productId: uuidSchema,
   }),
-
+  warehouseId: Joi.object({
+    warehouseId: uuidSchema,
+  }),
   orderId: Joi.object({
     orderId: uuidSchema,
   }),
-
   schoolId: Joi.object({
     schoolId: uuidSchema,
   }),
-
   categorySlug: Joi.object({
-    categorySlug: Joi.string().min(1).max(100).required(),
+    categorySlug: Joi.string().required(),
   }),
-
   categoryId: Joi.object({
     categoryId: Joi.string().min(1).max(100).required(),
   }),
-
   brandId: Joi.object({
     brandId: uuidSchema,
   }),
-
   variantId: Joi.object({
     variantId: uuidSchema,
   }),
-
   attributeId: Joi.object({
     attributeId: uuidSchema,
   }),
-
   valueId: Joi.object({
     valueId: uuidSchema,
   }),
-
   imageId: Joi.object({
     imageId: uuidSchema,
   }),
-
   productType: Joi.object({
     productType: Joi.string()
       .valid("bookset", "uniform", "stationary", "general")
@@ -894,7 +887,6 @@ export const paramSchemas = {
   city: Joi.object({
     city: Joi.string().min(1).max(100).required(),
   }),
-
   grade: Joi.object({
     grade: Joi.string()
       .valid(
@@ -916,4 +908,32 @@ export const paramSchemas = {
       )
       .required(),
   }),
+
+  // Combined parameter schemas for routes with multiple parameters
+  idAndBrandId: Joi.object({
+    id: uuidSchema,
+    brandId: uuidSchema,
+  }),
+  idAndImageId: Joi.object({
+    id: uuidSchema,
+    imageId: uuidSchema,
+  }),
 };
+
+/**
+ * Header validation schemas
+ */
+export const headerSchemas = {
+  warehouseHeaders: Joi.object({
+    "x-warehouse-id": uuidSchema,
+  }).unknown(true),
+};
+
+// Add to productSchemas
+productSchemas.warehouseProductQuery = Joi.object({
+  page: Joi.number().integer().min(1).default(1),
+  limit: Joi.number().integer().min(1).max(100).default(20),
+  search: Joi.string().max(255).optional(),
+  categoryId: optionalUuidSchema,
+  status: Joi.string().valid("active", "inactive", "all").default("active"),
+});

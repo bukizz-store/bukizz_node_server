@@ -54,7 +54,11 @@ export function validate(schema, property = "body") {
     }
 
     // Replace request property with sanitized value
-    req[property] = value;
+    if (property === "headers") {
+      req[property] = { ...req[property], ...value };
+    } else {
+      req[property] = value;
+    }
     next();
   };
 }
