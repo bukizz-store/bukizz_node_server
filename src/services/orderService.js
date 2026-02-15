@@ -11,13 +11,15 @@ export class OrderService {
     productRepository,
     userRepository,
     orderEventRepository,
-    orderQueryRepository
+    orderQueryRepository,
+    warehouseRepository
   ) {
     this.orderRepository = orderRepository;
     this.productRepository = productRepository;
     this.userRepository = userRepository;
     this.orderEventRepository = orderEventRepository;
     this.orderQueryRepository = orderQueryRepository;
+    this.warehouseRepository = warehouseRepository;
   }
 
   /**
@@ -251,9 +253,14 @@ export class OrderService {
     return await this.orderRepository.executeTransaction(async (connection) => {
       try {
         // Step 1: Validate and reserve stock for all items atomically
+        // Batch-resolve warehouse IDs for all products in one query
+        const productIds = items.map((item) => item.productId).filter(Boolean);
+        const warehouseMap = await this.warehouseRepository.getWarehouseIdsByProductIds(productIds);
+
         const validatedItems = await this._validateAndReserveStock(
           connection,
-          items
+          items,
+          warehouseMap
         );
 
         // Step 2: Calculate final pricing with current rates
@@ -342,7 +349,7 @@ export class OrderService {
   /**
    * Validate stock availability and reserve stock atomically
    */
-  async _validateAndReserveStock(connection, items) {
+  async _validateAndReserveStock(connection, items, warehouseMap = new Map()) {
     const validatedItems = [];
     const stockErrors = [];
 
@@ -494,7 +501,7 @@ export class OrderService {
               },
             }),
           },
-          retailerId: product.retailer_id,
+          warehouseId: warehouseMap.get(item.productId) || null,
           metadata: {
             stockReservedAt: new Date().toISOString(),
             originalStock: availableStock,
@@ -531,24 +538,24 @@ export class OrderService {
   async _calculateAtomicOrderSummary(connection, validatedItems) {
     let subtotal = 0;
     const itemDetails = [];
-    const retailerGroups = new Map();
+    const warehouseGroups = new Map();
 
     for (const item of validatedItems) {
       subtotal += item.totalPrice;
       itemDetails.push(item);
 
-      // Group by retailer for multi-retailer fee calculation
-      const retailerId = item.retailerId || "default";
-      if (!retailerGroups.has(retailerId)) {
-        retailerGroups.set(retailerId, []);
+      // Group by warehouse for multi-warehouse fee calculation
+      const warehouseId = item.warehouseId || "default";
+      if (!warehouseGroups.has(warehouseId)) {
+        warehouseGroups.set(warehouseId, []);
       }
-      retailerGroups.get(retailerId).push(item);
+      warehouseGroups.get(warehouseId).push(item);
     }
 
     // Calculate fees and taxes with business rules
     const deliveryFee = this._calculateDeliveryFee(
       subtotal,
-      retailerGroups.size
+      warehouseGroups.size
     );
     const platformFee = this._calculatePlatformFee(subtotal);
     const tax = this._calculateTax(subtotal);
@@ -588,7 +595,7 @@ export class OrderService {
       discount: parseFloat(discount.toFixed(2)), // Return product savings for display/analytics
       total: parseFloat(total.toFixed(2)),
       currency: "INR",
-      retailerCount: retailerGroups.size,
+      warehouseCount: warehouseGroups.size,
       savings: parseFloat(discount.toFixed(2)),
     };
   }
@@ -1053,9 +1060,13 @@ export class OrderService {
 
     let subtotal = 0;
     const itemDetails = [];
-    const retailerGroups = new Map();
+    const warehouseGroups = new Map();
 
     try {
+      // Batch-resolve warehouse IDs for all products upfront
+      const productIds = items.map((item) => item.productId).filter(Boolean);
+      const warehouseMap = await this.warehouseRepository.getWarehouseIdsByProductIds(productIds);
+
       for (const item of items) {
         // Validate item structure
         if (!item.productId || !item.quantity || item.quantity <= 0) {
@@ -1122,7 +1133,7 @@ export class OrderService {
           unitPrice: price,
           compareAtPrice,
           totalPrice: itemTotal,
-          retailerId: product.retailerId,
+          warehouseId: warehouseMap.get(item.productId) || null,
           productSnapshot: {
             type: product.productType,
             brand: product.brands?.[0]?.name,
@@ -1132,17 +1143,18 @@ export class OrderService {
 
         itemDetails.push(itemDetail);
 
-        // Group by retailer for potential multi-retailer orders
-        if (!retailerGroups.has(product.retailerId)) {
-          retailerGroups.set(product.retailerId, []);
+        // Group by warehouse for potential multi-warehouse orders
+        const wId = itemDetail.warehouseId || "default";
+        if (!warehouseGroups.has(wId)) {
+          warehouseGroups.set(wId, []);
         }
-        retailerGroups.get(product.retailerId).push(itemDetail);
+        warehouseGroups.get(wId).push(itemDetail);
       }
 
       // Calculate fees and taxes
       const deliveryFee = this._calculateDeliveryFee(
         subtotal,
-        retailerGroups.size
+        warehouseGroups.size
       );
       const platformFee = this._calculatePlatformFee(subtotal);
       const tax = this._calculateTax(subtotal);
@@ -1156,7 +1168,7 @@ export class OrderService {
         tax,
         total,
         currency: "INR",
-        retailerCount: retailerGroups.size,
+        warehouseCount: warehouseGroups.size,
         savings: itemDetails.reduce(
           (sum, item) =>
             sum +
@@ -1180,6 +1192,230 @@ export class OrderService {
       return await this.orderRepository.getStatistics(userId, filters);
     } catch (error) {
       logger.error("Error getting order statistics:", error);
+      throw error;
+    }
+  }
+
+  // ==========================================
+  // RETAILER PORTAL - WAREHOUSE-WISE ORDER APIs
+  // ==========================================
+
+  /**
+   * Get orders for a specific warehouse
+   * Used by retailer portal to view orders warehouse-wise
+   */
+  async getOrdersByWarehouseId(warehouseId, retailerId, filters = {}) {
+    try {
+      if (!warehouseId) {
+        throw new AppError("Warehouse ID is required", 400);
+      }
+
+      // Verify retailer owns this warehouse
+      const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
+      if (!isLinked) {
+        throw new AppError("Access denied. You do not own this warehouse.", 403);
+      }
+
+      const result = await this.orderRepository.getByWarehouseId(warehouseId, filters);
+
+      logger.info("Fetched orders for warehouse", {
+        warehouseId,
+        retailerId,
+        ordersCount: result.orders?.length || 0,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error("Error getting orders by warehouse:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all orders across all warehouses for a retailer
+   * Aggregates orders from all retailer's warehouses
+   */
+  async getRetailerOrders(retailerId, filters = {}) {
+    try {
+      if (!retailerId) {
+        throw new AppError("Retailer ID is required", 400);
+      }
+
+      // Get all warehouse IDs for this retailer
+      const warehouses = await this.warehouseRepository.findByRetailerId(retailerId);
+      const warehouseIds = (warehouses || []).map((w) => w.id);
+
+      if (warehouseIds.length === 0) {
+        logger.info("Retailer has no warehouses", { retailerId });
+        return {
+          orders: [],
+          pagination: {
+            page: 1,
+            limit: parseInt(filters.limit || 20),
+            total: 0,
+            totalPages: 0,
+            hasNext: false,
+            hasPrev: false,
+          },
+          warehouseCount: 0,
+        };
+      }
+
+      const result = await this.orderRepository.getByWarehouseIds(warehouseIds, filters);
+      result.warehouseCount = warehouseIds.length;
+
+      logger.info("Fetched all retailer orders", {
+        retailerId,
+        warehouseCount: warehouseIds.length,
+        ordersCount: result.orders?.length || 0,
+      });
+
+      return result;
+    } catch (error) {
+      logger.error("Error getting retailer orders:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get order statistics for a specific warehouse
+   */
+  async getWarehouseOrderStats(warehouseId, retailerId, filters = {}) {
+    try {
+      if (!warehouseId) {
+        throw new AppError("Warehouse ID is required", 400);
+      }
+
+      // Verify retailer owns this warehouse
+      const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
+      if (!isLinked) {
+        throw new AppError("Access denied. You do not own this warehouse.", 403);
+      }
+
+      const stats = await this.orderRepository.getWarehouseOrderStats(warehouseId, filters);
+
+      logger.info("Fetched warehouse order stats", {
+        warehouseId,
+        retailerId,
+        totalOrders: stats.summary?.totalOrders,
+      });
+
+      return stats;
+    } catch (error) {
+      logger.error("Error getting warehouse order stats:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get aggregated order statistics across all retailer warehouses
+   */
+  async getRetailerOrderStats(retailerId, filters = {}) {
+    try {
+      if (!retailerId) {
+        throw new AppError("Retailer ID is required", 400);
+      }
+
+      // Get all warehouse IDs for this retailer
+      const warehouses = await this.warehouseRepository.findByRetailerId(retailerId);
+      const warehouseIds = (warehouses || []).map((w) => w.id);
+
+      if (warehouseIds.length === 0) {
+        return {
+          summary: { totalOrders: 0, totalRevenue: 0, averageOrderValue: 0, totalItems: 0 },
+          byStatus: {},
+          byPaymentStatus: {},
+          byWarehouse: {},
+          warehouseCount: 0,
+        };
+      }
+
+      // Get stats per warehouse and aggregate
+      const aggregated = {
+        summary: { totalOrders: 0, totalRevenue: 0, averageOrderValue: 0, totalItems: 0 },
+        byStatus: {},
+        byPaymentStatus: {},
+        byWarehouse: {},
+        warehouseCount: warehouseIds.length,
+      };
+
+      for (const warehouse of warehouses) {
+        const warehouseStats = await this.orderRepository.getWarehouseOrderStats(warehouse.id, filters);
+
+        aggregated.summary.totalOrders += warehouseStats.summary.totalOrders;
+        aggregated.summary.totalRevenue += warehouseStats.summary.totalRevenue;
+        aggregated.summary.totalItems += warehouseStats.summary.totalItems;
+
+        // Merge status counts
+        for (const [status, data] of Object.entries(warehouseStats.byStatus)) {
+          if (!aggregated.byStatus[status]) {
+            aggregated.byStatus[status] = { count: 0, revenue: 0 };
+          }
+          aggregated.byStatus[status].count += data.count;
+          aggregated.byStatus[status].revenue += data.revenue || 0;
+        }
+
+        // Merge payment status counts
+        for (const [pStatus, data] of Object.entries(warehouseStats.byPaymentStatus)) {
+          if (!aggregated.byPaymentStatus[pStatus]) {
+            aggregated.byPaymentStatus[pStatus] = { count: 0 };
+          }
+          aggregated.byPaymentStatus[pStatus].count += data.count;
+        }
+
+        // Per-warehouse breakdown
+        aggregated.byWarehouse[warehouse.id] = {
+          name: warehouse.name,
+          ...warehouseStats.summary,
+        };
+      }
+
+      // Calculate overall average
+      if (aggregated.summary.totalOrders > 0) {
+        aggregated.summary.averageOrderValue = parseFloat(
+          (aggregated.summary.totalRevenue / aggregated.summary.totalOrders).toFixed(2)
+        );
+      }
+
+      return aggregated;
+    } catch (error) {
+      logger.error("Error getting retailer order stats:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get a specific order detail for retailer (validates warehouse ownership)
+   */
+  async getRetailerOrderById(orderId, retailerId) {
+    try {
+      const order = await this.orderRepository.findById(orderId);
+      if (!order) {
+        throw new AppError("Order not found", 404);
+      }
+
+      // Check if any order item belongs to retailer's warehouses
+      // Items with NULL warehouse_id belong to the warehouse set on the order itself
+      const warehouses = await this.warehouseRepository.findByRetailerId(retailerId);
+      const warehouseIds = new Set((warehouses || []).map((w) => w.id));
+      const orderWarehouseId = order.warehouseId;
+
+      const isRetailerItem = (item) =>
+        warehouseIds.has(item.warehouseId) ||
+        (!item.warehouseId && warehouseIds.has(orderWarehouseId));
+
+      const hasAccess = order.items?.some(isRetailerItem);
+
+      if (!hasAccess) {
+        throw new AppError("Access denied. This order does not belong to your warehouses.", 403);
+      }
+
+      // Filter items to only show retailer's warehouse items
+      order.items = order.items.filter(isRetailerItem);
+
+      return order;
+    } catch (error) {
+      logger.error("Error getting retailer order by ID:", error);
       throw error;
     }
   }
@@ -1287,15 +1523,15 @@ export class OrderService {
     return transitions[currentStatus]?.includes(newStatus) || false;
   }
 
-  _calculateDeliveryFee(subtotal, retailerCount) {
+  _calculateDeliveryFee(subtotal, warehouseCount) {
     // Free delivery above ₹399 (Frontend Logic)
     // Note: Frontend also has item-specific delivery charges. 
     // Ideally, this service should receive the fully calculated delivery fee or replicate the precise logic.
     // For now, aligning the base logic:
     const baseFee = subtotal >= 399 ? 0 : 50;
-    // Keeping multi-retailer logic if relevant for backend, or setting to 0 if not used in frontend
-    const multiRetailerFee = retailerCount > 1 ? (retailerCount - 1) * 30 : 0;
-    return baseFee + multiRetailerFee;
+    // Multi-warehouse shipping surcharge
+    const multiWarehouseFee = warehouseCount > 1 ? (warehouseCount - 1) * 30 : 0;
+    return baseFee + multiWarehouseFee;
   }
 
   _calculatePlatformFee(subtotal) {

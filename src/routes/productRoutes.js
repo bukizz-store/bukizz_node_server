@@ -58,6 +58,19 @@ export default function productRoutes(dependencies = {}) {
   );
 
   /**
+   * Get low-stock products for a warehouse (Retailer Dashboard)
+   * GET /api/v1/products/warehouse/low-stock
+   * Header: x-warehouse-id
+   * Query: threshold (default 10), outOfStockOnly ("true"/"false")
+   */
+  router.get(
+    "/warehouse/low-stock",
+    authenticateToken,
+    validate(headerSchemas.warehouseHeaders, "headers"),
+    productController.getLowStockProducts,
+  );
+
+  /**
    * Search products by retailer name
    * GET /api/v1/products/retailer-search
    */
@@ -407,6 +420,17 @@ export default function productRoutes(dependencies = {}) {
   );
 
   /**
+   * Bulk update variant stocks
+   * PUT /api/v1/products/variants/bulk-stock-update
+   * NOTE: Must be defined BEFORE /variants/:variantId to avoid param capture
+   */
+  router.put(
+    "/variants/bulk-stock-update",
+    authenticateToken,
+    productController.bulkUpdateVariantStocks,
+  );
+
+  /**
    * Update variant
    * PUT /api/v1/products/variants/:variantId
    */
@@ -438,16 +462,6 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.variantId, "params"),
     productController.updateVariantStock,
-  );
-
-  /**
-   * Bulk update variant stocks
-   * PUT /api/v1/products/variants/bulk-stock-update
-   */
-  router.put(
-    "/variants/bulk-stock-update",
-    authenticateToken,
-    productController.bulkUpdateVariantStocks,
   );
 
   // ============ PRODUCT IMAGE MANAGEMENT ROUTES (Protected) ============

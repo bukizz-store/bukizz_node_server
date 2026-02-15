@@ -6,6 +6,7 @@ import { ProductRepository } from "../repositories/productRepository.js";
 import { UserRepository } from "../repositories/userRepository.js";
 import { OrderEventRepository } from "../repositories/orderEventRepository.js";
 import { OrderQueryRepository } from "../repositories/orderQueryRepository.js";
+import { WarehouseRepository } from "../repositories/warehouseRepository.js";
 import { AppError } from "../middleware/errorHandler.js";
 import { getSupabase } from "../db/index.js";
 
@@ -21,13 +22,15 @@ function getOrderService() {
     const userRepository = new UserRepository(supabase);
     const orderEventRepository = new OrderEventRepository();
     const orderQueryRepository = new OrderQueryRepository();
+    const warehouseRepository = new WarehouseRepository();
 
     orderService = new OrderService(
       orderRepository,
       productRepository,
       userRepository,
       orderEventRepository,
-      orderQueryRepository
+      orderQueryRepository,
+      warehouseRepository
     );
   }
   return orderService;
@@ -348,8 +351,8 @@ export class OrderController {
         });
       }
 
-      // Check authorization (user can only see their own orders unless admin)
-      if (userRole !== "admin" && order.userId !== userId) {
+      // Check authorization (user can only see their own orders unless admin/retailer)
+      if (userRole !== "admin" && userRole !== "retailer" && order.userId !== userId) {
         logger.warn("Unauthorized order access attempt", {
           userId,
           requestedOrderId: orderId,

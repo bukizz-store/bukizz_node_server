@@ -310,6 +310,14 @@ export class ProductRepository {
           ),
           product_images(
             id, url, alt_text, sort_order, is_primary
+          ),
+          product_variants(
+            id, sku, price, compare_at_price, stock, weight,
+            option_value_1, option_value_2, option_value_3,
+            metadata, created_at, updated_at,
+            option_value_1_ref:product_option_values!option_value_1(id, value, price_modifier, image_url, product_option_attributes(id, name, position)),
+            option_value_2_ref:product_option_values!option_value_2(id, value, price_modifier, image_url, product_option_attributes(id, name, position)),
+            option_value_3_ref:product_option_values!option_value_3(id, value, price_modifier, image_url, product_option_attributes(id, name, position))
           )
         )
       `,
@@ -384,6 +392,126 @@ export class ProductRepository {
       };
     } catch (error) {
       logger.error("Error getting products by warehouse ID:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get low-stock products for a warehouse
+   * Fetches products whose variants have stock at or below the given threshold
+   */
+  async getLowStockProducts(warehouseId, threshold = 10, filters = {}) {
+    try {
+      const supabase = getSupabase();
+
+      // Step 1: Get all product IDs for this warehouse
+      const { data: warehouseProducts, error: wpError } = await supabase
+        .from("products_warehouse")
+        .select("product_id")
+        .eq("warehouse_id", warehouseId);
+
+      if (wpError) throw wpError;
+      if (!warehouseProducts || warehouseProducts.length === 0) {
+        return { products: [], summary: { totalProducts: 0, totalLowStockVariants: 0 } };
+      }
+
+      const productIds = warehouseProducts.map((wp) => wp.product_id);
+
+      // Step 2: Fetch variants with stock <= threshold for these products
+      let variantQuery = supabase
+        .from("product_variants")
+        .select(
+          `
+          *,
+          products!inner(
+            id, title, sku, base_price, product_type, is_active, image_url,
+            product_brands(brands(id, name, slug)),
+            product_categories(categories(id, name, slug)),
+            product_images(id, url, alt_text, sort_order, is_primary)
+          ),
+          option_value_1_ref:product_option_values!option_value_1(id, value, price_modifier, image_url, product_option_attributes(id, name, position)),
+          option_value_2_ref:product_option_values!option_value_2(id, value, price_modifier, image_url, product_option_attributes(id, name, position)),
+          option_value_3_ref:product_option_values!option_value_3(id, value, price_modifier, image_url, product_option_attributes(id, name, position))
+        `
+        )
+        .in("product_id", productIds)
+        .lte("stock", threshold)
+        .eq("products.is_deleted", false);
+
+      // Optional: filter only out-of-stock
+      if (filters.outOfStockOnly === "true") {
+        variantQuery = variantQuery.eq("stock", 0);
+      }
+
+      variantQuery = variantQuery.order("stock", { ascending: true });
+
+      const { data: variants, error: vError } = await variantQuery;
+
+      if (vError) throw vError;
+
+      // Step 3: Group variants by product
+      const productMap = new Map();
+      (variants || []).forEach((v) => {
+        const productId = v.product_id;
+        if (!productMap.has(productId)) {
+          const product = v.products;
+          const primaryImage =
+            product.product_images?.find((img) => img.is_primary) ||
+            product.product_images?.[0] ||
+            null;
+          productMap.set(productId, {
+            id: product.id,
+            title: product.title,
+            sku: product.sku,
+            basePrice: parseFloat(product.base_price),
+            productType: product.product_type,
+            isActive: Boolean(product.is_active),
+            categories: product.product_categories?.map((pc) => pc.categories) || [],
+            brands: product.product_brands?.map((pb) => pb.brands) || [],
+            primaryImage: primaryImage
+              ? { id: primaryImage.id, url: primaryImage.url, altText: primaryImage.alt_text, isPrimary: primaryImage.is_primary }
+              : null,
+            lowStockVariants: [],
+          });
+        }
+
+        productMap.get(productId).lowStockVariants.push({
+          id: v.id,
+          sku: v.sku,
+          price: parseFloat(v.price || 0),
+          compareAtPrice: v.compare_at_price ? parseFloat(v.compare_at_price) : null,
+          stock: parseInt(v.stock || 0),
+          weight: v.weight ? parseFloat(v.weight) : null,
+          optionValues: {
+            value1: v.option_value_1_ref
+              ? { ...v.option_value_1_ref, attributeName: v.option_value_1_ref.product_option_attributes?.name }
+              : null,
+            value2: v.option_value_2_ref
+              ? { ...v.option_value_2_ref, attributeName: v.option_value_2_ref.product_option_attributes?.name }
+              : null,
+            value3: v.option_value_3_ref
+              ? { ...v.option_value_3_ref, attributeName: v.option_value_3_ref.product_option_attributes?.name }
+              : null,
+          },
+          metadata: v.metadata || {},
+          createdAt: v.created_at,
+          updatedAt: v.updated_at,
+        });
+      });
+
+      const products = Array.from(productMap.values());
+
+      return {
+        products,
+        summary: {
+          totalProducts: products.length,
+          totalLowStockVariants: (variants || []).length,
+          outOfStockVariants: (variants || []).filter((v) => parseInt(v.stock) === 0).length,
+          threshold,
+        },
+      };
+    } catch (error) {
+      logger.error("Error getting low stock products:", error);
       throw error;
     }
   }
@@ -1001,6 +1129,51 @@ export class ProductRepository {
             isPrimary: img.is_primary,
           }))
         : [],
+      // Include variants if present (from warehouse product queries)
+      ...(row.product_variants
+        ? {
+            variants: row.product_variants.map((v) => ({
+              id: v.id,
+              sku: v.sku,
+              price: parseFloat(v.price || 0),
+              compareAtPrice: v.compare_at_price
+                ? parseFloat(v.compare_at_price)
+                : null,
+              stock: parseInt(v.stock || 0),
+              weight: v.weight ? parseFloat(v.weight) : null,
+              optionValues: {
+                value1: v.option_value_1_ref
+                  ? {
+                      ...v.option_value_1_ref,
+                      attributeName:
+                        v.option_value_1_ref.product_option_attributes?.name,
+                    }
+                  : null,
+                value2: v.option_value_2_ref
+                  ? {
+                      ...v.option_value_2_ref,
+                      attributeName:
+                        v.option_value_2_ref.product_option_attributes?.name,
+                    }
+                  : null,
+                value3: v.option_value_3_ref
+                  ? {
+                      ...v.option_value_3_ref,
+                      attributeName:
+                        v.option_value_3_ref.product_option_attributes?.name,
+                    }
+                  : null,
+              },
+              metadata: v.metadata || {},
+              createdAt: v.created_at,
+              updatedAt: v.updated_at,
+            })),
+            totalStock: row.product_variants.reduce(
+              (sum, v) => sum + parseInt(v.stock || 0),
+              0,
+            ),
+          }
+        : {}),
     };
   }
 

@@ -371,14 +371,16 @@ export class PaymentController {
                 const { ProductRepository } = await import("../repositories/productRepository.js");
                 const { UserRepository } = await import("../repositories/userRepository.js");
                 const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
+                const { WarehouseRepository } = await import("../repositories/warehouseRepository.js");
 
                 // We can reuse the getOrderService() logic if it was exported or just new it up
                 const orderRepo = new OrderRepository(this.supabase);
                 const prodRepo = new ProductRepository(); // Assuming it doesn't need supabase or handles it internally
                 const userRepo = new UserRepository(this.supabase);
                 const eventRepo = new OrderEventRepository();
+                const warehouseRepo = new WarehouseRepository();
 
-                const orderService = new OrderService(orderRepo, prodRepo, userRepo, eventRepo, null);
+                const orderService = new OrderService(orderRepo, prodRepo, userRepo, eventRepo, null, warehouseRepo);
 
                 // Check order status first
                 const order = await orderRepo.findById(orderId);

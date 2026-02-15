@@ -4,6 +4,7 @@ import { SchoolRepository } from "../repositories/schoolRepository.js";
 import { OrderRepository } from "../repositories/orderRepository.js";
 import { OrderEventRepository } from "../repositories/orderEventRepository.js";
 import { OrderQueryRepository } from "../repositories/orderQueryRepository.js";
+import { WarehouseRepository } from "../repositories/warehouseRepository.js";
 import { UserService } from "../services/userService.js";
 import { AuthService } from "../services/authService.js";
 import { ProductService } from "../services/productService.js";
@@ -40,6 +41,8 @@ export function createDependencies(overrides = {}) {
     overrides.orderEventRepository || new OrderEventRepository(db);
   const orderQueryRepository =
     overrides.orderQueryRepository || new OrderQueryRepository(db);
+  const warehouseRepository =
+    overrides.warehouseRepository || new WarehouseRepository();
 
   // Services (Business Logic Layer)
   const userService = overrides.userService || new UserService(userRepository);
@@ -55,7 +58,8 @@ export function createDependencies(overrides = {}) {
       productRepository,
       userRepository,
       orderEventRepository,
-      orderQueryRepository
+      orderQueryRepository,
+      warehouseRepository
     );
 
   // Controllers (Request Handling Layer)

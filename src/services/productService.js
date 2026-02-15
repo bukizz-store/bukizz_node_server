@@ -1308,7 +1308,7 @@ export class ProductService {
         throw new AppError("Product not found", 404);
       }
 
-      return await this.productRepository.findById(productId);
+      return await this.productVariantRepository.findByProductId(productId);
     } catch (error) {
       logger.error("Error getting product variants:", error);
       throw error;

@@ -163,6 +163,37 @@ export class ProductController {
   });
 
   /**
+   * Get low-stock products for a warehouse
+   * GET /api/v1/products/warehouse/low-stock
+   * Header: x-warehouse-id
+   * Query: threshold (default 10), outOfStockOnly ("true"/"false")
+   */
+  getLowStockProducts = asyncHandler(async (req, res) => {
+    const warehouseId = req.headers["x-warehouse-id"];
+
+    if (!warehouseId) {
+      return res.status(400).json({
+        success: false,
+        message: "Warehouse ID header (x-warehouse-id) is required",
+      });
+    }
+
+    const { threshold = 10, outOfStockOnly } = req.query;
+
+    const result = await this.productService.getLowStockProducts(
+      warehouseId,
+      threshold,
+      { outOfStockOnly },
+    );
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Low stock products retrieved successfully",
+    });
+  });
+
+  /**
    * Admin Search Products (Flexible filtering)
    * GET /api/products/admin/search
    */

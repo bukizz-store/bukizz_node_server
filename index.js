@@ -90,7 +90,7 @@ async function startServer() {
       productOptionRepository
     );
     const schoolService = new SchoolService(schoolRepository);
-    const orderService = new OrderService();
+    const orderService = new OrderService(); // Lazy-initialized via getOrderService() in controller
     const userService = new UserService(userRepository);
     const authService = new AuthService();
 
