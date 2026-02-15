@@ -1210,8 +1210,12 @@ export class OrderService {
         throw new AppError("Warehouse ID is required", 400);
       }
 
+      // Debug log: IDs being checked
+      logger.info("Checking warehouse ownership", { retailerId, warehouseId });
+
       // Verify retailer owns this warehouse
       const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
+      logger.info("isLinkedToRetailer result", { isLinked, retailerId, warehouseId });
       if (!isLinked) {
         throw new AppError("Access denied. You do not own this warehouse.", 403);
       }

@@ -303,12 +303,17 @@ export class WarehouseRepository {
         try {
             const supabase = getSupabase();
 
-            const { data } = await supabase
+            logger.info("isLinkedToRetailer: checking", { retailerId, warehouseId });
+
+
+            const { data, error } = await supabase
                 .from("retailer_warehouse")
-                .select("id")
+                .select("retailer_id,warehouse_id")
                 .eq("retailer_id", retailerId)
                 .eq("warehouse_id", warehouseId)
                 .single();
+
+            logger.info("isLinkedToRetailer: query result", { data, error });
 
             return !!data;
         } catch (error) {
