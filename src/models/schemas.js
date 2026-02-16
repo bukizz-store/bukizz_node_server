@@ -54,6 +54,11 @@ export const userSchemas = {
     otp: Joi.string().length(6).required(),
   }),
 
+  pendingRetailersQuery: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(20),
+  }),
+
   verifyRetailer: Joi.object({
     retailerId: uuidSchema,
     action: Joi.string().valid("authorize", "deauthorize").required(),
