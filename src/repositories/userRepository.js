@@ -642,7 +642,7 @@ export class UserRepository {
     try {
       const { data, error } = await this.supabase
         .from("users")
-        .update({ is_active: true })
+        .update({ is_active: true , deactivation_reason : "authorized"})
         .eq("id", userId)
         .eq("role", "retailer") // Ensure we are approving a retailer
         .select()
