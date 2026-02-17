@@ -116,7 +116,7 @@ export class UserRepository {
         .update({
           otp: otp,
           otp_created_at: new Date().toISOString(),
-          is_verified: false // Reset verification status when new OTP is generated
+          is_verified: false, // Reset verification status when new OTP is generated
         })
         .eq("id", userId);
 
@@ -138,7 +138,7 @@ export class UserRepository {
         .update({
           is_verified: true,
           otp: null, // Clear OTP after successful verification
-          otp_created_at: null
+          otp_created_at: null,
         })
         .eq("id", userId);
 
@@ -257,7 +257,9 @@ export class UserRepository {
       // Combine line2 and landmark if present, as landmark might not be a separate column
       let line2 = addressData.line2 || "";
       if (addressData.landmark) {
-        line2 = line2 ? `${line2}, Near ${addressData.landmark}` : `Near ${addressData.landmark}`;
+        line2 = line2
+          ? `${line2}, Near ${addressData.landmark}`
+          : `Near ${addressData.landmark}`;
       }
 
       const { data, error } = await this.supabase
@@ -316,15 +318,17 @@ export class UserRepository {
       // Handle line2 and landmark logic to match addAddress
       if (updateData.line2 !== undefined || updateData.landmark !== undefined) {
         let line2 = updateData.line2;
-        // If line2 is not provided in update, we might need to fetch it? 
+        // If line2 is not provided in update, we might need to fetch it?
         // But usually form sends full data. If line2 is undefined, we assume we leave it alone?
-        // But if landmark is provided, we need to merge. 
+        // But if landmark is provided, we need to merge.
         // For safety, if line2 is provided, we use it. If not, and landmark is provided, we might append?
         // Simpler approach: If line2 is passed, use it. If landmark is passed, append to line2.
 
         if (line2 !== undefined) {
           if (updateData.landmark) {
-            line2 = line2 ? `${line2}, Near ${updateData.landmark}` : `Near ${updateData.landmark}`;
+            line2 = line2
+              ? `${line2}, Near ${updateData.landmark}`
+              : `Near ${updateData.landmark}`;
           }
           dbUpdateData.line2 = line2;
         } else if (updateData.landmark) {
@@ -363,7 +367,11 @@ export class UserRepository {
       // If setting as default, unset others first
       if (updateData.isDefault) {
         // Get the user ID for this address first (could be optimized if passed in)
-        const { data: addr } = await this.supabase.from("addresses").select("user_id").eq("id", addressId).single();
+        const { data: addr } = await this.supabase
+          .from("addresses")
+          .select("user_id")
+          .eq("id", addressId)
+          .single();
         if (addr) {
           await this.supabase
             .from("addresses")
@@ -478,7 +486,7 @@ export class UserRepository {
       // Get order statistics
       const { data: orderStats, error: orderError } = await this.supabase.rpc(
         "get_user_order_stats",
-        { p_user_id: userId }
+        { p_user_id: userId },
       );
 
       if (orderError && orderError.code !== "PGRST202") {
@@ -590,6 +598,66 @@ export class UserRepository {
   }
 
   /**
+   * Get pending retailers
+   */
+  async getPendingRetailers(pagination) {
+    try {
+      const page = pagination.page || 1;
+      const limit = pagination.limit || 20;
+      const offset = (page - 1) * limit;
+
+      // Note: 'is_active' is false for pending retailers, and 'role' is 'retailer'
+      const { data, error, count } = await this.supabase
+        .from("users")
+        .select(
+          "id, full_name, email, phone, role, is_active, created_at, city, state, school_id",
+          { count: "exact" },
+        )
+        .eq("role", "retailer")
+        .eq("is_active", false)
+        .range(offset, offset + limit - 1)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      return {
+        users: (data || []).map((user) => this.formatUser(user)),
+        pagination: {
+          page,
+          limit,
+          total: count || 0,
+          totalPages: Math.ceil((count || 0) / limit),
+        },
+      };
+    } catch (error) {
+      logger.error("Error getting pending retailers:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Approve retailer
+   */
+  async approveRetailer(userId) {
+    try {
+      const { data, error } = await this.supabase
+        .from("users")
+        .update({ is_active: true })
+        .eq("id", userId)
+        .eq("role", "retailer") // Ensure we are approving a retailer
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return this.formatUser(data);
+    } catch (error) {
+      logger.error("Error approving retailer:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Search users
    */
   async search(filters) {
@@ -597,7 +665,8 @@ export class UserRepository {
       let query = this.supabase
         .from("users")
         .select(
-          "id, full_name, email, phone, role, is_active, email_verified, phone_verified, created_at, last_login_at, city, state, school_id"
+          "id, full_name, email, phone, role, is_active, email_verified, phone_verified, created_at, last_login_at, city, state, school_id",
+          { count: "exact" }, // Request count for pagination
         )
         .eq("is_active", true);
 
@@ -612,7 +681,7 @@ export class UserRepository {
 
       if (filters.search) {
         query = query.or(
-          `full_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%`
+          `full_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%`,
         );
       }
 

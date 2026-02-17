@@ -43,7 +43,7 @@ export class UserService {
       // Validate email uniqueness if being updated
       if (updateData.email && updateData.email !== user.email) {
         const existingUser = await this.userRepository.findByEmail(
-          updateData.email
+          updateData.email,
         );
         if (existingUser && existingUser.id !== userId) {
           throw new AppError("Email address is already in use", 409);
@@ -56,7 +56,7 @@ export class UserService {
       // Validate phone uniqueness if being updated
       if (updateData.phone && updateData.phone !== user.phone) {
         const existingUser = await this.userRepository.findByPhone(
-          updateData.phone
+          updateData.phone,
         );
         if (existingUser && existingUser.id !== userId) {
           throw new AppError("Phone number is already in use", 409);
@@ -87,7 +87,7 @@ export class UserService {
         if (!validGenders.includes(updateData.gender)) {
           throw new AppError(
             `Invalid gender. Must be one of: ${validGenders.join(", ")}`,
-            400
+            400,
           );
         }
       }
@@ -98,6 +98,58 @@ export class UserService {
       return this._sanitizeUser(updatedUser);
     } catch (error) {
       logger.error("Error updating user profile:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get pending retailers
+   */
+  async getPendingRetailers(queryParams) {
+    try {
+      // Validate pagination
+      const page = Math.max(1, parseInt(queryParams.page) || 1);
+      const limit = Math.min(
+        100,
+        Math.max(1, parseInt(queryParams.limit) || 20),
+      );
+
+      return await this.userRepository.getPendingRetailers({
+        page,
+        limit,
+      });
+    } catch (error) {
+      logger.error("Error getting pending retailers:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Approve retailer status
+   */
+  async approveRetailerStatus(userId, adminUserId) {
+    try {
+      // Check if user exists (even if inactive)
+      const { data: user, error } = await this.userRepository.supabase
+        .from("users")
+        .select("id, role")
+        .eq("id", userId)
+        .single();
+
+      if (error || !user) {
+        throw new AppError("User not found", 404);
+      }
+
+      if (user.role !== "retailer") {
+        throw new AppError("User is not a retailer", 400);
+      }
+
+      const approvedUser = await this.userRepository.approveRetailer(userId);
+
+      logger.info(`Retailer approved: ${userId} by admin ${adminUserId}`);
+      return this._sanitizeUser(approvedUser);
+    } catch (error) {
+      logger.error("Error approving retailer:", error);
       throw error;
     }
   }
@@ -132,7 +184,7 @@ export class UserService {
       // Log the received data for debugging
       console.log(
         "Received addressData:",
-        JSON.stringify(addressData, null, 2)
+        JSON.stringify(addressData, null, 2),
       );
 
       // Validate required fields with better error handling
@@ -163,7 +215,7 @@ export class UserService {
       if (!validLabels.includes(addressData.label)) {
         throw new AppError(
           `Invalid address label. Must be one of: ${validLabels.join(", ")}`,
-          400
+          400,
         );
       }
 
@@ -212,7 +264,7 @@ export class UserService {
         if (!validTypes.includes(updateData.type)) {
           throw new AppError(
             `Invalid address type. Must be one of: ${validTypes.join(", ")}`,
-            400
+            400,
           );
         }
       }
@@ -224,7 +276,7 @@ export class UserService {
 
       const updatedAddress = await this.userRepository.updateAddress(
         addressId,
-        updateData
+        updateData,
       );
 
       logger.info(`Address updated: ${addressId} for user: ${userId}`);
@@ -298,7 +350,7 @@ export class UserService {
         ];
 
         for (const [type, enabled] of Object.entries(
-          preferences.notifications
+          preferences.notifications,
         )) {
           if (!validNotificationTypes.includes(type)) {
             throw new AppError(`Invalid notification type: ${type}`, 400);
@@ -306,7 +358,7 @@ export class UserService {
           if (typeof enabled !== "boolean") {
             throw new AppError(
               `Notification preference must be boolean: ${type}`,
-              400
+              400,
             );
           }
         }
@@ -329,7 +381,7 @@ export class UserService {
 
       const updatedPreferences = await this.userRepository.updatePreferences(
         userId,
-        preferences
+        preferences,
       );
 
       logger.info(`Preferences updated for user: ${userId}`);
@@ -359,7 +411,7 @@ export class UserService {
       if (pendingOrders.length > 0) {
         throw new AppError(
           "Cannot deactivate account with pending orders. Please cancel or complete them first.",
-          400
+          400,
         );
       }
 
@@ -421,7 +473,7 @@ export class UserService {
       await emailService.sendVerificationEmail(
         user.email,
         token,
-        user.fullName.split(" ")[0]
+        user.fullName.split(" ")[0],
       );
 
       logger.info(`Verification email sent to user: ${userId}`);
@@ -438,10 +490,7 @@ export class UserService {
   async confirmEmailVerification(token) {
     try {
       // Hash token to look up
-      const tokenHash = crypto
-        .createHash("sha256")
-        .update(token)
-        .digest("hex");
+      const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
 
       const user = await this.userRepository.findByVerificationToken(tokenHash);
       if (!user) {
@@ -525,7 +574,7 @@ export class UserService {
         if (!validRoles.includes(filters.role)) {
           throw new AppError(
             `Invalid role filter. Must be one of: ${validRoles.join(", ")}`,
-            400
+            400,
           );
         }
       }
@@ -556,7 +605,7 @@ export class UserService {
       if (!validRoles.includes(newRole)) {
         throw new AppError(
           `Invalid role. Must be one of: ${validRoles.join(", ")}`,
-          400
+          400,
         );
       }
 
@@ -578,7 +627,7 @@ export class UserService {
           targetUserId: userId,
           oldRole: user.role,
           newRole,
-        }
+        },
       );
 
       return { message: `User role updated to ${newRole}` };
@@ -600,7 +649,9 @@ export class UserService {
 
       // Check for email uniqueness if changed
       if (updateData.email && updateData.email !== user.email) {
-        const existingUser = await this.userRepository.findByEmail(updateData.email);
+        const existingUser = await this.userRepository.findByEmail(
+          updateData.email,
+        );
         if (existingUser && existingUser.id !== userId) {
           throw new AppError("Email address is already in use", 409);
         }
@@ -608,7 +659,9 @@ export class UserService {
 
       // Check for phone uniqueness if changed
       if (updateData.phone && updateData.phone !== user.phone) {
-        const existingUser = await this.userRepository.findByPhone(updateData.phone);
+        const existingUser = await this.userRepository.findByPhone(
+          updateData.phone,
+        );
         if (existingUser && existingUser.id !== userId) {
           throw new AppError("Phone number is already in use", 409);
         }
@@ -620,7 +673,7 @@ export class UserService {
         if (!validRoles.includes(updateData.role)) {
           throw new AppError(
             `Invalid role. Must be one of: ${validRoles.join(", ")}`,
-            400
+            400,
           );
         }
       }
@@ -643,7 +696,10 @@ export class UserService {
       if (updateData.gender) {
         const validGenders = ["male", "female", "other", "prefer_not_to_say"];
         if (!validGenders.includes(updateData.gender)) {
-          throw new AppError(`Invalid gender. Must be one of: ${validGenders.join(", ")}`, 400);
+          throw new AppError(
+            `Invalid gender. Must be one of: ${validGenders.join(", ")}`,
+            400,
+          );
         }
       }
 
@@ -652,7 +708,7 @@ export class UserService {
       logger.info(`User updated by admin ${adminUserId}: ${userId}`, {
         adminUserId,
         targetUserId: userId,
-        updates: Object.keys(updateData)
+        updates: Object.keys(updateData),
       });
 
       return this._sanitizeUser(updatedUser);

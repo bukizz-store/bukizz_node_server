@@ -85,7 +85,7 @@ export class UserController {
     const address = await this.userService.updateAddress(
       userId,
       addressId,
-      req.body
+      req.body,
     );
 
     logger.info("User address updated", { userId, addressId });
@@ -138,7 +138,7 @@ export class UserController {
     const userId = req.user.userId;
     const preferences = await this.userService.updatePreferences(
       userId,
-      req.body
+      req.body,
     );
 
     logger.info("User preferences updated", { userId });
@@ -307,7 +307,7 @@ export class UserController {
     const user = await this.userService.updateUserByAdmin(
       userId,
       updateData,
-      adminUserId
+      adminUserId,
     );
 
     res.json({
@@ -329,7 +329,7 @@ export class UserController {
     const result = await this.userService.updateUserRole(
       userId,
       role,
-      adminUserId
+      adminUserId,
     );
 
     logger.info("User role updated", {
@@ -373,7 +373,7 @@ export class UserController {
             await this.userService.updateUserRole(
               userId,
               data.role,
-              adminUserId
+              adminUserId,
             );
             break;
           case "deactivate":
@@ -417,6 +417,40 @@ export class UserController {
         },
       },
       message: "Bulk user update completed",
+    });
+  });
+
+  /**
+   * Get pending retailers list (admin only)
+   * GET /api/users/admin/retailers/pending
+   */
+  getPendingRetailersList = asyncHandler(async (req, res) => {
+    const result = await this.userService.getPendingRetailers(req.query);
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Pending retailers retrieved successfully",
+    });
+  });
+
+  /**
+   * Approve retailer account (admin only)
+   * PATCH /api/users/admin/retailers/:userId/approve
+   */
+  approveRetailerAccount = asyncHandler(async (req, res) => {
+    const { userId } = req.params;
+    const adminUserId = req.user.id;
+
+    const user = await this.userService.approveRetailerStatus(
+      userId,
+      adminUserId,
+    );
+
+    res.json({
+      success: true,
+      data: { user },
+      message: "Retailer approved successfully",
     });
   });
 

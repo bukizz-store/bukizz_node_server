@@ -2,6 +2,7 @@ import express from "express";
 import {
   authenticateToken,
   requireOwnership,
+  requireRoles,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import {
@@ -38,7 +39,7 @@ export default function userRoutes(dependencies = {}) {
   router.put(
     "/profile",
     validate(userSchemas.updateProfile),
-    userController.updateProfile
+    userController.updateProfile,
   );
 
   // Address management routes
@@ -46,12 +47,12 @@ export default function userRoutes(dependencies = {}) {
   router.post(
     "/addresses",
     validate(addressSchemas.create),
-    userController.addAddress
+    userController.addAddress,
   );
   router.put(
     "/addresses/:addressId",
     validate(addressSchemas.update),
-    userController.updateAddress
+    userController.updateAddress,
   );
   router.delete("/addresses/:addressId", userController.deleteAddress);
 
@@ -73,22 +74,39 @@ export default function userRoutes(dependencies = {}) {
   router.get(
     "/admin/:userId",
     validate(paramSchemas.userId, "params"),
-    userController.getUserById
+    userController.getUserById,
   );
   router.put(
     "/admin/:userId",
     validate(paramSchemas.userId, "params"),
-    userController.updateUserByAdmin
+    userController.updateUserByAdmin,
   );
   router.put(
     "/admin/:userId/role",
     validate(paramSchemas.userId, "params"),
-    userController.updateUserRole
+    userController.updateUserRole,
   );
   router.post(
     "/admin/:userId/reactivate",
     validate(paramSchemas.userId, "params"),
-    userController.reactivateAccount
+    userController.reactivateAccount,
+  );
+
+  /**
+   * Retailer Approval Routes (Admin only)
+   */
+  router.get(
+    "/admin/retailers/pending",
+    requireRoles("admin"),
+    validate(userSchemas.pendingRetailersQuery, "query"),
+    userController.getPendingRetailersList,
+  );
+
+  router.patch(
+    "/admin/retailers/:userId/approve",
+    requireRoles("admin"),
+    validate(paramSchemas.userId, "params"),
+    userController.approveRetailerAccount,
   );
 
   return router;

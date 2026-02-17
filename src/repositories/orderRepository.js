@@ -308,7 +308,7 @@ export class OrderRepository {
           totalRevenue:
             orders?.reduce(
               (sum, order) => sum + parseFloat(order.total_amount || 0),
-              0
+              0,
             ) || 0,
           averageOrderValue: 0,
           uniqueCustomers:
@@ -342,7 +342,7 @@ export class OrderRepository {
         }
         stats.byPaymentMethod[method].count++;
         stats.byPaymentMethod[method].revenue += parseFloat(
-          order.total_amount || 0
+          order.total_amount || 0,
         );
       });
 
@@ -407,12 +407,21 @@ export class OrderRepository {
       const offset = (page - 1) * limit;
 
       // Valid order statuses from the database enum
-      const validOrderStatuses = ["initialized", "processed", "shipped", "out_for_delivery", "delivered", "cancelled", "refunded"];
+      const validOrderStatuses = [
+        "initialized",
+        "processed",
+        "shipped",
+        "out_for_delivery",
+        "delivered",
+        "cancelled",
+        "refunded",
+      ];
 
-      let query = this.supabase.from("orders").select("*");
+      let query = this.supabase.from("orders").select("*", { count: "exact" });
 
       // Apply filters - validate status against enum values
-      if (status && validOrderStatuses.includes(status)) query = query.eq("status", status);
+      if (status && validOrderStatuses.includes(status))
+        query = query.eq("status", status);
       if (userId) query = query.eq("user_id", userId);
       if (paymentStatus) query = query.eq("payment_status", paymentStatus);
       if (startDate) query = query.gte("created_at", startDate);
@@ -420,7 +429,7 @@ export class OrderRepository {
 
       if (searchTerm) {
         query = query.or(
-          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`
+          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`,
         );
       }
 
@@ -513,13 +522,20 @@ export class OrderRepository {
       const offset = (page - 1) * limit;
 
       // Valid order statuses from the database enum
-      const validOrderStatuses = ["initialized", "processed", "shipped", "out_for_delivery", "delivered", "cancelled", "refunded"];
+      const validOrderStatuses = [
+        "initialized",
+        "processed",
+        "shipped",
+        "out_for_delivery",
+        "delivered",
+        "cancelled",
+        "refunded",
+      ];
 
       let query = this.supabase
         .from("orders")
         .select("*")
         .eq("user_id", userId);
-
 
       // Only apply status filter if it's a valid enum value
       if (status && validOrderStatuses.includes(status)) {
@@ -784,7 +800,7 @@ export class OrderRepository {
           `
           *,
           users!changed_by(full_name)
-        `
+        `,
         )
         .eq("order_id", orderId)
         .order("created_at", { ascending: true });
