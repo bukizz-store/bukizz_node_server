@@ -643,6 +643,7 @@ export class SchoolRepository {
           base_price,
           currency,
           product_type,
+          metadata,
           is_active,
           created_at,
           updated_at
@@ -742,6 +743,7 @@ export class SchoolRepository {
           base_price: Number(prod.base_price ?? 0),
           currency: prod.currency ?? "INR",
           product_type: prod.product_type ?? null,
+          metadata: prod.metadata || null,
           primary_image: prod.image_url ?? null,
           variants: [],
           min_price: null,
@@ -945,6 +947,7 @@ export class SchoolRepository {
           product_type: p.product_type,
           base_price: p.base_price,
           currency: p.currency,
+          metadata: p.metadata,
           mandatory_for_school: !!row.mandatory,
           primary_image: primaryImage,
           categories: categoriesMap.get(pid) || [],
