@@ -83,8 +83,8 @@ export const userSchemas = {
   }),
 
   resetPassword: Joi.object({
-    token: Joi.string().required(),
-    password: passwordSchema,
+    resetToken: Joi.string().required(),
+    newPassword: passwordSchema,
   }),
 
   refreshToken: Joi.object({

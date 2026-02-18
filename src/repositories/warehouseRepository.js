@@ -321,6 +321,44 @@ export class WarehouseRepository {
             throw error;
         }
     }
+    /**
+     * Get Map of Product ID to Warehouse ID
+     * Used for order routing and splitting
+     */
+    async getWarehouseIdsByProductIds(productIds) {
+        try {
+            if (!productIds || productIds.length === 0) return new Map();
+
+            const supabase = getSupabase();
+
+            // Query products_warehouse to get mapping
+            // Note: A product might be in multiple warehouses. 
+            // For now, we'll pick the first one found or based on some logic.
+            // The current requirement seems to be just getting *a* warehouse for the product.
+            const { data, error } = await supabase
+                .from("products_warehouse")
+                .select("product_id, warehouse_id")
+                .in("product_id", productIds);
+
+            if (error) throw error;
+
+            const warehouseMap = new Map();
+
+            if (data) {
+                // Populate map. If a product has multiple warehouses, this simply takes the last one seen.
+                // TODO: Implement smarter warehouse selection logic (e.g., closest to user, highest stock)
+                data.forEach(item => {
+                    warehouseMap.set(item.product_id, item.warehouse_id);
+                });
+            }
+
+            return warehouseMap;
+        } catch (error) {
+            logger.error("Error getting warehouse IDs by product IDs:", error);
+            // Don't throw, just return empty map to allow default warehouse fallback if applicable
+            return new Map();
+        }
+    }
 }
 
 export default new WarehouseRepository();

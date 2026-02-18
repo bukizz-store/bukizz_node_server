@@ -109,6 +109,40 @@ class EmailService {
             throw error;
         }
     }
+
+    async sendForgotPasswordEmail(email, resetToken, firstName) {
+        const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/reset-password?token=${resetToken}`;
+
+        try {
+            const response = await fetch("https://services.theerrors.in/api/services/email/send", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": process.env.OTP_EMAIL_API_KEY
+                },
+                body: JSON.stringify({
+                    templateName: "forgot-password",
+                    to: email,
+                    data: {
+                        resetUrl: resetUrl,
+                        firstName: firstName || "User"
+                    }
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(`External API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+            }
+
+            const result = await response.json();
+            logger.info(`Forgot password email sent to ${email}: ${JSON.stringify(result)}`);
+            return result;
+        } catch (error) {
+            logger.error("Error sending forgot password email:", error);
+            throw error;
+        }
+    }
 }
 
 export const emailService = new EmailService();

@@ -631,7 +631,7 @@ export class AuthService {
       // Check if user exists
       const { data: users, error } = await this.supabase
         .from("users")
-        .select("id")
+        .select("id, full_name")
         .eq("email", email)
         .eq("is_active", true);
 
@@ -641,6 +641,7 @@ export class AuthService {
       }
 
       const userId = users[0].id;
+      const firstName = users[0].full_name.split(' ')[0];
 
       // Generate reset token
       const resetToken = crypto.randomBytes(32).toString("hex");
@@ -662,8 +663,11 @@ export class AuthService {
       });
 
       logger.info(
-        `Password reset requested for user ${userId}, token: ${resetToken}`
+        `Password reset requested for user ${userId}`
       );
+
+      // Send forgot password email
+      await emailService.sendForgotPasswordEmail(email, resetToken, firstName);
 
       return {
         message: "If the email exists, a reset link has been sent",
@@ -726,7 +730,6 @@ export class AuthService {
         .from("user_auths")
         .update({
           password_hash: passwordHash,
-          updated_at: new Date().toISOString(),
         })
         .eq("user_id", resets.user_id)
         .eq("provider", "email");
