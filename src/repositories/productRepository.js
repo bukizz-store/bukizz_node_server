@@ -185,6 +185,7 @@ export class ProductRepository {
             price: finalPrice,
             base_price: basePrice,
             variant_price: variantPrice,
+            compare_at_price: v.compare_at_price,
             stock: Number(v.stock ?? 0),
             weight: v.weight,
             metadata: v.metadata,
@@ -484,13 +485,25 @@ export class ProductRepository {
           weight: v.weight ? parseFloat(v.weight) : null,
           optionValues: {
             value1: v.option_value_1_ref
-              ? { ...v.option_value_1_ref, attributeName: v.option_value_1_ref.product_option_attributes?.name }
+              ? {
+                  ...v.option_value_1_ref,
+                  attributeName:
+                    v.option_value_1_ref.product_option_attributes?.name,
+                }
               : null,
             value2: v.option_value_2_ref
-              ? { ...v.option_value_2_ref, attributeName: v.option_value_2_ref.product_option_attributes?.name }
+              ? {
+                  ...v.option_value_2_ref,
+                  attributeName:
+                    v.option_value_2_ref.product_option_attributes?.name,
+                }
               : null,
             value3: v.option_value_3_ref
-              ? { ...v.option_value_3_ref, attributeName: v.option_value_3_ref.product_option_attributes?.name }
+              ? {
+                  ...v.option_value_3_ref,
+                  attributeName:
+                    v.option_value_3_ref.product_option_attributes?.name,
+                }
               : null,
           },
           metadata: v.metadata || {},
@@ -855,6 +868,28 @@ export class ProductRepository {
         .eq("id", productId);
 
       if (error) throw error;
+
+      // Update categories if provided
+      if (updateData.categoryIds) {
+        // Remove existing category links first
+        await supabase
+          .from("product_categories")
+          .delete()
+          .eq("product_id", productId);
+
+        if (updateData.categoryIds.length > 0) {
+          const categoryLinks = updateData.categoryIds.map((categoryId) => ({
+            product_id: productId,
+            category_id: categoryId,
+          }));
+
+          const { error: categoryError } = await supabase
+            .from("product_categories")
+            .insert(categoryLinks);
+
+          if (categoryError) throw categoryError;
+        }
+      }
 
       return this.findById(productId);
     } catch (error) {
@@ -1430,6 +1465,47 @@ export class ProductRepository {
   }
 
   /**
+   * Delete all product images (used during comprehensive update)
+   */
+  async deleteAllProductImages(productId) {
+    try {
+      const supabase = getSupabase();
+
+      // Get existing images
+      const { data: existingImages, error: fetchError } = await supabase
+        .from("product_images")
+        .select("*")
+        .eq("product_id", productId);
+
+      if (fetchError) throw fetchError;
+
+      if (existingImages && existingImages.length > 0) {
+        // Find which ones need storage deletion
+        const pathsToDelete = existingImages
+          .filter((img) => img.metadata?.source === "upload")
+          .map((img) => img.url.split("/").slice(-4).join("/"));
+
+        if (pathsToDelete.length > 0) {
+          await supabase.storage.from("product-images").remove(pathsToDelete);
+        }
+
+        // Delete image records
+        const { error: deleteError } = await supabase
+          .from("product_images")
+          .delete()
+          .eq("product_id", productId);
+
+        if (deleteError) throw deleteError;
+      }
+
+      return true;
+    } catch (error) {
+      logger.error("Error deleting all product images:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Set primary image for product/variant
    */
   async setPrimaryImage(imageId, productId, variantId = null) {
@@ -1805,6 +1881,29 @@ export class ProductRepository {
       };
     } catch (error) {
       logger.error("Error removing warehouse details:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove all warehouses from product
+   */
+  async removeAllProductWarehouses(productId) {
+    try {
+      const supabase = getSupabase();
+
+      const { error } = await supabase
+        .from("products_warehouse")
+        .delete()
+        .eq("product_id", productId);
+
+      if (error) throw error;
+
+      return {
+        message: "All warehouses successfully removed from product",
+      };
+    } catch (error) {
+      logger.error("Error removing all warehouse details:", error);
       throw error;
     }
   }

@@ -6,6 +6,7 @@ import ProductOptionRepository from "../repositories/productOptionRepository.js"
 import ProductVariantRepository from "../repositories/productVariantRepository.js";
 import ProductImageRepository from "../repositories/productImageRepository.js";
 import WarehouseRepository from "../repositories/warehouseRepository.js";
+import { SchoolRepository } from "../repositories/schoolRepository.js";
 
 /**
  * Product Service
@@ -17,6 +18,7 @@ export class ProductService {
     brandRepository,
     productOptionRepository,
     productVariantRepository,
+    schoolRepository,
   ) {
     this.productRepository = productRepository || ProductRepository;
     this.brandRepository = brandRepository || BrandRepository;
@@ -24,6 +26,7 @@ export class ProductService {
       productOptionRepository || ProductOptionRepository;
     this.productVariantRepository =
       productVariantRepository || ProductVariantRepository;
+    this.schoolRepository = schoolRepository || new SchoolRepository();
   }
 
   /**
@@ -319,6 +322,238 @@ export class ProductService {
   }
 
   /**
+   * Get comprehensive product by ID, perfectly formatted for the Admin/Retailer dashboards
+   */
+  async getComprehensiveProduct(productId) {
+    try {
+      const product = await this.productRepository.findById(productId);
+      if (!product) {
+        throw new AppError("Product not found", 404);
+      }
+
+      console.log("Product found:", product);
+      // We'll reconstruct the same shape the frontend sends in `createComprehensiveProduct`
+      const result = {
+        productData: {
+          title: product.title || "",
+          sku: product.sku || "",
+          basePrice: product.base_price || 0,
+          compareAtPrice:
+            product.compare_at_price || product.metadata?.compare_price || "",
+          shortDescription: product.short_description || "",
+          description: product.description || "",
+          city: product.city || "",
+          isActive: product.is_active,
+          categoryAttributes: product.metadata?.categoryAttributes || {},
+        },
+        productType: product.product_type || "general",
+        images: [],
+        brandData: null,
+        warehouseData: null,
+        categories: [],
+        highlights: [],
+        metadata: product.metadata || {},
+        variants: [],
+        productOptions: [],
+        schoolData: null,
+      };
+
+      // Extract brands
+      if (product.brands && product.brands.length > 0) {
+        const primaryBrand = product.brands[0];
+        result.brandData = {
+          brandId: primaryBrand.id,
+          name: primaryBrand.name,
+          type: "existing",
+        };
+      } else if (product.product_brands && product.product_brands.length > 0) {
+        const primaryBrand = product.product_brands[0].brands;
+        if (primaryBrand) {
+          result.brandData = {
+            brandId: primaryBrand.id,
+            name: primaryBrand.name,
+            type: "existing",
+          };
+        }
+      }
+
+      // Extract warehouse / retailer
+      if (product.products_warehouse && product.products_warehouse.warehouse) {
+        result.warehouseData = {
+          warehouseId: product.products_warehouse.warehouse.id,
+          name: product.products_warehouse.warehouse.name,
+          type: "existing",
+        };
+      }
+
+      // Extract categories
+      if (product.categories && product.categories.length > 0) {
+        result.categories = product.categories.map((c) => ({
+          id: c.id,
+          label: c.name,
+        }));
+      } else if (
+        product.product_categories &&
+        product.product_categories.length > 0
+      ) {
+        result.categories = product.product_categories
+          .map((pc) => pc.categories)
+          .filter(Boolean)
+          .map((c) => ({
+            id: c.id,
+            label: c.name,
+          }));
+      }
+
+      // Extract Highlights
+      if (product.highlight) {
+        result.highlights = Object.entries(product.highlight).map(
+          ([key, value]) => ({ key, value }),
+        );
+      }
+
+      // Extract school
+      if (product.product_type !== "general") {
+        try {
+          const fetchedSchoolData =
+            await this.schoolRepository.getSchoolForProduct(productId);
+          if (fetchedSchoolData) {
+            result.schoolData = fetchedSchoolData;
+          }
+        } catch (schoolErr) {
+          logger.error(
+            "Failed to fetch school data for comprehensive product",
+            schoolErr,
+          );
+        }
+      }
+
+      if (!result.schoolData) {
+        if (product.school) {
+          // Sometimes injected manually
+          result.schoolData = {
+            schoolId: product.school.id,
+            name: product.school.name,
+            grade: product.schoolData?.grade || "",
+            mandatory: product.schoolData?.mandatory || false,
+          };
+        } else if (product.products_school && product.products_school.school) {
+          result.schoolData = {
+            schoolId: product.products_school.school.id,
+            name: product.products_school.school.name,
+            grade: product.products_school.grade || "",
+            mandatory: product.products_school.mandatory || false,
+          };
+        }
+      }
+
+      // Process options and variants natively
+      if (product.variants && product.variants.length > 0) {
+        const reconstructedOptions = [];
+
+        // Helper to extract option structures
+        const processOptionPosition = (pos) => {
+          const refKey = `option_value_${pos}_ref`;
+          const referenceVariant = product.variants.find((v) => v[refKey]);
+
+          if (!referenceVariant) return;
+
+          const attributeName = referenceVariant[refKey].attribute_name;
+          const uniqueValuesMap = new Map();
+
+          product.variants.forEach((variant) => {
+            const ref = variant[refKey];
+            if (ref && ref.value) {
+              if (!uniqueValuesMap.has(ref.value)) {
+                uniqueValuesMap.set(ref.value, {
+                  value: ref.value,
+                  imageUrl: ref.imageUrl || null,
+                });
+              }
+            }
+          });
+
+          const hasImages = Array.from(uniqueValuesMap.values()).some(
+            (v) => v.imageUrl,
+          );
+
+          reconstructedOptions.push({
+            id: Date.now() + pos,
+            name: attributeName,
+            position: pos,
+            hasImages,
+            values: Array.from(uniqueValuesMap.values()).map((v) =>
+              hasImages ? { value: v.value, imageUrl: v.imageUrl } : v.value,
+            ),
+          });
+        };
+
+        processOptionPosition(1);
+        processOptionPosition(2);
+        processOptionPosition(3);
+
+        result.productOptions = reconstructedOptions;
+
+        // Map variants
+        result.variants = product.variants.map((v) => ({
+          id: v.id,
+          name: [
+            v.option_value_1_ref?.value,
+            v.option_value_2_ref?.value,
+            v.option_value_3_ref?.value,
+          ]
+            .filter(Boolean)
+            .join(" / "),
+          sku: v.sku || "",
+          price: v.variant_price || v.price,
+          compareAtPrice:
+            v.compare_at_price ||
+            v.base_price ||
+            v.metadata?.compare_price ||
+            "",
+          stock: v.stock || 0,
+          options: {
+            [v.option_value_1_ref?.attribute_name]: v.option_value_1_ref?.value,
+            [v.option_value_2_ref?.attribute_name]: v.option_value_2_ref?.value,
+            [v.option_value_3_ref?.attribute_name]: v.option_value_3_ref?.value,
+          },
+          image: v.imageUrl || null, // Map the resolved imageUrl to the variants for the grid
+        }));
+      }
+
+      // Map images loosely (the frontend often pulls them from variants directly or the main product.images array)
+      if (product.images && product.images.length > 0) {
+        // Sort by sortOrder
+        const sortedImages = [...product.images].sort(
+          (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0),
+        );
+        result.images = sortedImages.map((img) => ({
+          url: img.url,
+          isPrimary: img.isPrimary,
+        }));
+      } else {
+        try {
+          const images = await this.productRepository.getProductImages(
+            productId,
+            { includeVariantImages: false },
+          );
+          result.images = images.map((img) => ({
+            url: img.url,
+            isPrimary: img.isPrimary,
+          }));
+        } catch (err) {
+          // Silently fail if images error
+        }
+      }
+
+      return result;
+    } catch (error) {
+      logger.error("Error getting comprehensive product:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Search products with enhanced filtering
    */
   async searchProducts(filters) {
@@ -468,6 +703,7 @@ export class ProductService {
       variants = [],
       categories = [],
       productOptions = [],
+      schoolData = null,
     } = data;
 
     // Declare result outside try block to fix scoping issue
@@ -479,6 +715,7 @@ export class ProductService {
       variants: [],
       categories: [],
       productOptions: [],
+      school: null,
       errors: [],
     };
 
@@ -507,10 +744,8 @@ export class ProductService {
       // Step 3: Handle brand updates
       if (brandData) {
         try {
-          // First remove existing brand associations if updating
-          if (brandData.removeExisting) {
-            await this.productRepository.removeAllProductBrands(productId);
-          }
+          // First unconditionally remove existing brand associations if updating
+          await this.productRepository.removeAllProductBrands(productId);
 
           if (brandData.type === "new") {
             // Create new brand and associate
@@ -563,6 +798,9 @@ export class ProductService {
       // Step 4: Handle warehouse updates
       if (warehouseData) {
         try {
+          // Unlink existing warehouse first
+          await this.productRepository.removeAllProductWarehouses(productId);
+
           if (warehouseData.type === "new") {
             const warehouseResult =
               await this.productRepository.addWarehouseDetails(
@@ -612,57 +850,130 @@ export class ProductService {
         }
       }
 
-      // Step 5: Handle variant updates
-      if (variants && variants.length > 0) {
-        // Option to clear existing variants first
-        if (data.replaceVariants) {
-          try {
-            // Delete existing variants
-            const existingVariants =
-              await this.productVariantRepository.findByProductId(productId);
-            for (const variant of existingVariants) {
-              await this.productVariantRepository.delete(variant.id);
-            }
-            logger.info("Existing variants cleared for update", { productId });
-          } catch (variantDeleteError) {
-            logger.error(
-              "Error clearing existing variants:",
-              variantDeleteError,
+      // Step 5: Handle product option updates
+      let createdOptions = [];
+      if (productOptions && productOptions.length > 0) {
+        try {
+          // Clear existing attributes
+          const existingAttributes =
+            await this.productOptionRepository.findAttributesByProductId(
+              productId,
             );
+          for (const attr of existingAttributes) {
+            await this.productOptionRepository.deleteAttribute(attr.id);
+          }
+          logger.info("Existing options cleared for update", { productId });
+        } catch (attrDeleteError) {
+          logger.error("Error clearing existing options:", attrDeleteError);
+        }
+
+        for (const option of productOptions) {
+          try {
+            let attribute;
+            // Create new attribute
+            attribute = await this.productOptionRepository.createAttribute({
+              productId,
+              name: option.name,
+              position: option.position,
+              isRequired: option.isRequired,
+            });
+
+            let newOpt = { ...attribute, values: [] };
+
+            // Handle option values
+            if (option.values && option.values.length > 0) {
+              const updatedValues = [];
+              for (const value of option.values) {
+                try {
+                  let val;
+                  // Create new value
+                  val = await this.productOptionRepository.createValue({
+                    attributeId: attribute.id,
+                    value: value.value,
+                    priceModifier: value.priceModifier,
+                    sortOrder: value.sortOrder,
+                    imageUrl: value.imageUrl,
+                  });
+                  updatedValues.push(val);
+                } catch (valError) {
+                  logger.error(
+                    "Error handling option value in update:",
+                    valError,
+                  );
+                  result.errors.push(
+                    `Option value operation failed: ${valError.message}`,
+                  );
+                }
+              }
+              attribute.values = updatedValues;
+              newOpt.values = updatedValues;
+            }
+            result.productOptions.push(attribute);
+            createdOptions.push(newOpt);
+          } catch (optError) {
+            logger.error("Error handling product option in update:", optError);
             result.errors.push(
-              `Failed to clear existing variants: ${variantDeleteError.message}`,
+              `Product option operation failed: ${optError.message}`,
             );
           }
+        }
+      }
+
+      // Step 6: Handle variant updates
+      if (variants && variants.length > 0) {
+        // Option to clear existing variants first - we do this ALWAYS now due to UI generating new variations
+        try {
+          // Delete existing variants
+          const existingVariants =
+            await this.productVariantRepository.findByProductId(productId);
+          for (const variant of existingVariants) {
+            await this.productVariantRepository.delete(variant.id);
+          }
+          logger.info("Existing variants cleared for update", { productId });
+        } catch (variantDeleteError) {
+          logger.error("Error clearing existing variants:", variantDeleteError);
+          result.errors.push(
+            `Failed to clear existing variants: ${variantDeleteError.message}`,
+          );
         }
 
         // Create or update variants
         for (const variantData of variants) {
           try {
-            let variant;
-            if (variantData.id && !data.replaceVariants) {
-              // Update existing variant
-              variant = await this.productVariantRepository.update(
-                variantData.id,
-                {
-                  ...variantData,
-                  productId,
-                },
-              );
-              logger.info("Variant updated", {
-                variantId: variant.id,
-                productId,
-              });
-            } else {
-              // Create new variant
-              variant = await this.productVariantRepository.create({
-                productId,
-                ...variantData,
-              });
-              logger.info("Variant created in update", {
-                variantId: variant.id,
-                productId,
-              });
-            }
+            // We need to resolve the option values from strings to IDs
+            const getOptionValueId = (optName, valString) => {
+              if (!valString || !optName) return null;
+              const attr = createdOptions.find((o) => o.name === optName);
+              if (!attr) return null;
+              const val = attr.values.find((v) => v.value === valString);
+              return val ? val.id : null;
+            };
+
+            const optionValue1 = getOptionValueId(
+              productOptions[0]?.name,
+              variantData.option1,
+            );
+            const optionValue2 = getOptionValueId(
+              productOptions[1]?.name,
+              variantData.option2,
+            );
+            const optionValue3 = getOptionValueId(
+              productOptions[2]?.name,
+              variantData.option3,
+            );
+
+            // Always create new variant as they are regenerated
+            let variant = await this.productVariantRepository.create({
+              productId,
+              ...variantData,
+              optionValue1,
+              optionValue2,
+              optionValue3,
+            });
+            logger.info("Variant created in update", {
+              variantId: variant.id,
+              productId,
+            });
             result.variants.push(variant);
           } catch (variantError) {
             logger.error(
@@ -676,19 +987,17 @@ export class ProductService {
         }
       }
 
-      // Step 6: Handle image updates
+      // Step 7: Handle image updates
       if (images && images.length > 0) {
-        // Option to clear existing images first
-        if (data.replaceImages) {
-          try {
-            await this.productRepository.deleteAllProductImages(productId);
-            logger.info("Existing images cleared for update", { productId });
-          } catch (imageDeleteError) {
-            logger.error("Error clearing existing images:", imageDeleteError);
-            result.errors.push(
-              `Failed to clear existing images: ${imageDeleteError.message}`,
-            );
-          }
+        // Always clear existing images first during full update
+        try {
+          await this.productRepository.deleteAllProductImages(productId);
+          logger.info("Existing images cleared for update", { productId });
+        } catch (imageDeleteError) {
+          logger.error("Error clearing existing images:", imageDeleteError);
+          result.errors.push(
+            `Failed to clear existing images: ${imageDeleteError.message}`,
+          );
         }
 
         // Add new images
@@ -723,7 +1032,7 @@ export class ProductService {
         }
       }
 
-      // Step 7: Get final updated product with all details
+      // Step 8: Get final updated product with all details
       const updatedProduct = await this.productRepository.getProductWithDetails(
         productId,
         {
@@ -746,78 +1055,34 @@ export class ProductService {
         errorCount: result.errors.length,
       });
 
-      // Step 8: Handle product option updates
-      if (productOptions && productOptions.length > 0) {
-        for (const option of productOptions) {
-          try {
-            let attribute;
-            if (option.id) {
-              // Update existing attribute
-              attribute = await this.productOptionRepository.updateAttribute(
-                option.id,
-                {
-                  name: option.name,
-                  position: option.position,
-                  isRequired: option.isRequired,
-                },
-              );
-            } else {
-              // Create new attribute
-              attribute = await this.productOptionRepository.createAttribute({
-                productId,
-                name: option.name,
-                position: option.position,
-                isRequired: option.isRequired,
-              });
-            }
+      // Step 8: Handle school association
+      if (schoolData) {
+        try {
+          const { schoolId, grade, mandatory } = schoolData;
 
-            // Handle option values
-            if (option.values && option.values.length > 0) {
-              const updatedValues = [];
-              for (const value of option.values) {
-                try {
-                  let val;
-                  if (value.id) {
-                    // Update existing value
-                    val = await this.productOptionRepository.updateValue(
-                      value.id,
-                      {
-                        value: value.value,
-                        priceModifier: value.priceModifier,
-                        sortOrder: value.sortOrder,
-                        imageUrl: value.imageUrl,
-                      },
-                    );
-                  } else {
-                    // Create new value
-                    val = await this.productOptionRepository.createValue({
-                      attributeId: attribute.id,
-                      value: value.value,
-                      priceModifier: value.priceModifier,
-                      sortOrder: value.sortOrder,
-                      imageUrl: value.imageUrl,
-                    });
-                  }
-                  updatedValues.push(val);
-                } catch (valError) {
-                  logger.error(
-                    "Error handling option value in update:",
-                    valError,
-                  );
-                  result.errors.push(
-                    `Option value operation failed: ${valError.message}`,
-                  );
-                }
-              }
-              attribute.values = updatedValues;
-            }
-            result.productOptions.push(attribute);
-          } catch (optError) {
-            logger.error("Error handling product option in update:", optError);
-            result.errors.push(
-              `Product option operation failed: ${optError.message}`,
+          if (schoolId) {
+            // we will overwrite or create since product can only have 1 active valid school combo in Retailer flow right now
+            // or just use associateProduct which upserts
+            await this.schoolRepository.associateProduct(productId, schoolId, {
+              grade,
+              mandatory,
+            });
+
+            result.school = { schoolId, grade, mandatory };
+            logger.info(
+              "School association updated in comprehensive operation",
+              {
+                productId,
+                schoolId,
+              },
             );
           }
+        } catch (schoolError) {
+          logger.error(
+            "Error handling school in comprehensive product update:",
+            schoolError,
+          );
+          result.errors.push(`School operation failed: ${schoolError.message}`);
         }
       }
 
@@ -829,7 +1094,16 @@ export class ProductService {
         });
       }
 
-      return result;
+      // Format response exactly like createComprehensiveProduct
+      const finalProduct = await this.productRepository.findById(productId);
+
+      // Inject standard response format to mimic create_comprehensive_product RPC result
+      return {
+        product: finalProduct,
+        metadata: {
+          warnings: result.errors,
+        },
+      };
     } catch (error) {
       logger.error("Critical error in comprehensive product update:", error);
       throw error;

@@ -94,6 +94,21 @@ export class ProductController {
   });
 
   /**
+   * Get comprehensive product by ID
+   * GET /api/products/:id/comprehensive
+   */
+  getComprehensiveProduct = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const data = await this.productService.getComprehensiveProduct(id);
+
+    res.json({
+      success: true,
+      data,
+      message: "Comprehensive product retrieved successfully",
+    });
+  });
+
+  /**
    * Search products with enhanced filtering
    * GET /api/products
    */
@@ -238,6 +253,8 @@ export class ProductController {
       warehouseData = null,
       variants = [],
       categories = [],
+      productOptions = [],
+      schoolData = null,
       replaceVariants = false,
       replaceImages = false,
     } = req.body;
@@ -248,7 +265,8 @@ export class ProductController {
       !images.length &&
       !brandData &&
       !warehouseData &&
-      !variants.length
+      !variants.length &&
+      !schoolData
     ) {
       return res.status(400).json({
         success: false,
@@ -266,6 +284,8 @@ export class ProductController {
         warehouseData,
         variants,
         categories,
+        productOptions,
+        schoolData,
         replaceVariants,
         replaceImages,
       },
