@@ -43,7 +43,7 @@ export class OtpRepository {
             const { data, error } = await this.supabase
                 .from("otp_verifications")
                 .select("*")
-                .eq("email", email)
+                .ilike("email", email)
                 .single();
 
             if (error) {
@@ -67,7 +67,7 @@ export class OtpRepository {
             const { error } = await this.supabase
                 .from("otp_verifications")
                 .delete()
-                .eq("email", email);
+                .ilike("email", email);
 
             if (error) throw error;
             return true;

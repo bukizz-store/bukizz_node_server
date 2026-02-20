@@ -1362,6 +1362,440 @@
 					}
 				}
 			]
+		},
+		{
+			"name": "🏫 Retailer Schools (New)",
+			"item": [
+				{
+					"name": "Link Retailer to School",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/retailer-schools/link",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schoolId\": \"{{school_id}}\",\n  \"productType\": [\n    \"bookset\",\n    \"uniform\"\n  ]\n}"
+						}
+					}
+				},
+				{
+					"name": "Get Connected Schools",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer-schools/connected-schools?status=approved"
+					}
+				},
+				{
+					"name": "Get Connected Schools by Retailer ID (Admin)",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer-schools/connected-schools/{{user_id}}?status=pending"
+					}
+				},
+				{
+					"name": "Get Connected Retailers by School ID",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer-schools/connected-retailers/{{school_id}}?status=approved"
+					}
+				},
+				{
+					"name": "Update Link Status",
+					"request": {
+						"method": "PATCH",
+						"url": "{{api_base}}/retailer-schools/status",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schoolId\": \"{{school_id}}\",\n  \"currentStatus\": \"pending\",\n  \"newStatus\": \"approved\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Update Product Types",
+					"request": {
+						"method": "PATCH",
+						"url": "{{api_base}}/retailer-schools/product-type",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schoolId\": \"{{school_id}}\",\n  \"status\": \"approved\",\n  \"productType\": [\n    \"uniform\"\n  ]\n}"
+						}
+					}
+				},
+				{
+					"name": "Unlink Retailer from School",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/retailer-schools",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"schoolId\": \"{{school_id}}\",\n  \"status\": \"rejected\"\n}"
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "🏢 Retailer Profile Details (New)",
+			"item": [
+				{
+					"name": "Create/Update Retailer Profile Data",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/retailer/data",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "displayName",
+									"value": "Super Books & Uniforms",
+									"type": "text"
+								},
+								{
+									"key": "ownerName",
+									"value": "John Doe",
+									"type": "text"
+								},
+								{
+									"key": "gstin",
+									"value": "22AAAAA0000A1Z5",
+									"type": "text"
+								},
+								{
+									"key": "pan",
+									"value": "AAAAA0000A",
+									"type": "text"
+								},
+								{
+									"key": "signature",
+									"type": "file",
+									"src": "/path/to/signature.png"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Check Verification Status",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/verification-status"
+					}
+				},
+				{
+					"name": "Check Retailer Data Status",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/data/status"
+					}
+				},
+				{
+					"name": "Get Retailer Profile Details",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/data"
+					}
+				}
+			]
+		},
+		{
+			"name": "📦 Retailer Orders (New)",
+			"item": [
+				{
+					"name": "Get Overall Retailer Order Stats",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/orders/stats?startDate=2024-01-01&endDate=2024-12-31"
+					}
+				},
+				{
+					"name": "Get Warehouse Specific Order Stats",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/orders/warehouse/{{warehouse_id}}/stats"
+					}
+				},
+				{
+					"name": "Get Warehouse Orders by Status",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/orders/warehouse/{{warehouse_id}}/status/processed?page=1&limit=20"
+					}
+				},
+				{
+					"name": "Get All Orders for a Warehouse",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/orders/warehouse/{{warehouse_id}}?page=1&limit=20&status=processed"
+					}
+				},
+				{
+					"name": "Update Order Item Status (Warehouse specific)",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/retailer/orders/{{order_id}}/items/{{item_id}}/status",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"shipped\",\n  \"note\": \"Shipped via Courier\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Update Whole Order Status (Warehouse specific)",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/retailer/orders/{{order_id}}/status",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"processed\",\n  \"note\": \"Processing at warehouse\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Get Retailer Order Details",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/orders/{{order_id}}"
+					}
+				},
+				{
+					"name": "Get All Orders Across All Connected Warehouses",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/orders?page=1&limit=20"
+					}
+				}
+			]
+		},
+		{
+			"name": "🏦 Retailer Bank Accounts (New)",
+			"item": [
+				{
+					"name": "Add Bank Account",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/retailer/bank-accounts",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"accountHolderName\": \"John Doe\",\n  \"accountNumber\": \"1234567890\",\n  \"ifscCode\": \"HDFC0001234\",\n  \"bankName\": \"HDFC Bank\",\n  \"accountType\": \"current\",\n  \"isPrimary\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Verify Bank Account (Penny Drop)",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/retailer/bank-accounts/verify",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"bankAccountId\": \"{{bank_account_id}}\"\n}"
+						}
+					}
+				},
+				{
+					"name": "List Bank Accounts",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/retailer/bank-accounts"
+					}
+				},
+				{
+					"name": "Update Bank Account",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/retailer/bank-accounts/{{bank_account_id}}",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"accountHolderName\": \"John Updated\",\n  \"isPrimary\": false\n}"
+						}
+					}
+				},
+				{
+					"name": "Set Primary Bank Account",
+					"request": {
+						"method": "PATCH",
+						"url": "{{api_base}}/retailer/bank-accounts/{{bank_account_id}}/set-primary"
+					}
+				},
+				{
+					"name": "Delete Bank Account",
+					"request": {
+						"method": "DELETE",
+						"url": "{{api_base}}/retailer/bank-accounts/{{bank_account_id}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "🛍️ Products",
+			"item": [
+				{
+					"name": "Get Products by Warehouse",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/warehouse?page=1&limit=20",
+						"header": [
+							{
+								"key": "x-warehouse-id",
+								"value": "{{warehouse_id}}"
+							}
+						]
+					}
+				},
+				{
+					"name": "Get Low-stock Products",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/warehouse/low-stock?threshold=10&outOfStockOnly=false",
+						"header": [
+							{
+								"key": "x-warehouse-id",
+								"value": "{{warehouse_id}}"
+							}
+						]
+					}
+				},
+				{
+					"name": "Search Products by Retailer",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/products/retailer-search?retailerName=Super&page=1"
+					}
+				}
+			]
+		},
+		{
+			"name": "📦 Orders",
+			"item": [
+				{
+					"name": "Update Order Item Status (Customer Support/Admin)",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/orders/{{order_id}}/items/{{item_id}}/status",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"shipped\",\n  \"note\": \"Customer Support Update\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Update Whole Order Status (Admin)",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/orders/{{order_id}}/status",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"processed\",\n  \"note\": \"Backend status reset\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Cancel Specific Order Item (Customer)",
+					"request": {
+						"method": "PUT",
+						"url": "{{api_base}}/orders/{{order_id}}/items/{{item_id}}/cancel",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"reason\": \"Ordered by mistake\",\n  \"refundRequested\": true\n}"
+						}
+					}
+				},
+				{
+					"name": "Create Order Query/Support Ticket",
+					"request": {
+						"method": "POST",
+						"url": "{{api_base}}/orders/{{order_id}}/queries",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"subject\": \"Missing Item\",\n  \"message\": \"One of the books was missing from the package\",\n  \"priority\": \"high\",\n  \"category\": \"product\"\n}"
+						}
+					}
+				},
+				{
+					"name": "Get Order Queries",
+					"request": {
+						"method": "GET",
+						"url": "{{api_base}}/orders/{{order_id}}/queries"
+					}
+				}
+			]
 		}
 	]
 }
