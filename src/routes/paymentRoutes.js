@@ -22,6 +22,9 @@ export default function paymentRoutes() {
     // Verify Payment
     router.post("/verify", paymentController.verifyPayment);
 
+    // Reconcile Payment (if verify fails but money deducted)
+    router.post("/reconcile", paymentController.reconcilePayment);
+
     // Log Payment Failure
     router.post("/failure", paymentController.handlePaymentFailure);
 

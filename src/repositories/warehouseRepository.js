@@ -259,6 +259,51 @@ export class WarehouseRepository {
         try {
             const supabase = getSupabase();
 
+            // Handle inline address object
+            if (updates.addressData) {
+                const addrInput = updates.addressData;
+                const addressPayload = {
+                    line1: addrInput.line1,
+                    line2: addrInput.line2,
+                    city: addrInput.city,
+                    state: addrInput.state,
+                    postal_code: addrInput.postalCode || addrInput.postal_code || addrInput.pincode,
+                    country: addrInput.country || "India",
+                    lat: addrInput.lat,
+                    lng: addrInput.lng,
+                };
+
+                // Get the warehouse's current address ID
+                const { data: existing } = await supabase
+                    .from("warehouse")
+                    .select("address")
+                    .eq("id", id)
+                    .single();
+
+                if (existing?.address) {
+                    // Update the existing address row
+                    const { error: addrUpdateErr } = await supabase
+                        .from("addresses")
+                        .update(addressPayload)
+                        .eq("id", existing.address);
+
+                    if (addrUpdateErr) throw addrUpdateErr;
+                } else {
+                    // No existing address — create a new one and link it
+                    const { data: newAddr, error: addrInsertErr } = await supabase
+                        .from("addresses")
+                        .insert({ ...addressPayload, label: "Warehouse Address", is_active: true })
+                        .select("id")
+                        .single();
+
+                    if (addrInsertErr) throw addrInsertErr;
+                    updates.address = newAddr.id;
+                }
+
+                // Remove addressData before sending to warehouse table
+                delete updates.addressData;
+            }
+
             const { data: warehouse, error } = await supabase
                 .from("warehouse")
                 .update(updates)

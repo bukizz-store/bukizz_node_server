@@ -1567,6 +1567,25 @@ export class OrderService {
         error: error.message,
       });
     }
+
+    // Update all order items to cancelled
+    try {
+      const { createServiceClient } = await import("../db/index.js");
+      const serviceClient = createServiceClient();
+      const { error } = await serviceClient
+        .from("order_items")
+        .update({ status: "cancelled" })
+        .eq("order_id", orderId)
+        .neq("status", "cancelled");
+
+      if (error) throw error;
+      logger.info("Order items marked as cancelled", { orderId });
+    } catch (error) {
+      logger.error("Failed to update order items to cancelled", {
+        orderId,
+        error: error.message,
+      });
+    }
   }
 
   /**
