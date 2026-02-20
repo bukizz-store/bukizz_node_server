@@ -16,10 +16,10 @@ export class RetailerSchoolService {
 
     /**
      * Link a retailer to a school
-     * @param {Object} params - { retailerId, schoolId, status?, productType? }
+     * @param {Object} params - { retailerId, schoolId, status?, productType?, warehouseId? }
      * @returns {Object} Created retailer-school link
      */
-    async linkRetailerToSchool({ retailerId, schoolId, status = "pending", productType = [] }) {
+    async linkRetailerToSchool({ retailerId, schoolId, status = "pending", productType = [], warehouseId }) {
         try {
             if (!retailerId || !schoolId) {
                 throw new AppError("retailerId and schoolId are required", 400);
@@ -61,6 +61,19 @@ export class RetailerSchoolService {
                 throw new AppError("School not found", 404);
             }
 
+            // Verify warehouse exists if provided
+            if (warehouseId) {
+                const { data: warehouse, error: warehouseError } = await supabase
+                    .from("warehouse")
+                    .select("id")
+                    .eq("id", warehouseId)
+                    .single();
+
+                if (warehouseError || !warehouse) {
+                    throw new AppError("Warehouse not found", 404);
+                }
+            }
+
             // Check if exact composite key already exists
             const existing = await this.retailerSchoolRepo.findByCompositeKey(retailerId, schoolId, status);
             if (existing) {
@@ -72,6 +85,7 @@ export class RetailerSchoolService {
                 schoolId,
                 status,
                 productType,
+                warehouseId,
             });
 
             return {

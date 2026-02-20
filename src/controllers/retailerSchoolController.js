@@ -13,7 +13,7 @@ export class RetailerSchoolController {
      */
     linkRetailerToSchool = async (req, res) => {
         try {
-            const { schoolId, status, productType } = req.body;
+            const { schoolId, status, productType, warehouseId } = req.body;
             const retailerId = req.body.retailerId || req.user?.id;
 
             const result = await retailerSchoolService.linkRetailerToSchool({
@@ -21,6 +21,7 @@ export class RetailerSchoolController {
                 schoolId,
                 status,
                 productType,
+                warehouseId,
             });
 
             return res.status(201).json({

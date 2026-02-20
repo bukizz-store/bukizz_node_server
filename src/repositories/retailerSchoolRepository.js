@@ -17,13 +17,14 @@ export class RetailerSchoolRepository {
      * @returns {Object} Created record
      */
     async create(data) {
-        const { retailerId, schoolId, status = "pending", productType = [] } = data;
+        const { retailerId, schoolId, status = "pending", productType = [], warehouseId } = data;
 
         const record = {
             retailer_id: retailerId,
             school_id: schoolId,
             status,
             product_type: productType,
+            warehouse_id: warehouseId,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
         };
@@ -97,8 +98,9 @@ export class RetailerSchoolRepository {
         let query = this.supabase
             .from(this.tableName)
             .select(`
-                retailer_id, school_id, status, product_type, created_at, updated_at,
-                schools (*)
+                retailer_id, school_id, status, product_type, warehouse_id, created_at, updated_at,
+                schools (*),
+                warehouse!retailer_schools_warehouse_id_fkey (*)
             `)
             .eq("retailer_id", retailerId);
 
@@ -128,8 +130,9 @@ export class RetailerSchoolRepository {
         let query = this.supabase
             .from(this.tableName)
             .select(`
-                retailer_id, school_id, status, product_type, created_at, updated_at,
-                users!retailer_id (id, full_name, email, phone)
+                retailer_id, school_id, status, product_type, warehouse_id, created_at, updated_at,
+                users!retailer_id (id, full_name, email, phone),
+                warehouse!retailer_schools_warehouse_id_fkey (*)
             `)
             .eq("school_id", schoolId);
 
@@ -183,6 +186,7 @@ export class RetailerSchoolRepository {
             school_id: schoolId,
             status: newStatus,
             product_type: existing.product_type,
+            warehouse_id: existing.warehouse_id,
             created_at: existing.created_at,
             updated_at: new Date().toISOString(),
         };
