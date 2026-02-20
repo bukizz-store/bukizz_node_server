@@ -213,6 +213,23 @@ export class PaymentController {
                     updatedData: updateData,
                     newStatus: "paid"
                 });
+
+                // 2.1 Update Order Items Status
+                const { error: itemsUpdateError } = await this.serviceClient
+                    .from("order_items")
+                    .update({
+                        status: "processed",
+                    })
+                    .eq("order_id", orderId);
+
+                if (itemsUpdateError) {
+                    logger.error("Failed to update order items status after payment", {
+                        error: itemsUpdateError,
+                        orderId
+                    });
+                } else {
+                    logger.info("Order items status updated to processed", { orderId });
+                }
             }
 
             logger.info("Payment verified and order updated", {
@@ -289,6 +306,14 @@ export class PaymentController {
                         // Use .neq to avoid overwriting if already paid/processing? 
                         // Actually idempotent update is fine.
                         ;
+
+                    // Update order items too
+                    await this.serviceClient
+                        .from("order_items")
+                        .update({
+                            status: "processed",
+                        })
+                        .eq("order_id", orderId);
 
                     // Update transaction too
                     await this.serviceClient

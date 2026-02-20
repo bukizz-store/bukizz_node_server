@@ -22,7 +22,8 @@ export class AuthService {
   }
 
   async register(userData) {
-    const { fullName, email, password } = userData;
+    let { fullName, email, password } = userData;
+    if (email) email = email.toLowerCase();
 
     try {
       // Validate input
@@ -38,7 +39,7 @@ export class AuthService {
       const { data: existingUser, error: checkError } = await this.supabase
         .from("users")
         .select("id")
-        .eq("email", email)
+        .ilike("email", email)
         .single();
 
       if (existingUser) {
@@ -102,7 +103,8 @@ export class AuthService {
   }
 
   async registerRetailer(userData) {
-    const { fullName, email, password, phone } = userData;
+    let { fullName, email, password, phone } = userData;
+    if (email) email = email.toLowerCase();
 
     try {
       // Validate input
@@ -118,7 +120,7 @@ export class AuthService {
       const { data: existingUser } = await this.supabase
         .from("users")
         .select("id")
-        .eq("email", email)
+        .ilike("email", email)
         .single();
 
       if (existingUser) {
@@ -244,6 +246,8 @@ export class AuthService {
 
   async loginRetailer(email, password) {
     try {
+      if (email) email = email.toLowerCase();
+
       if (!email || !password) {
         throw new Error("Email and password are required");
       }
@@ -257,7 +261,7 @@ export class AuthService {
           user_auths!inner(password_hash)
         `
         )
-        .eq("email", email)
+        .ilike("email", email)
         .eq("user_auths.provider", "email");
 
       if (userError || !users || users.length === 0) {
@@ -300,6 +304,8 @@ export class AuthService {
 
   async login(email, password, loginAs = "customer") {
     try {
+      if (email) email = email.toLowerCase();
+
       // Validate input
       if (!email || !password) {
         throw new Error("Email and password are required");
@@ -314,7 +320,7 @@ export class AuthService {
           user_auths!inner(password_hash)
         `
         )
-        .eq("email", email)
+        .ilike("email", email)
         .eq("user_auths.provider", "email");
 
       if (userError || !users || users.length === 0) {
@@ -386,7 +392,8 @@ export class AuthService {
         throw new Error("Invalid Google token");
       }
 
-      const email = supabaseUser.email;
+      let email = supabaseUser.email;
+      if (email) email = email.toLowerCase();
       logger.info(`Google token verified for email: ${email}`);
       const fullName = supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || email.split('@')[0];
 
@@ -394,7 +401,7 @@ export class AuthService {
       const { data: existingUser, error: checkError } = await this.supabase
         .from("users")
         .select("id, full_name, email, email_verified, phone, is_active, role")
-        .eq("email", email)
+        .ilike("email", email)
         .single();
 
       let userId;
@@ -624,6 +631,8 @@ export class AuthService {
 
   async requestPasswordReset(email) {
     try {
+      if (email) email = email.toLowerCase();
+
       if (!email) {
         throw new Error("Email is required");
       }
@@ -632,7 +641,7 @@ export class AuthService {
       const { data: users, error } = await this.supabase
         .from("users")
         .select("id, full_name")
-        .eq("email", email)
+        .ilike("email", email)
         .eq("is_active", true);
 
       if (error || !users || users.length === 0) {
@@ -839,7 +848,8 @@ export class AuthService {
   }
 
   async sendOtp(userData) {
-    const { email, fullName, password } = userData;
+    let { email, fullName, password } = userData;
+    if (email) email = email.toLowerCase();
     try {
       if (!email) {
         throw new Error("Email is required");
@@ -849,7 +859,7 @@ export class AuthService {
       const { data: existingUser, error } = await this.supabase
         .from("users")
         .select("id")
-        .eq("email", email)
+        .ilike("email", email)
         .single();
 
       if (existingUser) {
@@ -888,6 +898,8 @@ export class AuthService {
 
   async verifyOtp(email, otp) {
     try {
+      if (email) email = email.toLowerCase();
+
       if (!email || !otp) {
         throw new Error("Email and OTP are required");
       }
@@ -968,7 +980,8 @@ export class AuthService {
   }
 
   async sendRetailerOtp(userData) {
-    const { email, fullName, password, phone } = userData;
+    let { email, fullName, password, phone } = userData;
+    if (email) email = email.toLowerCase();
     try {
       if (!email || !fullName || !password) {
         throw new Error("Email, full name, and password are required");
@@ -982,7 +995,7 @@ export class AuthService {
       const { data: existingUser } = await this.supabase
         .from("users")
         .select("id")
-        .eq("email", email)
+        .ilike("email", email)
         .single();
 
       if (existingUser) {
@@ -1019,6 +1032,8 @@ export class AuthService {
 
   async verifyRetailerOtp(email, otp) {
     try {
+      if (email) email = email.toLowerCase();
+
       if (!email || !otp) {
         throw new Error("Email and OTP are required");
       }

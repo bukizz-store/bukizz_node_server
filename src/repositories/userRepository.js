@@ -268,6 +268,7 @@ export class UserRepository {
           {
             user_id: userId,
             label: addressData.label, // Use label directly from request
+            student_name: addressData.studentName || null,
             recipient_name: addressData.recipientName || null,
             phone: addressData.phone || null,
             line1: addressData.line1,
@@ -304,6 +305,9 @@ export class UserRepository {
 
       if (updateData.label !== undefined) {
         dbUpdateData.label = updateData.label;
+      }
+      if (updateData.studentName !== undefined) {
+        dbUpdateData.student_name = updateData.studentName;
       }
       if (updateData.recipientName !== undefined) {
         dbUpdateData.recipient_name = updateData.recipientName;
@@ -642,7 +646,7 @@ export class UserRepository {
     try {
       const { data, error } = await this.supabase
         .from("users")
-        .update({ is_active: true , deactivation_reason : "authorized"})
+        .update({ is_active: true, deactivation_reason: "authorized" })
         .eq("id", userId)
         .eq("role", "retailer") // Ensure we are approving a retailer
         .select()
@@ -807,6 +811,7 @@ export class UserRepository {
       id: row.id,
       userId: row.user_id,
       label: row.label, // Return label as is
+      studentName: row.student_name,
       recipientName: row.recipient_name,
       phone: row.phone,
       line1: row.line1,

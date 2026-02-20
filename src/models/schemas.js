@@ -791,6 +791,7 @@ export const reviewSchemas = {
 export const addressSchemas = {
   create: Joi.object({
     label: Joi.string().max(50).optional(),
+    studentName: Joi.string().max(255).allow(null, "").optional(),
     recipientName: Joi.string().max(255).required(),
     phone: phoneSchema.required(),
     alternatePhone: phoneSchema,
@@ -810,6 +811,7 @@ export const addressSchemas = {
 
   update: Joi.object({
     label: Joi.string().max(50).optional(),
+    studentName: Joi.string().max(255).allow(null, "").optional(),
     recipientName: Joi.string().max(255).optional(),
     phone: phoneSchema,
     alternatePhone: phoneSchema,

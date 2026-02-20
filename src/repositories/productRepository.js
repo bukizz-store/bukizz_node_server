@@ -194,39 +194,39 @@ export class ProductRepository {
             // Add enhanced option value references with attribute data
             option_value_1_ref: v.option_value_1_ref
               ? {
-                  id: v.option_value_1_ref.id,
-                  value: v.option_value_1_ref.value,
-                  price_modifier: v.option_value_1_ref.price_modifier,
-                  imageUrl: v.option_value_1_ref.image_url,
-                  attribute_name:
-                    v.option_value_1_ref.product_option_attributes?.name,
-                  attribute_position:
-                    v.option_value_1_ref.product_option_attributes?.position,
-                }
+                id: v.option_value_1_ref.id,
+                value: v.option_value_1_ref.value,
+                price_modifier: v.option_value_1_ref.price_modifier,
+                imageUrl: v.option_value_1_ref.image_url,
+                attribute_name:
+                  v.option_value_1_ref.product_option_attributes?.name,
+                attribute_position:
+                  v.option_value_1_ref.product_option_attributes?.position,
+              }
               : null,
             option_value_2_ref: v.option_value_2_ref
               ? {
-                  id: v.option_value_2_ref.id,
-                  value: v.option_value_2_ref.value,
-                  price_modifier: v.option_value_2_ref.price_modifier,
-                  imageUrl: v.option_value_2_ref.image_url,
-                  attribute_name:
-                    v.option_value_2_ref.product_option_attributes?.name,
-                  attribute_position:
-                    v.option_value_2_ref.product_option_attributes?.position,
-                }
+                id: v.option_value_2_ref.id,
+                value: v.option_value_2_ref.value,
+                price_modifier: v.option_value_2_ref.price_modifier,
+                imageUrl: v.option_value_2_ref.image_url,
+                attribute_name:
+                  v.option_value_2_ref.product_option_attributes?.name,
+                attribute_position:
+                  v.option_value_2_ref.product_option_attributes?.position,
+              }
               : null,
             option_value_3_ref: v.option_value_3_ref
               ? {
-                  id: v.option_value_3_ref.id,
-                  value: v.option_value_3_ref.value,
-                  price_modifier: v.option_value_3_ref.price_modifier,
-                  imageUrl: v.option_value_3_ref.image_url,
-                  attribute_name:
-                    v.option_value_3_ref.product_option_attributes?.name,
-                  attribute_position:
-                    v.option_value_3_ref.product_option_attributes?.position,
-                }
+                id: v.option_value_3_ref.id,
+                value: v.option_value_3_ref.value,
+                price_modifier: v.option_value_3_ref.price_modifier,
+                imageUrl: v.option_value_3_ref.image_url,
+                attribute_name:
+                  v.option_value_3_ref.product_option_attributes?.name,
+                attribute_position:
+                  v.option_value_3_ref.product_option_attributes?.position,
+              }
               : null,
           };
         });
@@ -655,6 +655,29 @@ export class ProductRepository {
 
         if (productIds && productIds.length > 0) {
           const ids = productIds.map((p) => p.product_id);
+          query = query.in("id", ids);
+        } else {
+          return {
+            products: [],
+            pagination: {
+              page: filters.page || 1,
+              limit: filters.limit || 20,
+              total: 0,
+              totalPages: 0,
+            },
+          };
+        }
+      }
+
+      // Apply school filter if provided
+      if (filters.schoolId) {
+        const { data: schoolProductIds } = await supabase
+          .from("product_schools")
+          .select("product_id")
+          .eq("school_id", filters.schoolId);
+
+        if (schoolProductIds && schoolProductIds.length > 0) {
+          const ids = schoolProductIds.map((p) => p.product_id);
           query = query.in("id", ids);
         } else {
           return {
@@ -1150,64 +1173,64 @@ export class ProductRepository {
       brands: row.product_brands?.map((pb) => pb.brands) || [],
       primaryImage: primaryImage
         ? {
-            id: primaryImage.id,
-            url: primaryImage.url,
-            altText: primaryImage.alt_text,
-            isPrimary: primaryImage.is_primary,
-          }
+          id: primaryImage.id,
+          url: primaryImage.url,
+          altText: primaryImage.alt_text,
+          isPrimary: primaryImage.is_primary,
+        }
         : null,
       images: Array.isArray(row.product_images)
         ? row.product_images.map((img) => ({
-            id: img.id,
-            url: img.url,
-            altText: img.alt_text,
-            isPrimary: img.is_primary,
-          }))
+          id: img.id,
+          url: img.url,
+          altText: img.alt_text,
+          isPrimary: img.is_primary,
+        }))
         : [],
       // Include variants if present (from warehouse product queries)
       ...(row.product_variants
         ? {
-            variants: row.product_variants.map((v) => ({
-              id: v.id,
-              sku: v.sku,
-              price: parseFloat(v.price || 0),
-              compareAtPrice: v.compare_at_price
-                ? parseFloat(v.compare_at_price)
+          variants: row.product_variants.map((v) => ({
+            id: v.id,
+            sku: v.sku,
+            price: parseFloat(v.price || 0),
+            compareAtPrice: v.compare_at_price
+              ? parseFloat(v.compare_at_price)
+              : null,
+            stock: parseInt(v.stock || 0),
+            weight: v.weight ? parseFloat(v.weight) : null,
+            optionValues: {
+              value1: v.option_value_1_ref
+                ? {
+                  ...v.option_value_1_ref,
+                  attributeName:
+                    v.option_value_1_ref.product_option_attributes?.name,
+                }
                 : null,
-              stock: parseInt(v.stock || 0),
-              weight: v.weight ? parseFloat(v.weight) : null,
-              optionValues: {
-                value1: v.option_value_1_ref
-                  ? {
-                      ...v.option_value_1_ref,
-                      attributeName:
-                        v.option_value_1_ref.product_option_attributes?.name,
-                    }
-                  : null,
-                value2: v.option_value_2_ref
-                  ? {
-                      ...v.option_value_2_ref,
-                      attributeName:
-                        v.option_value_2_ref.product_option_attributes?.name,
-                    }
-                  : null,
-                value3: v.option_value_3_ref
-                  ? {
-                      ...v.option_value_3_ref,
-                      attributeName:
-                        v.option_value_3_ref.product_option_attributes?.name,
-                    }
-                  : null,
-              },
-              metadata: v.metadata || {},
-              createdAt: v.created_at,
-              updatedAt: v.updated_at,
-            })),
-            totalStock: row.product_variants.reduce(
-              (sum, v) => sum + parseInt(v.stock || 0),
-              0,
-            ),
-          }
+              value2: v.option_value_2_ref
+                ? {
+                  ...v.option_value_2_ref,
+                  attributeName:
+                    v.option_value_2_ref.product_option_attributes?.name,
+                }
+                : null,
+              value3: v.option_value_3_ref
+                ? {
+                  ...v.option_value_3_ref,
+                  attributeName:
+                    v.option_value_3_ref.product_option_attributes?.name,
+                }
+                : null,
+            },
+            metadata: v.metadata || {},
+            createdAt: v.created_at,
+            updatedAt: v.updated_at,
+          })),
+          totalStock: row.product_variants.reduce(
+            (sum, v) => sum + parseInt(v.stock || 0),
+            0,
+          ),
+        }
         : {}),
     };
   }
@@ -1246,9 +1269,8 @@ export class ProductRepository {
 
       if (imageData.file && !imageUrl) {
         // If file is provided, upload to Supabase storage
-        const fileName = `products/${productId}/${
-          imageData.variantId || "main"
-        }/${Date.now()}-${imageData.file.name}`;
+        const fileName = `products/${productId}/${imageData.variantId || "main"
+          }/${Date.now()}-${imageData.file.name}`;
 
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("product-images")
@@ -1347,9 +1369,8 @@ export class ProductRepository {
       let imageUrl = updateData.url || existingImage.url;
 
       if (updateData.file) {
-        const fileName = `products/${existingImage.product_id}/${
-          existingImage.variant_id || "main"
-        }/${Date.now()}-${updateData.file.name}`;
+        const fileName = `products/${existingImage.product_id}/${existingImage.variant_id || "main"
+          }/${Date.now()}-${updateData.file.name}`;
 
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from("product-images")
