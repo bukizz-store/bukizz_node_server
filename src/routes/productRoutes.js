@@ -167,6 +167,16 @@ export default function productRoutes(dependencies = {}) {
   );
 
   /**
+   * Get comprehensive product by ID
+   * GET /api/v1/products/:id/comprehensive
+   */
+  router.get(
+    "/:id/comprehensive",
+    validate(paramSchemas.id, "params"),
+    productController.getComprehensiveProduct,
+  );
+
+  /**
    * Get product with complete details (images, brands, retailer)
    * GET /api/v1/products/:id/complete
    */

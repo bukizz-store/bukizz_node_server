@@ -1,4 +1,8 @@
-import { getSupabase, createAuthenticatedClient, createServiceClient } from "../db/index.js";
+import {
+  getSupabase,
+  createAuthenticatedClient,
+  createServiceClient,
+} from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 import { logger } from "../utils/logger.js";
 
@@ -70,10 +74,7 @@ export class SchoolRepository {
    */
   async findById(schoolId, { includeInactive = false } = {}) {
     try {
-      let query = this.supabase
-        .from("schools")
-        .select("*")
-        .eq("id", schoolId);
+      let query = this.supabase.from("schools").select("*").eq("id", schoolId);
 
       if (!includeInactive) {
         query = query.eq("is_active", true);
@@ -154,7 +155,7 @@ export class SchoolRepository {
       if (search && search.trim()) {
         const searchTerm = search.trim().replace(/[%_]/g, "\\$&");
         query = query.or(
-          `name.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%,state.ilike.%${searchTerm}%`
+          `name.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%,state.ilike.%${searchTerm}%`,
         );
       }
 
@@ -273,7 +274,6 @@ export class SchoolRepository {
         updates.email = updateData.email;
       }
 
-
       if (updateData.isActive !== undefined) {
         updates.is_active = updateData.isActive;
       }
@@ -281,8 +281,6 @@ export class SchoolRepository {
       if (Object.keys(updates).length === 0) {
         return this.findById(schoolId);
       }
-
-
 
       const { data, error } = await this.supabase
         .from("schools")
@@ -458,7 +456,7 @@ export class SchoolRepository {
           grade,
           mandatory,
           products!inner(*)
-        `
+        `,
         )
         .eq("school_id", schoolId)
         .eq("products.is_active", true);
@@ -497,6 +495,49 @@ export class SchoolRepository {
     } catch (error) {
       logger.error("Error getting school analytics:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Get school for a specific product
+   * @param {string} productId - Product ID
+   * @returns {Promise<Object|null>} School association data or null
+   */
+  async getSchoolForProduct(productId) {
+    try {
+      if (!productId) return null;
+
+      const { data, error } = await this.supabase
+        .from("product_schools")
+        .select(
+          `
+          grade, 
+          mandatory,
+          schools (
+            id,
+            name
+          )
+        `,
+        )
+        .eq("product_id", productId)
+        .single();
+
+      if (error) {
+        if (error.code === "PGRST116") return null; // Not found
+        throw error;
+      }
+
+      if (!data || !data.schools) return null;
+
+      return {
+        schoolId: data.schools.id,
+        name: data.schools.name,
+        grade: data.grade,
+        mandatory: data.mandatory,
+      };
+    } catch (error) {
+      logger.error("Error getting school for product:", error);
+      return null;
     }
   }
 
@@ -584,7 +625,9 @@ export class SchoolRepository {
     // Helper: Validate UUID v4 (case-insensitive)
     const isUUID = (s) =>
       typeof s === "string" &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        s,
+      );
 
     try {
       if (!isUUID(schoolId)) {
@@ -611,7 +654,10 @@ export class SchoolRepository {
 
       const filterCategory = category || productType || null;
       const validPage = Math.max(1, Number.parseInt(page, 10) || 1);
-      const validLimit = Math.min(Math.max(1, Number.parseInt(limit, 10) || 1), 200);
+      const validLimit = Math.min(
+        Math.max(1, Number.parseInt(limit, 10) || 1),
+        200,
+      );
       const offset = (validPage - 1) * validLimit;
       const isDescending = String(sortOrder || "asc").toLowerCase() === "desc";
 
@@ -649,7 +695,7 @@ export class SchoolRepository {
           updated_at
         )
       `,
-          { count: "exact" }
+          { count: "exact" },
         )
         .eq("school_id", schoolId)
         .eq("products.is_active", true);
@@ -658,30 +704,46 @@ export class SchoolRepository {
       // if (grade && String(grade).trim()) baseQuery = baseQuery.eq("grade", String(grade).trim());
 
       // mandatory filter (product_schools.mandatory)
-      if (mandatory !== null && mandatory !== undefined) baseQuery = baseQuery.eq("mandatory", !!mandatory);
+      if (mandatory !== null && mandatory !== undefined)
+        baseQuery = baseQuery.eq("mandatory", !!mandatory);
 
       // product-level price filtering (on products.base_price)
-      if (priceMin !== null && priceMin !== undefined && !Number.isNaN(Number(priceMin)))
+      if (
+        priceMin !== null &&
+        priceMin !== undefined &&
+        !Number.isNaN(Number(priceMin))
+      )
         baseQuery = baseQuery.gte("products.base_price", Number(priceMin));
-      if (priceMax !== null && priceMax !== undefined && !Number.isNaN(Number(priceMax)))
+      if (
+        priceMax !== null &&
+        priceMax !== undefined &&
+        !Number.isNaN(Number(priceMax))
+      )
         baseQuery = baseQuery.lte("products.base_price", Number(priceMax));
 
       // search on product title/description (use ilike)
       if (search && String(search).trim()) {
         const term = String(search).trim().replace(/[%_]/g, "\\$&");
         // Supabase .or(...) syntax takes comma-separated conditions
-        baseQuery = baseQuery.or(`products.title.ilike.%${term}%,products.description.ilike.%${term}%`);
+        baseQuery = baseQuery.or(
+          `products.title.ilike.%${term}%,products.description.ilike.%${term}%`,
+        );
       }
 
       // Attempt some DB ordering where possible (grade/mandatory can be sorted DB-side)
       let dbOrderAttempted = false;
       try {
         if (mappedSortBy === "grade" || mappedSortBy === "mandatory") {
-          baseQuery = baseQuery.order(mappedSortBy, { ascending: !isDescending });
+          baseQuery = baseQuery.order(mappedSortBy, {
+            ascending: !isDescending,
+          });
           dbOrderAttempted = true;
         } else if (mappedSortBy === "title" || mappedSortBy === "created_at") {
           // sort by product fields (via foreign table)
-          baseQuery = baseQuery.order(mappedSortBy, { foreignTable: "products", ascending: !isDescending });
+          baseQuery = baseQuery.order(mappedSortBy, {
+            foreignTable: "products",
+            ascending: !isDescending,
+          });
           dbOrderAttempted = true;
         } else {
           dbOrderAttempted = false;
@@ -694,7 +756,10 @@ export class SchoolRepository {
       baseQuery = baseQuery.range(offset, offset + validLimit - 1);
       const { data: baseRows, error: baseErr, count } = await baseQuery;
       if (baseErr) {
-        logger?.error("Supabase: failed fetching product_schools + products", baseErr);
+        logger?.error(
+          "Supabase: failed fetching product_schools + products",
+          baseErr,
+        );
         throw baseErr;
       }
 
@@ -716,7 +781,17 @@ export class SchoolRepository {
             hasNext: totalPages ? validPage < totalPages : false,
             hasPrev: validPage > 1,
           },
-          filters: { grade, mandatory, category: filterCategory, priceMin, priceMax, search, sortBy, sortOrder, onlyAvailable },
+          filters: {
+            grade,
+            mandatory,
+            category: filterCategory,
+            priceMin,
+            priceMax,
+            search,
+            sortBy,
+            sortOrder,
+            onlyAvailable,
+          },
           meta: {
             appliedFilters: {
               hasGradeFilter: !!grade,
@@ -757,10 +832,11 @@ export class SchoolRepository {
       // --- 2) Fetch variants for these products (bulk)
       let variantQuery = this.supabase
         .from("product_variants")
-        .select("id, product_id, sku, price, stock, option_value_1, option_value_2, option_value_3");
+        .select(
+          "id, product_id, sku, price, stock, option_value_1, option_value_2, option_value_3",
+        );
 
       // console.log({productIds});
-
 
       // Avoid calling .in() with empty array (Supabase error). productIds is non-empty here.
       variantQuery = variantQuery.in("product_id", productIds);
@@ -772,7 +848,9 @@ export class SchoolRepository {
       }
       const allVariants = variantRows || [];
       // Optionally keep only available variants
-      const variants = onlyAvailable ? allVariants.filter((v) => Number(v.stock) > 0) : allVariants;
+      const variants = onlyAvailable
+        ? allVariants.filter((v) => Number(v.stock) > 0)
+        : allVariants;
 
       // --- 3) Collect option_value ids present and bulk fetch them
       const optionValueIdsSet = new Set();
@@ -792,7 +870,10 @@ export class SchoolRepository {
           .in("id", optionValueIds);
 
         if (ovErr) {
-          logger?.error("Supabase: failed fetching product_option_values", ovErr);
+          logger?.error(
+            "Supabase: failed fetching product_option_values",
+            ovErr,
+          );
           throw ovErr;
         }
         optionValues = ovData || [];
@@ -800,7 +881,9 @@ export class SchoolRepository {
       const optionValueMap = new Map(optionValues.map((o) => [o.id, o]));
 
       // --- 4) Fetch attributes used by those option values
-      const attributeIds = Array.from(new Set(optionValues.map((o) => o.attribute_id).filter(Boolean)));
+      const attributeIds = Array.from(
+        new Set(optionValues.map((o) => o.attribute_id).filter(Boolean)),
+      );
       let attributes = [];
       if (attributeIds.length > 0) {
         const { data: attrData, error: attrErr } = await this.supabase
@@ -809,7 +892,10 @@ export class SchoolRepository {
           .in("id", attributeIds);
 
         if (attrErr) {
-          logger?.error("Supabase: failed fetching product_option_attributes", attrErr);
+          logger?.error(
+            "Supabase: failed fetching product_option_attributes",
+            attrErr,
+          );
           throw attrErr;
         }
         attributes = attrData || [];
@@ -887,7 +973,11 @@ export class SchoolRepository {
         // Build option list and sum modifiers
         const optionList = [];
         let optionModifiersSum = 0;
-        const optionIds = [v.option_value_1, v.option_value_2, v.option_value_3];
+        const optionIds = [
+          v.option_value_1,
+          v.option_value_2,
+          v.option_value_3,
+        ];
 
         for (const optId of optionIds) {
           if (!optId) continue;
@@ -906,7 +996,10 @@ export class SchoolRepository {
         }
 
         // Base price for variant (variant.price preferred, fallback to product.base_price)
-        const basePrice = v.price !== null && v.price !== undefined ? Number(v.price) : Number(product.base_price || 0);
+        const basePrice =
+          v.price !== null && v.price !== undefined
+            ? Number(v.price)
+            : Number(product.base_price || 0);
         const finalPrice = Number((basePrice || 0) + optionModifiersSum);
 
         const variantObj = {
@@ -920,7 +1013,8 @@ export class SchoolRepository {
         };
 
         product.variants.push(variantObj);
-        if (product.min_price === null || finalPrice < product.min_price) product.min_price = finalPrice;
+        if (product.min_price === null || finalPrice < product.min_price)
+          product.min_price = finalPrice;
       }
 
       // Attach categories, brands, images and finalize products array
@@ -961,7 +1055,11 @@ export class SchoolRepository {
       }
 
       // --- 7) In-memory sorting when DB ordering wasn't applied or for price/category sorts
-      if (!dbOrderAttempted || mappedSortBy === "min_price" || mappedSortBy === "category") {
+      if (
+        !dbOrderAttempted ||
+        mappedSortBy === "min_price" ||
+        mappedSortBy === "category"
+      ) {
         const dir = isDescending ? -1 : 1;
         products.sort((a, b) => {
           let aValue, bValue;
@@ -1029,9 +1127,6 @@ export class SchoolRepository {
     }
   }
 
-
-
-
   /**
    * Deactivate school (soft delete)
    * @param {string} schoolId - School ID
@@ -1067,7 +1162,6 @@ export class SchoolRepository {
         .from("schools")
         .update({
           is_active: true,
-
         })
         .eq("id", schoolId);
 
@@ -1150,8 +1244,6 @@ export class SchoolRepository {
         });
 
       if (error) throw error;
-
-
 
       // Get public URL (always uses public client as read is public)
       const {

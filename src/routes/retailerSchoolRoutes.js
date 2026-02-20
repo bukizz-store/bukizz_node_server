@@ -1,6 +1,9 @@
 import express from "express";
 import { retailerSchoolController } from "../controllers/retailerSchoolController.js";
-import { authenticateToken } from "../middleware/authMiddleware.js";
+import {
+  authenticateToken,
+  requireRoles,
+} from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -16,6 +19,17 @@ router.use(authenticateToken);
 router.post("/link", retailerSchoolController.linkRetailerToSchool);
 
 /**
+ * @route GET /api/v1/retailer-schools/admin/pending
+ * @desc Get all pending retailer-school link requests globally
+ * @access Private/Admin
+ */
+router.get(
+  "/admin/pending",
+  requireRoles("admin"),
+  retailerSchoolController.getAllPendingRequests,
+);
+
+/**
  * @route GET /api/v1/retailer-schools/connected-schools
  * @desc Get all schools connected to the authenticated retailer (full school info)
  * @query ?status=approved|pending|rejected
@@ -29,7 +43,10 @@ router.get("/connected-schools", retailerSchoolController.getConnectedSchools);
  * @query ?status=approved|pending|rejected
  * @access Private
  */
-router.get("/connected-schools/:retailerId", retailerSchoolController.getConnectedSchools);
+router.get(
+  "/connected-schools/:retailerId",
+  retailerSchoolController.getConnectedSchools,
+);
 
 /**
  * @route GET /api/v1/retailer-schools/connected-retailers/:schoolId
@@ -37,7 +54,10 @@ router.get("/connected-schools/:retailerId", retailerSchoolController.getConnect
  * @query ?status=approved|pending|rejected
  * @access Private
  */
-router.get("/connected-retailers/:schoolId", retailerSchoolController.getConnectedRetailers);
+router.get(
+  "/connected-retailers/:schoolId",
+  retailerSchoolController.getConnectedRetailers,
+);
 
 /**
  * @route PATCH /api/v1/retailer-schools/status
