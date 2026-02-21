@@ -472,7 +472,6 @@ export class OrderService {
           productId: item.productId,
           variantId: item.variantId || null,
           quantity: item.quantity,
-          quantity: item.quantity,
           unitPrice: parseFloat(currentPrice),
           originalPrice: parseFloat(originalPrice), // Store for calculation
           totalPrice: parseFloat(currentPrice) * item.quantity,
@@ -480,6 +479,7 @@ export class OrderService {
             ? product.variant_sku || product.sku
             : product.sku,
           title: product.title,
+          deliveryCharge: parseFloat(product.delivery_charge) || 0,
           productSnapshot: {
             title: product.title,
             description: product.description || product.short_description,
@@ -539,9 +539,11 @@ export class OrderService {
     let subtotal = 0;
     const itemDetails = [];
     const warehouseGroups = new Map();
+    let totalDeliveryCharge = 0;
 
     for (const item of validatedItems) {
       subtotal += item.totalPrice;
+      totalDeliveryCharge += (item.deliveryCharge || 0) * item.quantity;
       itemDetails.push(item);
 
       // Group by warehouse for multi-warehouse fee calculation
@@ -555,7 +557,7 @@ export class OrderService {
     // Calculate fees and taxes with business rules
     const deliveryFee = this._calculateDeliveryFee(
       subtotal,
-      warehouseGroups.size
+      totalDeliveryCharge
     );
     const platformFee = this._calculatePlatformFee(subtotal);
     const tax = this._calculateTax(subtotal);
@@ -1134,6 +1136,7 @@ export class OrderService {
           compareAtPrice,
           totalPrice: itemTotal,
           warehouseId: warehouseMap.get(item.productId) || null,
+          deliveryCharge: parseFloat(product.delivery_charge || product.deliveryCharge) || 0,
           productSnapshot: {
             type: product.productType,
             brand: product.brands?.[0]?.name,
@@ -1151,10 +1154,15 @@ export class OrderService {
         warehouseGroups.get(wId).push(itemDetail);
       }
 
+      let totalDeliveryCharge = 0;
+      for (const item of itemDetails) {
+        totalDeliveryCharge += (item.deliveryCharge || 0) * item.quantity;
+      }
+
       // Calculate fees and taxes
       const deliveryFee = this._calculateDeliveryFee(
         subtotal,
-        warehouseGroups.size
+        totalDeliveryCharge
       );
       const platformFee = this._calculatePlatformFee(subtotal);
       const tax = this._calculateTax(subtotal);
@@ -1527,15 +1535,15 @@ export class OrderService {
     return transitions[currentStatus]?.includes(newStatus) || false;
   }
 
-  _calculateDeliveryFee(subtotal, warehouseCount) {
+  _calculateDeliveryFee(subtotal, totalDeliveryCharge) {
     // Free delivery above ₹399 (Frontend Logic)
     // Note: Frontend also has item-specific delivery charges. 
     // Ideally, this service should receive the fully calculated delivery fee or replicate the precise logic.
     // For now, aligning the base logic:
     const baseFee = subtotal >= 399 ? 0 : 50;
-    // Multi-warehouse shipping surcharge
-    const multiWarehouseFee = warehouseCount > 1 ? (warehouseCount - 1) * 30 : 0;
-    return baseFee + multiWarehouseFee;
+
+    // Add product specific delivery charges instead of multi-warehouse fee
+    return baseFee + totalDeliveryCharge;
   }
 
   _calculatePlatformFee(subtotal) {
