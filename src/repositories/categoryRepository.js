@@ -226,7 +226,7 @@ export class CategoryRepository {
       }
 
       if (error) throw error;
-
+      
       return {
         categories: (categories || []).map((c) => this.formatCategory(c)),
         pagination: {
