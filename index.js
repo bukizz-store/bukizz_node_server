@@ -42,6 +42,12 @@ import { UserRepository } from "./src/repositories/userRepository.js";
 import { errorHandler } from "./src/middleware/errorHandler.js";
 import { logger } from "./src/utils/logger.js";
 import { config } from "./src/config/index.js";
+import { setupCronJobs } from "./src/jobs/cronJobs.js";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -123,6 +129,14 @@ async function startServer() {
 
     // Setup all routes
     setupRoutes(app, dependencies);
+
+    // Serve sitemap statically
+    app.get("/sitemap.xml", (req, res) => {
+      res.sendFile(path.join(__dirname, "public/sitemap.xml"));
+    });
+
+    // Start cron jobs
+    setupCronJobs();
 
     // Basic auth routes (keeping existing for backward compatibility)
     const loginSchema = Joi.object({

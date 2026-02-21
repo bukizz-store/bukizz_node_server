@@ -4,6 +4,8 @@ const logger = require("./utils/logger");
 const { connectDB } = require("./db");
 const { setupRoutes } = require("./routes");
 const { errorHandler } = require("./middleware/errorHandler");
+const { setupCronJobs } = require("./jobs/cronJobs.js");
+const path = require("path");
 
 /**
  * Main application entry point
@@ -39,6 +41,14 @@ async function createApp() {
 
     // Setup routes
     setupRoutes(app);
+
+    // Serve sitemap statically
+    app.get("/sitemap.xml", (req, res) => {
+      res.sendFile(path.join(__dirname, "../public/sitemap.xml"));
+    });
+
+    // Start cron jobs
+    setupCronJobs();
 
     // Global error handler (must be last)
     app.use(errorHandler);

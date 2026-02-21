@@ -105,7 +105,11 @@ class WarehouseService {
             if (updates.name) allowedUpdates.name = updates.name;
             if (updates.contactEmail) allowedUpdates.contact_email = updates.contactEmail;
             if (updates.contactPhone) allowedUpdates.contact_phone = updates.contactPhone;
-            if (updates.address) allowedUpdates.address = updates.address;
+            if (updates.address && typeof updates.address === 'object') {
+                allowedUpdates.addressData = updates.address;
+            } else if (updates.address) {
+                allowedUpdates.address = updates.address;
+            }
             if (updates.website) allowedUpdates.website = updates.website;
             if (updates.metadata) allowedUpdates.metadata = updates.metadata;
 
@@ -161,7 +165,11 @@ class WarehouseService {
             if (updates.name) allowedUpdates.name = updates.name;
             if (updates.contactEmail) allowedUpdates.contact_email = updates.contactEmail;
             if (updates.contactPhone) allowedUpdates.contact_phone = updates.contactPhone;
-            if (updates.address) allowedUpdates.address = updates.address;
+            if (updates.address && typeof updates.address === 'object') {
+                allowedUpdates.addressData = updates.address;
+            } else if (updates.address) {
+                allowedUpdates.address = updates.address;
+            }
             if (updates.website) allowedUpdates.website = updates.website;
             if (updates.metadata) allowedUpdates.metadata = updates.metadata;
             if (updates.isVerified !== undefined) allowedUpdates.is_verified = updates.isVerified;

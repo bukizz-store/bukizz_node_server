@@ -265,6 +265,118 @@ export class PaymentController {
     });
 
     /**
+     * Reconcile Payment Status
+     * POST /api/payments/reconcile
+     * Checks Razorpay for actual payment status if DB is out of sync
+     */
+    reconcilePayment = asyncHandler(async (req, res) => {
+        const { orderId } = req.body;
+        const userId = req.user.id;
+
+        if (!orderId) {
+            throw new AppError("Order ID is required", 400);
+        }
+
+        // 1. Get the order
+        const order = await this.orderRepository.findById(orderId);
+        if (!order) {
+            throw new AppError("Order not found", 404);
+        }
+
+        if (order.userId !== userId) {
+            throw new AppError("Access denied", 403);
+        }
+
+        // If order is already paid/processed, nothing to reconcile
+        if (order.paymentStatus === "paid" || order.status !== "initialized") {
+            return res.status(200).json({
+                success: true,
+                message: "Order is already up to date",
+                status: order.status,
+                paymentStatus: order.paymentStatus
+            });
+        }
+
+        // 2. Find the transaction for this order to get gateway_order_id
+        const { data: transactions, error: txnError } = await this.supabase
+            .from("transactions")
+            .select("*")
+            .eq("order_id", orderId)
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+        if (txnError || !transactions || transactions.length === 0) {
+            throw new AppError("No transaction found for this order", 404);
+        }
+
+        const transaction = transactions[0];
+
+        if (!transaction.gateway_order_id) {
+            throw new AppError("No payment gateway order ID found", 400);
+        }
+
+        // 3. Fetch payments for this order from Razorpay
+        try {
+            const payments = await razorpay.orders.fetchPayments(transaction.gateway_order_id);
+
+            // Find if any payment was captured
+            const capturedPayment = payments?.items?.find((p) => p.status === "captured");
+
+            if (capturedPayment) {
+                logger.info("Reconciliation: Found captured payment in Razorpay", {
+                    orderId,
+                    paymentId: capturedPayment.id
+                });
+
+                // Update Transaction
+                await this.serviceClient
+                    .from("transactions")
+                    .update({
+                        payment_id: capturedPayment.id,
+                        status: "completed",
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", transaction.id);
+
+                // Update Order Status
+                await this.serviceClient
+                    .from("orders")
+                    .update({
+                        payment_status: "paid",
+                        status: "processed",
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq("id", orderId);
+
+                // Update Order Items
+                await this.serviceClient
+                    .from("order_items")
+                    .update({ status: "processed" })
+                    .eq("order_id", orderId);
+
+                return res.status(200).json({
+                    success: true,
+                    message: "Payment reconciled and order marked as paid",
+                    status: "processed",
+                    paymentStatus: "paid"
+                });
+            } else {
+                // No captured payment found on Razorpay
+                // Don't auto-cancel yet, just return current status to let the user try again
+                return res.status(200).json({
+                    success: true,
+                    message: "No successful payment found on gateway",
+                    status: order.status,
+                    paymentStatus: order.paymentStatus
+                });
+            }
+        } catch (razorpayError) {
+            logger.error("Failed to fetch payments from Razorpay during reconciliation", razorpayError);
+            throw new AppError("Failed to check payment status with gateway", 500);
+        }
+    });
+
+    /**
     * Handle Razorpay Webhooks
     * POST /api/payments/webhook
     */
@@ -294,42 +406,58 @@ export class PaymentController {
                 const orderId = payment.notes.orderId;
 
                 if (orderId) {
-                    // Ensure order is marked as paid
-                    await this.serviceClient
-                        .from("orders")
-                        .update({
-                            payment_status: "paid",
-                            status: "processed",
-                            updated_at: new Date().toISOString(),
-                        })
-                        .eq("id", orderId)
-                        // Use .neq to avoid overwriting if already paid/processing? 
-                        // Actually idempotent update is fine.
-                        ;
+                    try {
+                        // Ensure order is marked as paid
+                        const { error: orderError } = await this.serviceClient
+                            .from("orders")
+                            .update({
+                                payment_status: "paid",
+                                status: "processed",
+                                updated_at: new Date().toISOString(),
+                            })
+                            .eq("id", orderId);
 
-                    // Update order items too
-                    await this.serviceClient
-                        .from("order_items")
-                        .update({
-                            status: "processed",
-                        })
-                        .eq("order_id", orderId);
+                        if (orderError) throw new Error(`Orders update failed: ${orderError.message}`);
 
-                    // Update transaction too
-                    await this.serviceClient
-                        .from("transactions")
-                        .update({
-                            payment_id: payment.id,
-                            status: "completed", // or captured
-                            updated_at: new Date().toISOString(),
-                        })
-                        .eq("gateway_order_id", payment.order_id);
+                        // Update order items too
+                        const { error: itemsError } = await this.serviceClient
+                            .from("order_items")
+                            .update({
+                                status: "processed",
+                            })
+                            .eq("order_id", orderId);
+
+                        if (itemsError) throw new Error(`Order items update failed: ${itemsError.message}`);
+
+                        // Update transaction too
+                        const { error: txnError } = await this.serviceClient
+                            .from("transactions")
+                            .update({
+                                payment_id: payment.id,
+                                status: "completed", // or captured
+                                updated_at: new Date().toISOString(),
+                            })
+                            .eq("gateway_order_id", payment.order_id);
+
+                        if (txnError) throw new Error(`Transaction update failed: ${txnError.message}`);
+
+                        logger.info("Webhook: Successfully processed captured payment", { orderId, paymentId: payment.id });
+                    } catch (captureError) {
+                        logger.error("Webhook: Failed to process captured payment updates", {
+                            orderId,
+                            paymentId: payment.id,
+                            error: captureError.message
+                        });
+                        // Don't throw, let the webhook return 200 so Razorpay doesn't infinitely retry 
+                        // when our DB is the issue. The new /reconcile API will handle recovery.
+                    }
                 }
             } else if (event === "payment.failed") {
                 const payment = payload.payment.entity;
                 const orderId = payment.notes.orderId;
 
                 if (orderId) {
+                    // 1. Update transaction as failed
                     await this.serviceClient
                         .from("transactions")
                         .update({
@@ -340,6 +468,60 @@ export class PaymentController {
                             updated_at: new Date().toISOString(),
                         })
                         .eq("gateway_order_id", payment.order_id);
+
+                    // 2. Set payment_status to failed immediately (guaranteed)
+                    await this.serviceClient
+                        .from("orders")
+                        .update({ payment_status: "failed", updated_at: new Date().toISOString() })
+                        .eq("id", orderId);
+
+                    // 3. Cancel order + restock if still in initialized state (safety net)
+                    try {
+                        const { OrderService } = await import("../services/orderService.js");
+                        const { OrderRepository } = await import("../repositories/orderRepository.js");
+                        const { ProductRepository } = await import("../repositories/productRepository.js");
+                        const { UserRepository } = await import("../repositories/userRepository.js");
+                        const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
+                        const { WarehouseRepository } = await import("../repositories/warehouseRepository.js");
+
+                        const orderRepo = new OrderRepository(this.serviceClient);
+                        const orderService = new OrderService(
+                            orderRepo, new ProductRepository(), new UserRepository(this.serviceClient),
+                            new OrderEventRepository(), null, new WarehouseRepository()
+                        );
+
+                        const order = await orderRepo.findById(orderId);
+                        if (order && order.status === "initialized") {
+                            await orderService.cancelOrder(
+                                orderId, order.userId,
+                                `Webhook: Payment Failed - ${payment.error_description || payment.error_code || "Unknown"}`
+                            );
+                            logger.info("Webhook: Order auto-cancelled due to payment failure", { orderId });
+                        } else {
+                            logger.info("Webhook: Order not in initialized state, skipping cancel", {
+                                orderId, currentStatus: order?.status
+                            });
+                        }
+                    } catch (cancelError) {
+                        logger.error("Webhook: Failed to cancel order after payment failure", {
+                            orderId, error: cancelError.message
+                        });
+
+                        // Fallback: direct DB updates for status and items
+                        try {
+                            await this.serviceClient.from("orders").update({
+                                status: "cancelled", updated_at: new Date().toISOString(),
+                            }).eq("id", orderId).eq("status", "initialized");
+
+                            await this.serviceClient.from("order_items").update({
+                                status: "cancelled",
+                            }).eq("order_id", orderId).neq("status", "cancelled");
+
+                            logger.info("Webhook fallback: Order and items directly cancelled", { orderId });
+                        } catch (fallbackError) {
+                            logger.error("Webhook fallback cancellation also failed", { orderId, error: fallbackError.message });
+                        }
+                    }
                 }
             }
 
@@ -384,13 +566,13 @@ export class PaymentController {
 
         // CRITICAL: Cancel the order to release stock and mark as cancelled
         if (orderId) {
-            try {
-                // We use the internal service methods via a temporary controller instance or direct service usage is better
-                // But since we are in controller, let's use the OrderService if available or direct DB updates with restocking logic
-                // Ideally, we should inject OrderService into PaymentController. 
-                // Given the current structure, let's see if we can use OrderController's logic or instantiate OrderService.
+            // Set payment_status to failed FIRST (guaranteed, regardless of cancelOrder outcome)
+            await this.serviceClient
+                .from("orders")
+                .update({ payment_status: "failed", updated_at: new Date().toISOString() })
+                .eq("id", orderId);
 
-                // Re-instantiating OrderService here to safely cancel
+            try {
                 const { OrderService } = await import("../services/orderService.js");
                 const { OrderRepository } = await import("../repositories/orderRepository.js");
                 const { ProductRepository } = await import("../repositories/productRepository.js");
@@ -398,10 +580,9 @@ export class PaymentController {
                 const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
                 const { WarehouseRepository } = await import("../repositories/warehouseRepository.js");
 
-                // We can reuse the getOrderService() logic if it was exported or just new it up
-                const orderRepo = new OrderRepository(this.supabase);
-                const prodRepo = new ProductRepository(); // Assuming it doesn't need supabase or handles it internally
-                const userRepo = new UserRepository(this.supabase);
+                const orderRepo = new OrderRepository(this.serviceClient);
+                const prodRepo = new ProductRepository();
+                const userRepo = new UserRepository(this.serviceClient);
                 const eventRepo = new OrderEventRepository();
                 const warehouseRepo = new WarehouseRepository();
 
@@ -412,13 +593,38 @@ export class PaymentController {
                 if (order && order.status === 'initialized') {
                     await orderService.cancelOrder(
                         orderId,
-                        req.user?.id || order.userId, // Use order owner if auth is missing in callback
+                        req.user?.id || order.userId,
                         `Payment Failed/Cancelled: ${error_description || "User cancelled"}`
                     );
                     logger.info("Order auto-cancelled due to payment failure", { orderId });
                 }
             } catch (cancelError) {
                 logger.error("Failed to auto-cancel order after payment failure", cancelError);
+
+                // Fallback: directly update order and items via service client
+                try {
+                    await this.serviceClient
+                        .from("orders")
+                        .update({
+                            status: "cancelled",
+                            payment_status: "failed",
+                            updated_at: new Date().toISOString(),
+                        })
+                        .eq("id", orderId)
+                        .eq("status", "initialized");
+
+                    await this.serviceClient
+                        .from("order_items")
+                        .update({
+                            status: "cancelled",
+                        })
+                        .eq("order_id", orderId)
+                        .neq("status", "cancelled");
+
+                    logger.info("Fallback: Order and items directly cancelled", { orderId });
+                } catch (fallbackError) {
+                    logger.error("Fallback cancellation also failed", { orderId, error: fallbackError.message });
+                }
             }
         }
 
