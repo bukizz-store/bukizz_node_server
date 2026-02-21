@@ -35,6 +35,19 @@ router.post(
 );
 
 /**
+ * @route PUT /api/v1/retailer/data
+ * @desc Update retailer business details (owner name, gstin, pan, signature)
+ * @access Private
+ */
+router.put(
+  "/data",
+  authenticateToken,
+  requireRoles("retailer"),
+  upload.single("signature"),
+  retailerController.updateRetailerProfile,
+);
+
+/**
  * @route GET /api/v1/retailer/verification-status
  * @desc Check retailer verification/authorization status
  * @access Private (retailer)

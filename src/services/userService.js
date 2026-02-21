@@ -2,6 +2,7 @@ import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
 import authService from "./authService.js";
 import emailService from "./emailService.js";
+import { retailerService } from "./retailerService.js";
 import crypto from "crypto";
 
 /**
@@ -23,7 +24,16 @@ export class UserService {
         throw new AppError("User not found or inactive", 404);
       }
 
-      return this._sanitizeUser(user);
+      const sanitizedUser = this._sanitizeUser(user);
+
+      if (sanitizedUser.role === "retailer") {
+        const retailerData = await retailerService.getRetailerProfile(userId);
+        if (retailerData) {
+          sanitizedUser.retailer_data = retailerData;
+        }
+      }
+
+      return sanitizedUser;
     } catch (error) {
       logger.error("Error getting user profile:", error);
       throw error;
