@@ -372,6 +372,7 @@ export class OrderRepository {
       if (!orderData) return null;
 
       const order = this._formatOrder(orderData);
+      console.log("order", order);
 
       // Get order items
       order.items = await this._getOrderItems(orderId);

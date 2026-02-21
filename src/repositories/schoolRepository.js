@@ -455,7 +455,10 @@ export class SchoolRepository {
           `
           grade,
           mandatory,
-          products!inner(*)
+          products!inner(
+            *,
+            product_images(url, is_primary, sort_order)
+          )
         `,
         )
         .eq("school_id", schoolId)
@@ -463,13 +466,31 @@ export class SchoolRepository {
 
       if (error) throw error;
 
-      return (data || []).map((item) => ({
-        ...item.products,
-        schoolInfo: {
-          grade: item.grade,
-          mandatory: item.mandatory,
-        },
-      }));
+      return (data || []).map((item) => {
+        const prod = item.products;
+        let images = prod.product_images || [];
+        images.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+
+        let primaryImage = images.find((i) => i.is_primary)?.url;
+        if (!primaryImage && images.length > 0) {
+          primaryImage = images[0].url;
+        }
+
+        const formattedProd = {
+          ...prod,
+          images, // Frontend sometimes falls back to array
+          primaryImage,
+        };
+        delete formattedProd.product_images;
+
+        return {
+          ...formattedProd,
+          schoolInfo: {
+            grade: item.grade,
+            mandatory: item.mandatory,
+          },
+        };
+      });
     } catch (error) {
       logger.error("Error getting school products:", error);
       throw error;
@@ -692,7 +713,8 @@ export class SchoolRepository {
           metadata,
           is_active,
           created_at,
-          updated_at
+          updated_at,
+          product_images(url, is_primary, sort_order)
         )
       `,
           { count: "exact" },
@@ -819,7 +841,12 @@ export class SchoolRepository {
           currency: prod.currency ?? "INR",
           product_type: prod.product_type ?? null,
           metadata: prod.metadata || null,
-          primary_image: prod.image_url ?? null,
+          primary_image:
+            prod.image_url ||
+            prod.product_images?.find((i) => i.is_primary)?.url ||
+            prod.product_images?.[0]?.url ||
+            null,
+          images: prod.product_images || [],
           variants: [],
           min_price: null,
           schoolInfo: { grade: row.grade, mandatory: !!row.mandatory },
