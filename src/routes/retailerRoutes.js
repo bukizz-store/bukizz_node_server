@@ -1,9 +1,25 @@
 import express from "express";
 import { retailerController } from "../controllers/retailerController.js";
+import { dashboardController } from "../controllers/dashboardController.js";
 import { upload } from "../middleware/upload.js";
-import { authenticateToken, requireRoles } from "../middleware/authMiddleware.js";
+import {
+  authenticateToken,
+  requireRoles,
+} from "../middleware/authMiddleware.js";
 
 const router = express.Router();
+
+/**
+ * @route GET /api/v1/retailer/dashboard/overview
+ * @desc Get aggregated dashboard overview data (stats, schools, recent orders)
+ * @access Private (retailer)
+ */
+router.get(
+  "/dashboard/overview",
+  authenticateToken,
+  requireRoles("retailer", "admin"),
+  dashboardController.getDashboardOverview,
+);
 
 /**
  * @route POST /api/v1/retailer/data
@@ -11,11 +27,11 @@ const router = express.Router();
  * @access Private
  */
 router.post(
-    "/data",
-    authenticateToken,
-    requireRoles("retailer"),
-    upload.single("signature"),
-    retailerController.createRetailerProfile
+  "/data",
+  authenticateToken,
+  requireRoles("retailer"),
+  upload.single("signature"),
+  retailerController.createRetailerProfile,
 );
 
 /**
@@ -24,9 +40,9 @@ router.post(
  * @access Private (retailer)
  */
 router.get(
-    "/verification-status",
-    authenticateToken,
-    retailerController.checkVerificationStatus
+  "/verification-status",
+  authenticateToken,
+  retailerController.checkVerificationStatus,
 );
 
 /**
@@ -35,9 +51,9 @@ router.get(
  * @access Private (retailer)
  */
 router.get(
-    "/data/status",
-    authenticateToken,
-    retailerController.checkRetailerDataStatus
+  "/data/status",
+  authenticateToken,
+  retailerController.checkRetailerDataStatus,
 );
 
 /**
@@ -45,10 +61,6 @@ router.get(
  * @desc Get retailer profile
  * @access Private
  */
-router.get(
-    "/data",
-    authenticateToken,
-    retailerController.getRetailerProfile
-);
+router.get("/data", authenticateToken, retailerController.getRetailerProfile);
 
 export default router;
