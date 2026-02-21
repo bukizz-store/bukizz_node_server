@@ -495,6 +495,7 @@ export const orderSchemas = {
       .required(),
     shippingAddress: Joi.object({
       recipientName: Joi.string().min(2).max(255).required(),
+      studentName: Joi.string().max(255).allow(null, "").optional(),
       phone: phoneSchema.required(),
       line1: Joi.string().max(255).required(),
       line2: Joi.string().max(255).optional(),
@@ -508,6 +509,7 @@ export const orderSchemas = {
     }).required(),
     billingAddress: Joi.object({
       recipientName: Joi.string().min(2).max(255).required(),
+      studentName: Joi.string().max(255).allow(null, "").optional(),
       phone: phoneSchema.required(),
       line1: Joi.string().max(255).required(),
       line2: Joi.string().max(255).optional(),
