@@ -22,6 +22,7 @@ jobs:
           cd ~/bukizz_node_server
 
           # 2. Pull the latest code from GitHub
+          git reset --hard
           git pull origin main
 
           # 3. Install dependencies and Build
