@@ -216,7 +216,7 @@ export class CategoryRepository {
       const { data: categories, count, error } = await query;
 
       if (error) throw error;
-
+      
       return {
         categories: (categories || []).map((c) => this.formatCategory(c)),
         pagination: {
