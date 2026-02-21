@@ -157,6 +157,7 @@ export const categorySchemas = {
     rootOnly: Joi.boolean().optional(),
     sortBy: Joi.string().valid("createdAt", "name").default("name"),
     sortOrder: Joi.string().valid("asc", "desc").default("asc"),
+    schoolCat: Joi.boolean().optional().default(false)
   }),
 };
 

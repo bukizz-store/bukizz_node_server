@@ -192,6 +192,7 @@ export class CategoryRepository {
         query = query.is("parent_id", null);
       }
 
+
       // Sorting
       const sortBy = filters.sortBy || "name";
       const sortOrder = filters.sortOrder === "desc" ? false : true; // default asc
@@ -213,7 +214,16 @@ export class CategoryRepository {
 
       query = query.range(offset, offset + limit - 1);
 
-      const { data: categories, count, error } = await query;
+      let { data: categories, count, error } = await query;
+
+      if (
+        filters.schoolCat === false ||
+        filters.schoolCat === "false" ||
+        filters.schoolCat === undefined ||
+        filters.schholCat === false
+      ) {
+        categories = categories.filter((c) => c.name.toLowerCase() !== "school");
+      }
 
       if (error) throw error;
 
@@ -248,19 +258,19 @@ export class CategoryRepository {
       parentId: row.parent_id,
       parent: row.parent
         ? {
-            id: row.parent.id,
-            name: row.parent.name,
-            slug: row.parent.slug,
-          }
+          id: row.parent.id,
+          name: row.parent.name,
+          slug: row.parent.slug,
+        }
         : null,
       children: Array.isArray(row.children)
         ? row.children.map((c) => ({
-            id: c.id,
-            name: c.name,
-            slug: c.slug,
-            description: c.description,
-            image: c.image,
-          }))
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          description: c.description,
+          image: c.image,
+        }))
         : [],
       isActive: row.is_active,
       createdAt: row.created_at,
