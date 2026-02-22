@@ -1,5 +1,7 @@
 import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
+import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
+import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
 
 /**
  * Order Service
@@ -20,6 +22,8 @@ export class OrderService {
     this.orderEventRepository = orderEventRepository;
     this.orderQueryRepository = orderQueryRepository;
     this.warehouseRepository = warehouseRepository;
+    this.productPaymentMethodRepository = productPaymentMethodRepository;
+    this.variantCommissionRepository = variantCommissionRepository;
   }
 
   /**
@@ -173,18 +177,29 @@ export class OrderService {
         }
       }
 
-      // 4. Validate payment method
-      const validPaymentMethods = [
-        "cod",
-        "upi",
-        "card",
-        "netbanking",
-        "wallet",
-      ];
-      if (!paymentMethod || !validPaymentMethods.includes(paymentMethod)) {
-        validationErrors.push(
-          `Invalid payment method. Allowed: ${validPaymentMethods.join(", ")}`
-        );
+      // 4. Validate payment method dynamically against product settings
+      if (!paymentMethod) {
+        validationErrors.push("Payment method is required");
+      } else {
+        // Collect product IDs
+        const productIds = items.map(i => i.productId).filter(Boolean);
+        if (productIds.length > 0) {
+          // Check payment methods for each product
+          for (const pid of productIds) {
+            const allowedMethods = await this.productPaymentMethodRepository.getPaymentMethods(pid);
+            if (allowedMethods && allowedMethods.length > 0) {
+              if (!allowedMethods.includes(paymentMethod)) {
+                validationErrors.push(`Product ${pid} does not accept payment method: ${paymentMethod}`);
+              }
+            } else {
+              // Fallback default if not explicitly set
+              const defaultMethods = ["cod", "upi", "card"];
+              if (!defaultMethods.includes(paymentMethod)) {
+                validationErrors.push(`Product ${pid} does not accept payment method: ${paymentMethod}`);
+              }
+            }
+          }
+        }
       }
 
       // 5. Validate contact information (more lenient since it's optional in many cases)
@@ -441,6 +456,16 @@ export class OrderService {
           ? product.variant_compare_at_price || product.compare_at_price || currentPrice
           : product.compare_at_price || currentPrice;
 
+        // Fetch active commission for variant, if any
+        let activeCommission = null;
+        if (item.variantId) {
+          try {
+            activeCommission = await this.variantCommissionRepository.getActiveCommission(item.variantId);
+          } catch (commErr) {
+            logger.warn(`Failed to fetch commission for variant ${item.variantId}`, commErr);
+          }
+        }
+
         // Check stock availability
         if (availableStock < item.quantity) {
           stockErrors.push(
@@ -498,6 +523,10 @@ export class OrderService {
                 sku: product.variant_sku,
                 price: product.variant_price,
                 metadata: product.variant_metadata || {},
+                commission: activeCommission ? {
+                  type: activeCommission.commission_type,
+                  value: parseFloat(activeCommission.commission_value)
+                } : null,
               },
             }),
           },

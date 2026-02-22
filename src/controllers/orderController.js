@@ -46,6 +46,30 @@ export class OrderController {
   }
 
   /**
+   * Internal helper to sanitize order items product snapshot for non-admins
+   */
+  static _sanitizeOrders(orders, userRole) {
+    if (userRole === "admin") return orders;
+
+    const sanitizeSingle = (order) => {
+      if (!order || !order.items) return order;
+      order.items.forEach((item) => {
+        if (item.productSnapshot?.variantInfo?.commission) {
+          delete item.productSnapshot.variantInfo.commission;
+        }
+      });
+      return order;
+    };
+
+    if (Array.isArray(orders)) {
+      orders.forEach(sanitizeSingle);
+    } else {
+      sanitizeSingle(orders);
+    }
+    return orders;
+  }
+
+  /**
    * Place a new order with atomic transaction and comprehensive validation
    */
   static async placeOrder(req, res, next) {
@@ -301,6 +325,8 @@ export class OrderController {
       const orderService = getOrderService();
       const result = await orderService.orderRepository.getByUser(userId, filters);
 
+      OrderController._sanitizeOrders(result.orders, req.user?.role);
+
       logger.info("getUserOrders result", {
         userId,
         ordersCount: result.orders?.length || 0,
@@ -342,6 +368,8 @@ export class OrderController {
 
       const orderService = getOrderService();
       const order = await orderService.orderRepository.findById(orderId);
+
+      OrderController._sanitizeOrders(order, userRole);
 
       if (!order) {
         return res.status(404).json({
@@ -446,6 +474,8 @@ export class OrderController {
         `Customer cancellation: ${reason}`
       );
 
+      OrderController._sanitizeOrders(updatedOrder, req.user?.role);
+
       logger.info("Order cancelled successfully", {
         orderId,
         userId,
@@ -549,6 +579,8 @@ export class OrderController {
 
     const order = await this.orderService.createOrder(orderData);
 
+    OrderController._sanitizeOrders(order, req.user.role);
+
     logger.info("Order created", {
       orderId: order.id,
       userId,
@@ -572,6 +604,8 @@ export class OrderController {
 
     const order = await this.orderService.getOrder(id, userId);
 
+    OrderController._sanitizeOrders(order, req.user?.role);
+
     res.json({
       success: true,
       data: { order },
@@ -587,6 +621,10 @@ export class OrderController {
     const userId = req.user.id;
     const result = await this.orderService.getUserOrders(userId, req.query);
 
+    if (result && result.orders) {
+      OrderController._sanitizeOrders(result.orders, req.user?.role);
+    }
+
     res.json({
       success: true,
       data: result,
@@ -600,6 +638,10 @@ export class OrderController {
    */
   searchOrders = asyncHandler(async (req, res) => {
     const result = await this.orderService.searchOrders(req.query);
+
+    if (result && result.orders) {
+      OrderController._sanitizeOrders(result.orders, req.user?.role);
+    }
 
     res.json({
       success: true,
@@ -624,6 +666,8 @@ export class OrderController {
       note,
       metadata
     );
+
+    OrderController._sanitizeOrders(order, req.user?.role);
 
     logger.info("Order status updated", {
       orderId: id,
