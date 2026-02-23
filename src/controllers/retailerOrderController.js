@@ -76,15 +76,19 @@ export class RetailerOrderController {
         const service = getOrderService();
         const result = await service.getOrdersByWarehouseId(warehouseId, retailerId, filters);
 
-        logger.info("Retailer fetched warehouse orders", {
+        // Apply bifurcation and data reduction
+        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result);
+
+        logger.info("Retailer fetched warehouse orders (bifurcated)", {
             retailerId,
             warehouseId,
-            ordersCount: result.orders?.length || 0,
+            originalOrdersCount: result.orders?.length || 0,
+            bifurcatedOrdersCount: bifurcatedResult.orders?.length || 0,
         });
 
         res.json({
             success: true,
-            data: result,
+            data: bifurcatedResult,
             message: "Warehouse orders retrieved successfully",
         });
     });
@@ -118,9 +122,12 @@ export class RetailerOrderController {
         const service = getOrderService();
         const result = await service.getRetailerOrders(retailerId, filters);
 
+        // Apply bifurcation and data reduction
+        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result);
+
         res.json({
             success: true,
-            data: result,
+            data: bifurcatedResult,
             message: "Retailer orders retrieved successfully",
         });
     });
@@ -356,12 +363,86 @@ export class RetailerOrderController {
         const service = getOrderService();
         const result = await service.getOrdersByWarehouseId(warehouseId, retailerId, filters);
 
+        // Apply bifurcation and data reduction
+        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result);
+
         res.json({
             success: true,
-            data: result,
+            data: bifurcatedResult,
             message: `Warehouse orders with status '${status}' retrieved successfully`,
         });
     });
+
+    /**
+     * Internal helper to bifurcate and reduce order data for retailer portal
+     */
+    _formatBifurcatedRetailerOrders(result) {
+        if (!result || !result.orders || !Array.isArray(result.orders)) {
+            return result;
+        }
+
+        const bifurcatedOrders = [];
+
+        result.orders.forEach((order) => {
+            if (!order.items || !Array.isArray(order.items)) {
+                return;
+            }
+
+            order.items.forEach((item) => {
+                // Create a lean bifurcated order record
+                const bifurcatedOrder = {
+                    id: order.id,
+                    orderNumber: order.orderNumber,
+                    userId: order.userId,
+                    status: order.status,
+                    totalAmount: order.totalAmount,
+                    currency: order.currency || "INR",
+                    shippingAddress: {
+                        studentName: order.shippingAddress?.studentName || null,
+                    },
+                    createdAt: order.createdAt,
+                    items: [
+                        {
+                            id: item.id,
+                            schoolName: item.schoolName,
+                            productId: item.productId,
+                            variantId: item.variantId,
+                            sku: item.sku,
+                            title: item.title,
+                            quantity: item.quantity,
+                            unitPrice: item.unitPrice,
+                            totalPrice: item.totalPrice,
+                            productSnapshot: {
+                                image_url: item.productSnapshot?.image_url || item.productSnapshot?.image || null,
+                            },
+                            status: item.status,
+                            variant: item.variant ? {
+                                id: item.variant.id,
+                                sku: item.variant.sku,
+                                options: (item.variant.options || []).map(opt => ({
+                                    id: opt.id,
+                                    value: opt.value
+                                }))
+                            } : null
+                        }
+                    ]
+                };
+
+                bifurcatedOrders.push(bifurcatedOrder);
+            });
+        });
+
+        return {
+            ...result,
+            orders: bifurcatedOrders,
+            pagination: {
+                ...result.pagination,
+                total: bifurcatedOrders.length, // Update total to reflect bifurcated count in current page
+                // Note: accurate totalPages calculation would require bifurcation at the repo/query level
+                // For now, we update the count of the current results
+            }
+        };
+    }
 }
 
 export const retailerOrderController = new RetailerOrderController();
