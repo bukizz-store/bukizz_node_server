@@ -972,4 +972,7 @@ productSchemas.warehouseProductQuery = Joi.object({
   search: Joi.string().max(255).optional(),
   categoryId: optionalUuidSchema,
   status: Joi.string().valid("active", "inactive", "all").default("active"),
+  productType: Joi.string()
+    .valid("bookset", "uniform", "stationary", "school", "general")
+    .optional(),
 });
