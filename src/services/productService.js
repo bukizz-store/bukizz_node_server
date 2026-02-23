@@ -7,6 +7,8 @@ import ProductVariantRepository from "../repositories/productVariantRepository.j
 import ProductImageRepository from "../repositories/productImageRepository.js";
 import WarehouseRepository from "../repositories/warehouseRepository.js";
 import { SchoolRepository } from "../repositories/schoolRepository.js";
+import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
+import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
 
 /**
  * Product Service
@@ -19,6 +21,7 @@ export class ProductService {
     productOptionRepository,
     productVariantRepository,
     schoolRepository,
+    paymentMethodRepo,
   ) {
     this.productRepository = productRepository || ProductRepository;
     this.brandRepository = brandRepository || BrandRepository;
@@ -27,6 +30,8 @@ export class ProductService {
     this.productVariantRepository =
       productVariantRepository || ProductVariantRepository;
     this.schoolRepository = schoolRepository || new SchoolRepository();
+    this.productPaymentMethodRepository = paymentMethodRepo || productPaymentMethodRepository;
+    this.variantCommissionRepository = variantCommissionRepository;
   }
 
   /**
@@ -125,6 +130,7 @@ export class ProductService {
         productOptions: data.productOptions,
         schoolData: data.schoolData,
         productType: data.productType,
+        paymentMethods: data.paymentMethods,
       };
 
       const result =
@@ -314,6 +320,14 @@ export class ProductService {
         product.brandDetails = [];
       }
 
+      // Fetch payment methods
+      try {
+        product.paymentMethods = await this.productPaymentMethodRepository.getPaymentMethods(productId);
+      } catch (pmErr) {
+        logger.warn("Error fetching payment methods:", pmErr);
+        product.paymentMethods = [];
+      }
+
       return product;
     } catch (error) {
       logger.error("Error getting product:", error);
@@ -356,6 +370,7 @@ export class ProductService {
         variants: [],
         productOptions: [],
         schoolData: null,
+        paymentMethods: [],
       };
 
       // Extract brands
@@ -544,6 +559,13 @@ export class ProductService {
         } catch (err) {
           // Silently fail if images error
         }
+      }
+
+      // Fetch payment methods
+      try {
+        result.paymentMethods = await this.productPaymentMethodRepository.getPaymentMethods(productId);
+      } catch (pmErr) {
+        logger.error("Failed to fetch payment methods", pmErr);
       }
 
       return result;
@@ -1083,6 +1105,17 @@ export class ProductService {
             schoolError,
           );
           result.errors.push(`School operation failed: ${schoolError.message}`);
+        }
+      }
+
+      // Step 9: Handle Payment Methods updates
+      if (data.paymentMethods && Array.isArray(data.paymentMethods)) {
+        try {
+          await this.productPaymentMethodRepository.setPaymentMethods(productId, data.paymentMethods);
+          logger.info("Payment methods updated in comprehensive operation", { productId });
+        } catch (pmError) {
+          logger.error("Error handling payment methods in comprehensive product update:", pmError);
+          result.errors.push(`Payment methods operation failed: ${pmError.message}`);
         }
       }
 
@@ -1922,6 +1955,36 @@ export class ProductService {
     }
   }
 
+  // ============ VARIANT COMMISSION METHODS ============
+
+  /**
+   * Get active commissions for all variants of a product
+   */
+  async getProductCommissions(productId) {
+    try {
+      const product = await this.productRepository.findById(productId);
+      if (!product) {
+        throw new AppError("Product not found", 404);
+      }
+      return await this.variantCommissionRepository.getCommissionsByProduct(productId);
+    } catch (error) {
+      logger.error("Error getting product commissions:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Bulk update variant commissions
+   */
+  async bulkSetCommissions(commissions) {
+    try {
+      return await this.variantCommissionRepository.bulkSetCommissions(commissions);
+    } catch (error) {
+      logger.error("Error in bulk setting commissions:", error);
+      throw error;
+    }
+  }
+
   // ============ RETAILER MANAGEMENT METHODS ============
 
   /**
@@ -2021,13 +2084,13 @@ export class ProductService {
         },
         retailerInfo: product.retailerId
           ? {
-              hasRetailer: true,
-              retailerId: product.retailerId,
-              retailerName: product.retailerName,
-            }
+            hasRetailer: true,
+            retailerId: product.retailerId,
+            retailerName: product.retailerName,
+          }
           : {
-              hasRetailer: false,
-            },
+            hasRetailer: false,
+          },
       };
 
       // Get detailed image statistics

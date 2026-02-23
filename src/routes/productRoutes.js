@@ -9,6 +9,7 @@ import {
   productSchemas,
   productOptionSchemas,
   productVariantSchemas,
+  variantCommissionSchemas,
   paramSchemas,
   headerSchemas,
 } from "../models/schemas.js";
@@ -602,6 +603,30 @@ export default function productRoutes(dependencies = {}) {
     authenticateToken,
     validate(paramSchemas.id, "params"),
     productController.removeRetailerDetails,
+  );
+
+  // ============ VARIANT COMMISSION ROUTES (Protected) ============
+
+  /**
+   * Get product commissions
+   * GET /api/v1/products/:id/commissions
+   */
+  router.get(
+    "/:id/commissions",
+    authenticateToken,
+    validate(paramSchemas.id, "params"),
+    productController.getProductCommissions,
+  );
+
+  /**
+   * Bulk set Variant commissions
+   * PUT /api/v1/products/commissions/bulk
+   */
+  router.put(
+    "/commissions/bulk",
+    authenticateToken,
+    validate(variantCommissionSchemas.bulkSetCommission),
+    productController.bulkSetCommissions,
   );
 
   // ============ COMPREHENSIVE DATA ROUTES (Protected) ============

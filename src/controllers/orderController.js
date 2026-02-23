@@ -30,7 +30,7 @@ function getOrderService() {
       userRepository,
       orderEventRepository,
       orderQueryRepository,
-      warehouseRepository
+      warehouseRepository,
     );
   }
   return orderService;
@@ -43,6 +43,30 @@ function getOrderService() {
 export class OrderController {
   constructor(orderServiceInstance) {
     this.orderService = orderServiceInstance || getOrderService();
+  }
+
+  /**
+   * Internal helper to sanitize order items product snapshot for non-admins
+   */
+  static _sanitizeOrders(orders, userRole) {
+    if (userRole === "admin") return orders;
+
+    const sanitizeSingle = (order) => {
+      if (!order || !order.items) return order;
+      order.items.forEach((item) => {
+        if (item.productSnapshot?.variantInfo?.commission) {
+          delete item.productSnapshot.variantInfo.commission;
+        }
+      });
+      return order;
+    };
+
+    if (Array.isArray(orders)) {
+      orders.forEach(sanitizeSingle);
+    } else {
+      sanitizeSingle(orders);
+    }
+    return orders;
   }
 
   /**
@@ -299,7 +323,12 @@ export class OrderController {
       };
 
       const orderService = getOrderService();
-      const result = await orderService.orderRepository.getByUser(userId, filters);
+      const result = await orderService.orderRepository.getByUser(
+        userId,
+        filters,
+      );
+
+      OrderController._sanitizeOrders(result.orders, req.user?.role);
 
       logger.info("getUserOrders result", {
         userId,
@@ -343,6 +372,8 @@ export class OrderController {
       const orderService = getOrderService();
       const order = await orderService.orderRepository.findById(orderId);
 
+      OrderController._sanitizeOrders(order, userRole);
+
       if (!order) {
         return res.status(404).json({
           success: false,
@@ -352,7 +383,11 @@ export class OrderController {
       }
 
       // Check authorization (user can only see their own orders unless admin/retailer)
-      if (userRole !== "admin" && userRole !== "retailer" && order.userId !== userId) {
+      if (
+        userRole !== "admin" &&
+        userRole !== "retailer" &&
+        order.userId !== userId
+      ) {
         logger.warn("Unauthorized order access attempt", {
           userId,
           requestedOrderId: orderId,
@@ -443,8 +478,10 @@ export class OrderController {
         orderId,
         "cancelled",
         userId,
-        `Customer cancellation: ${reason}`
+        `Customer cancellation: ${reason}`,
       );
+
+      OrderController._sanitizeOrders(updatedOrder, req.user?.role);
 
       logger.info("Order cancelled successfully", {
         orderId,
@@ -549,6 +586,8 @@ export class OrderController {
 
     const order = await this.orderService.createOrder(orderData);
 
+    OrderController._sanitizeOrders(order, req.user.role);
+
     logger.info("Order created", {
       orderId: order.id,
       userId,
@@ -572,6 +611,8 @@ export class OrderController {
 
     const order = await this.orderService.getOrder(id, userId);
 
+    OrderController._sanitizeOrders(order, req.user?.role);
+
     res.json({
       success: true,
       data: { order },
@@ -587,6 +628,10 @@ export class OrderController {
     const userId = req.user.id;
     const result = await this.orderService.getUserOrders(userId, req.query);
 
+    if (result && result.orders) {
+      OrderController._sanitizeOrders(result.orders, req.user?.role);
+    }
+
     res.json({
       success: true,
       data: result,
@@ -600,6 +645,10 @@ export class OrderController {
    */
   searchOrders = asyncHandler(async (req, res) => {
     const result = await this.orderService.searchOrders(req.query);
+
+    if (result && result.orders) {
+      OrderController._sanitizeOrders(result.orders, req.user?.role);
+    }
 
     res.json({
       success: true,
@@ -622,8 +671,10 @@ export class OrderController {
       status,
       changedBy,
       note,
-      metadata
+      metadata,
     );
+
+    OrderController._sanitizeOrders(order, req.user?.role);
 
     logger.info("Order status updated", {
       orderId: id,
@@ -653,7 +704,7 @@ export class OrderController {
       status,
       changedBy,
       note,
-      metadata
+      metadata,
     );
 
     logger.info("Order item status updated", {
@@ -703,7 +754,12 @@ export class OrderController {
     const { reason } = req.body;
     const userId = req.user.id;
 
-    const item = await this.orderService.cancelOrderItem(orderId, itemId, userId, reason);
+    const item = await this.orderService.cancelOrderItem(
+      orderId,
+      itemId,
+      userId,
+      reason,
+    );
 
     logger.info("Order item cancelled", {
       orderId,
@@ -735,6 +791,34 @@ export class OrderController {
   });
 
   /**
+   * Get a single order item detail for warehouse view
+   * GET /api/orders/warehouse/items/:itemId
+   * Header: x-warehouse-id
+   */
+  getWarehouseOrderItem = asyncHandler(async (req, res) => {
+    const { itemId } = req.params;
+    const warehouseId = req.headers["x-warehouse-id"];
+
+    if (!warehouseId) {
+      return res.status(400).json({
+        success: false,
+        message: "Warehouse ID header (x-warehouse-id) is required",
+      });
+    }
+
+    const result = await this.orderService.getWarehouseOrderItem(
+      itemId,
+      warehouseId,
+    );
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Order item retrieved successfully",
+    });
+  });
+
+  /**
    * Get order statistics
    * GET /api/orders/stats
    */
@@ -760,7 +844,7 @@ export class OrderController {
     const query = await this.orderService.createOrderQuery(
       id,
       userId,
-      req.body
+      req.body,
     );
 
     logger.info("Order query created", {
@@ -867,7 +951,7 @@ export class OrderController {
           orderId,
           status,
           changedBy,
-          note
+          note,
         );
         results.push({ orderId, success: true });
         successCount++;
@@ -966,7 +1050,7 @@ export class OrderController {
   static _canReturnOrder(order) {
     const returnableStatuses = ["delivered"];
     const deliveredDate = order.events?.find(
-      (e) => e.newStatus === "delivered"
+      (e) => e.newStatus === "delivered",
     )?.createdAt;
 
     if (!returnableStatuses.includes(order.status) || !deliveredDate) {
@@ -1032,7 +1116,7 @@ export class OrderController {
         "Your order is ready for shipment",
         "You will receive tracking information once shipped",
         "Estimated delivery: " +
-        OrderController._calculateEstimatedDelivery(order),
+          OrderController._calculateEstimatedDelivery(order),
       ],
       shipped: [
         "Your order is on the way",

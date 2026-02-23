@@ -1144,6 +1144,46 @@ export class ProductController {
     });
   });
 
+  // ============ VARIANT COMMISSION METHODS ============
+
+  /**
+   * Get all active commissions for a product's variants
+   * GET /api/products/:id/commissions
+   */
+  getProductCommissions = asyncHandler(async (req, res) => {
+    const { id: productId } = req.params;
+
+    const commissions = await this.productService.getProductCommissions(
+      productId
+    );
+
+    res.json({
+      success: true,
+      data: { commissions },
+      message: "Product commissions retrieved successfully",
+    });
+  });
+
+  /**
+   * Bulk update variant commissions
+   * PUT /api/products/commissions/bulk
+   */
+  bulkSetCommissions = asyncHandler(async (req, res) => {
+    const { commissions } = req.body;
+
+    const results = await this.productService.bulkSetCommissions(commissions);
+
+    logger.info("Bulk variant commissions updated", {
+      count: results.length,
+    });
+
+    res.json({
+      success: true,
+      data: { results },
+      message: "Variant commissions updated successfully",
+    });
+  });
+
   // ============ COMPREHENSIVE DATA METHODS ============
 
   /**

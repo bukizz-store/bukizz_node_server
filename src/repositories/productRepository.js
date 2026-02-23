@@ -335,6 +335,10 @@ export class ProductRepository {
         query = query.eq("products.is_deleted", false);
       }
 
+      if (filters.productType) {
+        query = query.eq("products.product_type", filters.productType);
+      }
+
       if (filters.search) {
         query = query.or(
           `title.ilike.%${filters.search}%,products.description.ilike.%${filters.search}%`,

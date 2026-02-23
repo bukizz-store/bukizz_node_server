@@ -72,15 +72,31 @@ export async function generateSitemap() {
 
         const xml = root.end({ prettyPrint: true });
 
-        // Save to server's public folder
-        const sitemapPath = path.join(__dirname, '../../public/sitemap.xml');
+        // Save to various folders to ensure it's accessible
+        const serverPublicPath = path.join(__dirname, '../../public/sitemap.xml');
+        const frontendPublicPath = path.join(__dirname, '../../../public/sitemap.xml');
+        const frontendBuildPath = path.join(__dirname, '../../../build/sitemap.xml');
 
-        const publicDir = path.dirname(sitemapPath);
-        if (!fs.existsSync(publicDir)) {
-            fs.mkdirSync(publicDir, { recursive: true });
+        const writeXml = (filePath) => {
+            try {
+                const dir = path.dirname(filePath);
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                fs.writeFileSync(filePath, xml);
+            } catch (err) {
+                logger.error(`Failed to write sitemap to ${filePath}:`, err);
+            }
+        };
+
+        writeXml(serverPublicPath);
+        writeXml(frontendPublicPath);
+
+        // Write to build folder if it exists
+        if (fs.existsSync(path.dirname(frontendBuildPath))) {
+            writeXml(frontendBuildPath);
         }
 
-        fs.writeFileSync(sitemapPath, xml);
         logger.info(`Sitemap generated successfully with ${staticRoutes.length + (products?.length || 0) + (schools?.length || 0) + (categories?.length || 0)} URLs`);
 
     } catch (err) {

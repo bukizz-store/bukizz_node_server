@@ -222,6 +222,26 @@ export const productVariantSchemas = {
 };
 
 /**
+ * Variant Commission validation schemas
+ */
+export const variantCommissionSchemas = {
+  setCommission: Joi.object({
+    variantId: uuidSchema,
+    commissionType: Joi.string().valid("percentage", "amount").required(),
+    commissionValue: Joi.number().min(0).precision(2).required(),
+  }),
+  bulkSetCommission: Joi.object({
+    commissions: Joi.array().items(
+      Joi.object({
+        variantId: uuidSchema,
+        commissionType: Joi.string().valid("percentage", "amount").required(),
+        commissionValue: Joi.number().min(0).precision(2).required(),
+      })
+    ).min(1).required(),
+  }),
+};
+
+/**
  * Product validation schemas
  */
 export const productSchemas = {
@@ -239,6 +259,9 @@ export const productSchemas = {
     categoryIds: Joi.array().items(uuidSchema).optional(),
     brandIds: Joi.array().items(uuidSchema).optional(),
     warehouseIds: Joi.array().items(uuidSchema).optional(),
+    paymentMethods: Joi.array()
+      .items(Joi.string().valid("cod", "upi", "card", "netbanking", "wallet"))
+      .optional(),
     metadata: Joi.object().optional(),
   }),
 
@@ -255,6 +278,9 @@ export const productSchemas = {
     city: Joi.string().max(100).optional(),
     isActive: Joi.boolean().optional(),
     isDeleted: Joi.boolean().optional(),
+    paymentMethods: Joi.array()
+      .items(Joi.string().valid("cod", "upi", "card", "netbanking", "wallet"))
+      .optional(),
     metadata: Joi.object().optional(),
   }),
 
@@ -495,6 +521,7 @@ export const orderSchemas = {
       .required(),
     shippingAddress: Joi.object({
       recipientName: Joi.string().min(2).max(255).required(),
+      studentName: Joi.string().max(255).allow(null, "").optional(),
       phone: phoneSchema.required(),
       line1: Joi.string().max(255).required(),
       line2: Joi.string().max(255).optional(),
@@ -508,6 +535,7 @@ export const orderSchemas = {
     }).required(),
     billingAddress: Joi.object({
       recipientName: Joi.string().min(2).max(255).required(),
+      studentName: Joi.string().max(255).allow(null, "").optional(),
       phone: phoneSchema.required(),
       line1: Joi.string().max(255).required(),
       line2: Joi.string().max(255).optional(),
@@ -944,6 +972,9 @@ productSchemas.warehouseProductQuery = Joi.object({
   search: Joi.string().max(255).optional(),
   categoryId: optionalUuidSchema,
   status: Joi.string().valid("active", "inactive", "all").default("active"),
+  productType: Joi.string()
+    .valid("bookset", "uniform", "stationary", "school", "general")
+    .optional(),
 });
 
 /**

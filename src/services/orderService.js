@@ -1,5 +1,7 @@
 import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
+import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
+import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
 
 /**
  * Order Service
@@ -22,6 +24,8 @@ export class OrderService {
     this.orderQueryRepository = orderQueryRepository;
     this.warehouseRepository = warehouseRepository;
     this.ledgerRepository = ledgerRepository;
+    this.productPaymentMethodRepository = productPaymentMethodRepository;
+    this.variantCommissionRepository = variantCommissionRepository;
   }
 
   /**
@@ -175,18 +179,34 @@ export class OrderService {
         }
       }
 
-      // 4. Validate payment method
-      const validPaymentMethods = [
-        "cod",
-        "upi",
-        "card",
-        "netbanking",
-        "wallet",
-      ];
-      if (!paymentMethod || !validPaymentMethods.includes(paymentMethod)) {
-        validationErrors.push(
-          `Invalid payment method. Allowed: ${validPaymentMethods.join(", ")}`,
-        );
+      // 4. Validate payment method dynamically against product settings
+      if (!paymentMethod) {
+        validationErrors.push("Payment method is required");
+      } else {
+        // Collect product IDs
+        const productIds = items.map((i) => i.productId).filter(Boolean);
+        if (productIds.length > 0) {
+          // Check payment methods for each product
+          for (const pid of productIds) {
+            const allowedMethods =
+              await this.productPaymentMethodRepository.getPaymentMethods(pid);
+            if (allowedMethods && allowedMethods.length > 0) {
+              if (!allowedMethods.includes(paymentMethod)) {
+                validationErrors.push(
+                  `Product ${pid} does not accept payment method: ${paymentMethod}`,
+                );
+              }
+            } else {
+              // Fallback default if not explicitly set
+              const defaultMethods = ["cod", "upi", "card"];
+              if (!defaultMethods.includes(paymentMethod)) {
+                validationErrors.push(
+                  `Product ${pid} does not accept payment method: ${paymentMethod}`,
+                );
+              }
+            }
+          }
+        }
       }
 
       // 5. Validate contact information (more lenient since it's optional in many cases)
@@ -453,6 +473,22 @@ export class OrderService {
             currentPrice
           : product.compare_at_price || currentPrice;
 
+        // Fetch active commission for variant, if any
+        let activeCommission = null;
+        if (item.variantId) {
+          try {
+            activeCommission =
+              await this.variantCommissionRepository.getActiveCommission(
+                item.variantId,
+              );
+          } catch (commErr) {
+            logger.warn(
+              `Failed to fetch commission for variant ${item.variantId}`,
+              commErr,
+            );
+          }
+        }
+
         // Check stock availability
         if (availableStock < item.quantity) {
           stockErrors.push(
@@ -510,6 +546,12 @@ export class OrderService {
                 sku: product.variant_sku,
                 price: product.variant_price,
                 metadata: product.variant_metadata || {},
+                commission: activeCommission
+                  ? {
+                      type: activeCommission.commission_type,
+                      value: parseFloat(activeCommission.commission_value),
+                    }
+                  : null,
               },
             }),
           },
@@ -1519,6 +1561,115 @@ export class OrderService {
       return order;
     } catch (error) {
       logger.error("Error getting retailer order by ID:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get a single order item detail for warehouse view
+   * Validates warehouse ownership and returns item + parent order data
+   */
+  async getWarehouseOrderItem(itemId, warehouseId) {
+    try {
+      if (!itemId) {
+        throw new AppError("Order item ID is required", 400);
+      }
+      if (!warehouseId) {
+        throw new AppError("Warehouse ID is required", 400);
+      }
+
+      // Fetch the order item
+      const item = await this.orderRepository.findOrderItemById(itemId);
+      if (!item) {
+        throw new AppError("Order item not found", 404);
+      }
+
+      // Validate warehouse ownership
+      if (item.warehouseId && item.warehouseId !== warehouseId) {
+        throw new AppError(
+          "Access denied. This item does not belong to your warehouse.",
+          403,
+        );
+      }
+
+      // Fetch parent order
+      const order = await this.orderRepository.findById(item._orderId);
+      if (!order) {
+        throw new AppError("Parent order not found", 404);
+      }
+
+      // For items with NULL warehouse_id, check the order-level warehouse_id
+      if (!item.warehouseId && order.warehouseId !== warehouseId) {
+        throw new AppError(
+          "Access denied. This item does not belong to your warehouse.",
+          403,
+        );
+      }
+
+      // Fetch item-level events
+      const events = await this.orderRepository.getOrderItemEvents(itemId);
+
+      // Compute canCancel: false if status is out_for_delivery, delivered, cancelled, refunded, returned
+      const cancellableStatuses = ["initialized", "processed", "shipped"];
+      const canCancel = cancellableStatuses.includes(item.status);
+
+      // Compute canReturn: true only if delivered within 10 days
+      let canReturn = false;
+      if (item.status === "delivered") {
+        const deliveredEvent = events.find((e) => e.newStatus === "delivered");
+        if (deliveredEvent) {
+          const returnWindow = 10 * 24 * 60 * 60 * 1000; // 10 days
+          canReturn =
+            Date.now() - new Date(deliveredEvent.createdAt).getTime() <
+            returnWindow;
+        }
+      }
+
+      // Tracking info
+      const trackingInfo = {
+        carrier: order.metadata?.carrier || "Local Delivery",
+        trackingUrl: order.trackingNumber
+          ? `https://track.bukizz.com/${order.trackingNumber}`
+          : null,
+      };
+
+      // Build response
+      const order_item_data = {
+        id: item.id,
+        sku: item.sku,
+        title: item.title,
+        quantity: item.quantity,
+        productId: item.productId,
+        variantId: item.variantId,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
+        warehouseId: item.warehouseId,
+        dispatchId: item.dispatchId,
+        status: item.status,
+        schoolName: item.schoolName || null,
+        variant: item.variant || null,
+        productSnapshot: item.productSnapshot,
+        events,
+        canCancel,
+        canReturn,
+        trackingInfo,
+      };
+
+      const order_data = {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        userId: order.userId,
+        shippingAddress: order.shippingAddress,
+        billingAddress: order.billingAddress,
+        contactPhone: order.contactPhone,
+        contactEmail: order.contactEmail,
+        paymentMethod: order.paymentMethod,
+        paymentStatus: order.paymentStatus,
+      };
+
+      return { order_item_data, order_data };
+    } catch (error) {
+      logger.error("Error getting warehouse order item:", error);
       throw error;
     }
   }
