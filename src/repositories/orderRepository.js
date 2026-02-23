@@ -650,8 +650,11 @@ export class OrderRepository {
       }
 
       const allFormatted = (items || []).map(this._formatOrderItem);
-      const enrichedWithVariants = await this._enrichItemsWithVariantData(allFormatted);
-      const enriched = await this._enrichItemsWithSchoolData(enrichedWithVariants);
+      console.log("allFormatted", allFormatted);
+      const enrichedWithVariants =
+        await this._enrichItemsWithVariantData(allFormatted);
+      const enriched =
+        await this._enrichItemsWithSchoolData(enrichedWithVariants);
 
       // Group by order_id
       const itemsMap = {};
@@ -685,7 +688,8 @@ export class OrderRepository {
       }
 
       const formatted = (items || []).map(this._formatOrderItem);
-      const enrichedWithVariants = await this._enrichItemsWithVariantData(formatted);
+      const enrichedWithVariants =
+        await this._enrichItemsWithVariantData(formatted);
       return await this._enrichItemsWithSchoolData(enrichedWithVariants);
     } catch (error) {
       logger.error("Error getting order items:", error);
@@ -807,19 +811,26 @@ export class OrderRepository {
     try {
       if (!items || items.length === 0) return items;
 
-      const productIds = Array.from(new Set(items.map(item => item.productId).filter(Boolean)));
+      const productIds = Array.from(
+        new Set(items.map((item) => item.productId).filter(Boolean)),
+      );
       if (productIds.length === 0) return items;
 
       const { data: schoolLinks, error: schoolError } = await this.supabase
         .from("product_schools")
-        .select(`
+        .select(
+          `
           product_id,
           schools (name)
-        `)
+        `,
+        )
         .in("product_id", productIds);
 
       if (schoolError) {
-        logger.error("Error fetching schools for item enrichment:", schoolError);
+        logger.error(
+          "Error fetching schools for item enrichment:",
+          schoolError,
+        );
         return items;
       }
 
@@ -839,6 +850,65 @@ export class OrderRepository {
     } catch (error) {
       logger.error("Error enriching items with school data:", error);
       return items;
+    }
+  }
+
+  /**
+   * Find a single order item by ID
+   */
+  async findOrderItemById(itemId) {
+    try {
+      const { data: item, error } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .eq("id", itemId)
+        .single();
+
+      if (error) {
+        if (error.code === "PGRST116") return null;
+        throw error;
+      }
+
+      if (!item) return null;
+
+      const formatted = this._formatOrderItem(item);
+      const enrichedWithVariants = await this._enrichItemsWithVariantData([
+        formatted,
+      ]);
+      const enriched =
+        await this._enrichItemsWithSchoolData(enrichedWithVariants);
+      return enriched[0];
+    } catch (error) {
+      logger.error("Error finding order item by ID:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get events for a specific order item
+   */
+  async getOrderItemEvents(itemId) {
+    try {
+      const { data: events, error } = await this.supabase
+        .from("order_events")
+        .select(
+          `
+          *,
+          users!changed_by(full_name)
+        `,
+        )
+        .eq("order_item_id", itemId)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        logger.error("Error getting order item events:", error);
+        return [];
+      }
+
+      return (events || []).map(this._formatOrderEvent);
+    } catch (error) {
+      logger.error("Error getting order item events:", error);
+      return [];
     }
   }
 
@@ -1336,8 +1406,10 @@ export class OrderRepository {
       }
 
       const allFormatted = (items || []).map(this._formatOrderItem);
-      const enrichedWithVariants = await this._enrichItemsWithVariantData(allFormatted);
-      const enriched = await this._enrichItemsWithSchoolData(enrichedWithVariants);
+      const enrichedWithVariants =
+        await this._enrichItemsWithVariantData(allFormatted);
+      const enriched =
+        await this._enrichItemsWithSchoolData(enrichedWithVariants);
 
       const itemsMap = {};
       enriched.forEach((item) => {
@@ -1378,8 +1450,10 @@ export class OrderRepository {
       }
 
       const allFormatted = (items || []).map(this._formatOrderItem);
-      const enrichedWithVariants = await this._enrichItemsWithVariantData(allFormatted);
-      const enriched = await this._enrichItemsWithSchoolData(enrichedWithVariants);
+      const enrichedWithVariants =
+        await this._enrichItemsWithVariantData(allFormatted);
+      const enriched =
+        await this._enrichItemsWithSchoolData(enrichedWithVariants);
 
       const itemsMap = {};
       enriched.forEach((item) => {
@@ -1430,6 +1504,7 @@ export class OrderRepository {
       id: row.id,
       _orderId: row.order_id, // Internal: used for batch grouping
       productId: row.product_id,
+      dispatchId: row.dispatch_id,
       variantId: row.variant_id,
       sku: row.sku,
       title: row.title,

@@ -30,7 +30,7 @@ function getOrderService() {
       userRepository,
       orderEventRepository,
       orderQueryRepository,
-      warehouseRepository
+      warehouseRepository,
     );
   }
   return orderService;
@@ -323,7 +323,10 @@ export class OrderController {
       };
 
       const orderService = getOrderService();
-      const result = await orderService.orderRepository.getByUser(userId, filters);
+      const result = await orderService.orderRepository.getByUser(
+        userId,
+        filters,
+      );
 
       OrderController._sanitizeOrders(result.orders, req.user?.role);
 
@@ -380,7 +383,11 @@ export class OrderController {
       }
 
       // Check authorization (user can only see their own orders unless admin/retailer)
-      if (userRole !== "admin" && userRole !== "retailer" && order.userId !== userId) {
+      if (
+        userRole !== "admin" &&
+        userRole !== "retailer" &&
+        order.userId !== userId
+      ) {
         logger.warn("Unauthorized order access attempt", {
           userId,
           requestedOrderId: orderId,
@@ -471,7 +478,7 @@ export class OrderController {
         orderId,
         "cancelled",
         userId,
-        `Customer cancellation: ${reason}`
+        `Customer cancellation: ${reason}`,
       );
 
       OrderController._sanitizeOrders(updatedOrder, req.user?.role);
@@ -664,7 +671,7 @@ export class OrderController {
       status,
       changedBy,
       note,
-      metadata
+      metadata,
     );
 
     OrderController._sanitizeOrders(order, req.user?.role);
@@ -697,7 +704,7 @@ export class OrderController {
       status,
       changedBy,
       note,
-      metadata
+      metadata,
     );
 
     logger.info("Order item status updated", {
@@ -747,7 +754,12 @@ export class OrderController {
     const { reason } = req.body;
     const userId = req.user.id;
 
-    const item = await this.orderService.cancelOrderItem(orderId, itemId, userId, reason);
+    const item = await this.orderService.cancelOrderItem(
+      orderId,
+      itemId,
+      userId,
+      reason,
+    );
 
     logger.info("Order item cancelled", {
       orderId,
@@ -779,6 +791,34 @@ export class OrderController {
   });
 
   /**
+   * Get a single order item detail for warehouse view
+   * GET /api/orders/warehouse/items/:itemId
+   * Header: x-warehouse-id
+   */
+  getWarehouseOrderItem = asyncHandler(async (req, res) => {
+    const { itemId } = req.params;
+    const warehouseId = req.headers["x-warehouse-id"];
+
+    if (!warehouseId) {
+      return res.status(400).json({
+        success: false,
+        message: "Warehouse ID header (x-warehouse-id) is required",
+      });
+    }
+
+    const result = await this.orderService.getWarehouseOrderItem(
+      itemId,
+      warehouseId,
+    );
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Order item retrieved successfully",
+    });
+  });
+
+  /**
    * Get order statistics
    * GET /api/orders/stats
    */
@@ -804,7 +844,7 @@ export class OrderController {
     const query = await this.orderService.createOrderQuery(
       id,
       userId,
-      req.body
+      req.body,
     );
 
     logger.info("Order query created", {
@@ -911,7 +951,7 @@ export class OrderController {
           orderId,
           status,
           changedBy,
-          note
+          note,
         );
         results.push({ orderId, success: true });
         successCount++;
@@ -1010,7 +1050,7 @@ export class OrderController {
   static _canReturnOrder(order) {
     const returnableStatuses = ["delivered"];
     const deliveredDate = order.events?.find(
-      (e) => e.newStatus === "delivered"
+      (e) => e.newStatus === "delivered",
     )?.createdAt;
 
     if (!returnableStatuses.includes(order.status) || !deliveredDate) {
@@ -1076,7 +1116,7 @@ export class OrderController {
         "Your order is ready for shipment",
         "You will receive tracking information once shipped",
         "Estimated delivery: " +
-        OrderController._calculateEstimatedDelivery(order),
+          OrderController._calculateEstimatedDelivery(order),
       ],
       shipped: [
         "Your order is on the way",

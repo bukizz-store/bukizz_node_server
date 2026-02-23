@@ -44,7 +44,7 @@ export default function orderRoutes(dependencies = {}) {
     "/",
     orderCreationLimiter,
     validate(orderSchemas.createOrder),
-    OrderController.placeOrder
+    OrderController.placeOrder,
   );
 
   // Place a new order with comprehensive validation and atomic transaction (alias)
@@ -52,7 +52,7 @@ export default function orderRoutes(dependencies = {}) {
     "/place",
     orderCreationLimiter,
     validate(orderSchemas.createOrder),
-    OrderController.placeOrder
+    OrderController.placeOrder,
   );
 
   // Calculate order summary/preview (for cart checkout)
@@ -60,7 +60,7 @@ export default function orderRoutes(dependencies = {}) {
     "/calculate-summary",
     orderQueryLimiter,
     validate(orderSchemas.calculateSummary),
-    OrderController.calculateOrderSummary
+    OrderController.calculateOrderSummary,
   );
 
   // Get current user's orders with filtering
@@ -76,7 +76,7 @@ export default function orderRoutes(dependencies = {}) {
   router.put(
     "/:orderId/cancel",
     validate(orderSchemas.cancelOrder),
-    OrderController.cancelOrder
+    OrderController.cancelOrder,
   );
 
   // Cancel specific order item (customer self-service)
@@ -90,7 +90,7 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   // Create order query/support ticket
@@ -104,7 +104,7 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   // Get order queries/support tickets
@@ -121,6 +121,21 @@ export default function orderRoutes(dependencies = {}) {
    * ADMIN/RETAILER ORDER MANAGEMENT ENDPOINTS
    */
 
+  // Get single order item detail for warehouse
+  router.get(
+    "/warehouse/items/:itemId",
+    requireRoles("admin", "retailer"),
+    orderQueryLimiter,
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.getWarehouseOrderItem(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   // Search and filter orders (admin/retailer access)
   router.get(
     "/admin/search",
@@ -133,7 +148,7 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   // Get orders by specific status (admin dashboard)
@@ -148,7 +163,7 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   // Update order status (admin/retailer operation)
@@ -163,7 +178,7 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   // Update order item status (admin/retailer operation)
@@ -179,7 +194,7 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   // Update payment status (payment gateway webhook or admin)
@@ -194,7 +209,7 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   // Bulk update orders (admin operation)
@@ -209,22 +224,18 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   // Export orders data (admin reporting)
-  router.get(
-    "/admin/export",
-    requireRoles("admin"),
-    async (req, res, next) => {
-      try {
-        const orderController = new OrderController();
-        await orderController.exportOrders(req, res, next);
-      } catch (error) {
-        next(error);
-      }
+  router.get("/admin/export", requireRoles("admin"), async (req, res, next) => {
+    try {
+      const orderController = new OrderController();
+      await orderController.exportOrders(req, res, next);
+    } catch (error) {
+      next(error);
     }
-  );
+  });
 
   // Get order statistics and analytics
   router.get(
@@ -237,7 +248,7 @@ export default function orderRoutes(dependencies = {}) {
       } catch (error) {
         next(error);
       }
-    }
+    },
   );
 
   /**
