@@ -99,11 +99,9 @@ export class DashboardController {
 
     // Active orders = distinct order IDs where at least one item is NOT delivered/cancelled
     const activeStatuses = new Set([
-      "initialized",
-      "confirmed",
-      "processing",
-      "packed",
-      "shipped",
+      'initialized',
+      'processed',
+      'shipped',
       "out_for_delivery",
     ]);
     const activeOrderIds = new Set();
@@ -194,18 +192,48 @@ export class DashboardController {
         sortOrder: "desc",
       });
 
+      const orders = result.orders || [];
+      if (orders.length === 0) return [];
+
       // Return simplified order objects for the overview
-      return (result.orders || []).map((order) => ({
-        id: order.id,
-        orderNumber: order.orderNumber,
-        status: order.status,
-        totalPrice: order.totalPrice,
-        paymentStatus: order.paymentStatus,
-        customerName:
-          order.shippingAddress?.name || order.contactEmail || "Unknown",
-        createdAt: order.createdAt,
-        itemCount: order.items?.length || 0,
-      }));
+      return orders.map((order) => {
+        // Format Items including the requested details
+        const formattedItems = (order.items || []).map((item) => {
+          let variantDetail = null;
+
+          if (item.variant && item.variant.options && item.variant.options.length > 0) {
+            variantDetail = item.variant.options
+              .map((opt) => (opt.attribute?.name ? `${opt.attribute.name}: ${opt.value}` : opt.value))
+              .join(" • ");
+          } else if (item.productSnapshot) {
+            const parts = [];
+            if (item.productSnapshot.size) parts.push(`Size: ${item.productSnapshot.size}`);
+            if (item.productSnapshot.color) parts.push(`Color: ${item.productSnapshot.color}`);
+            if (parts.length > 0) variantDetail = parts.join(" • ");
+          }
+
+          return {
+            title: item.title,
+            price: item.unitPrice,
+            schoolName: item.schoolName, // Now provided by repository enrichment
+            variantDetail,
+            status: item.status || order.status || "initialized",
+          };
+        });
+
+        return {
+          id: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status,
+          totalPrice: order.totalAmount || order.totalPrice, // Use totalAmount from Parent Order
+          paymentStatus: order.paymentStatus,
+          customerName:
+            order.shippingAddress?.name || order.contactEmail || "Unknown",
+          createdAt: order.createdAt,
+          itemCount: order.items?.length || 0,
+          items: formattedItems,
+        };
+      });
     } catch (error) {
       logger.error("Error fetching recent orders for dashboard:", error);
       return [];

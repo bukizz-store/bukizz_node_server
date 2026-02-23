@@ -649,7 +649,8 @@ export class OrderRepository {
       }
 
       const allFormatted = (items || []).map(this._formatOrderItem);
-      const enriched = await this._enrichItemsWithVariantData(allFormatted);
+      const enrichedWithVariants = await this._enrichItemsWithVariantData(allFormatted);
+      const enriched = await this._enrichItemsWithSchoolData(enrichedWithVariants);
 
       // Group by order_id
       const itemsMap = {};
@@ -682,7 +683,8 @@ export class OrderRepository {
       }
 
       const formatted = (items || []).map(this._formatOrderItem);
-      return await this._enrichItemsWithVariantData(formatted);
+      const enrichedWithVariants = await this._enrichItemsWithVariantData(formatted);
+      return await this._enrichItemsWithSchoolData(enrichedWithVariants);
     } catch (error) {
       logger.error("Error getting order items:", error);
       return [];
@@ -787,6 +789,48 @@ export class OrderRepository {
     } catch (error) {
       logger.error("Error enriching items with variant data:", error);
       return items; // Return items without variant data on failure
+    }
+  }
+
+  /**
+   * Enrich order items with school names
+   */
+  async _enrichItemsWithSchoolData(items) {
+    try {
+      if (!items || items.length === 0) return items;
+
+      const productIds = Array.from(new Set(items.map(item => item.productId).filter(Boolean)));
+      if (productIds.length === 0) return items;
+
+      const { data: schoolLinks, error: schoolError } = await this.supabase
+        .from("product_schools")
+        .select(`
+          product_id,
+          schools (name)
+        `)
+        .in("product_id", productIds);
+
+      if (schoolError) {
+        logger.error("Error fetching schools for item enrichment:", schoolError);
+        return items;
+      }
+
+      const schoolMap = {};
+      if (schoolLinks) {
+        schoolLinks.forEach((link) => {
+          if (link.schools?.name) {
+            schoolMap[link.product_id] = link.schools.name;
+          }
+        });
+      }
+
+      return items.map((item) => ({
+        ...item,
+        schoolName: schoolMap[item.productId] || null,
+      }));
+    } catch (error) {
+      logger.error("Error enriching items with school data:", error);
+      return items;
     }
   }
 
@@ -1222,7 +1266,8 @@ export class OrderRepository {
       }
 
       const allFormatted = (items || []).map(this._formatOrderItem);
-      const enriched = await this._enrichItemsWithVariantData(allFormatted);
+      const enrichedWithVariants = await this._enrichItemsWithVariantData(allFormatted);
+      const enriched = await this._enrichItemsWithSchoolData(enrichedWithVariants);
 
       const itemsMap = {};
       enriched.forEach((item) => {
@@ -1261,7 +1306,8 @@ export class OrderRepository {
       }
 
       const allFormatted = (items || []).map(this._formatOrderItem);
-      const enriched = await this._enrichItemsWithVariantData(allFormatted);
+      const enrichedWithVariants = await this._enrichItemsWithVariantData(allFormatted);
+      const enriched = await this._enrichItemsWithSchoolData(enrichedWithVariants);
 
       const itemsMap = {};
       enriched.forEach((item) => {
