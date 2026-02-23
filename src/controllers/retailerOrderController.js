@@ -405,6 +405,7 @@ export class RetailerOrderController {
                         {
                             id: item.id,
                             schoolName: item.schoolName,
+                            dispatchId: item.dispatchId,
                             productId: item.productId,
                             variantId: item.variantId,
                             sku: item.sku,
