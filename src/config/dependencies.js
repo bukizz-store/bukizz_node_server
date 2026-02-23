@@ -15,6 +15,10 @@ import { AuthController } from "../controllers/authController.js";
 import { ProductController } from "../controllers/productController.js";
 import { SchoolController } from "../controllers/schoolController.js";
 import { OrderController } from "../controllers/orderController.js";
+import { ledgerRepository } from "../repositories/ledgerRepository.js";
+import { settlementRepository } from "../repositories/settlementRepository.js";
+import { SettlementService } from "../services/settlementService.js";
+import { settlementController } from "../controllers/settlementController.js";
 import { getDB } from "../db/index.js";
 
 /**
@@ -59,8 +63,14 @@ export function createDependencies(overrides = {}) {
       userRepository,
       orderEventRepository,
       orderQueryRepository,
-      warehouseRepository
+      warehouseRepository,
+      ledgerRepository,
     );
+
+  // Settlement
+  const settlementService =
+    overrides.settlementService ||
+    new SettlementService(ledgerRepository, settlementRepository);
 
   // Controllers (Request Handling Layer)
   const userController =
@@ -73,6 +83,9 @@ export function createDependencies(overrides = {}) {
     overrides.schoolController || new SchoolController(schoolService);
   const orderController =
     overrides.orderController || new OrderController(orderService);
+  const settlementCtrl =
+    overrides.settlementController ||
+    settlementController({ settlementService });
 
   return {
     // Database
@@ -85,6 +98,8 @@ export function createDependencies(overrides = {}) {
     orderRepository,
     orderEventRepository,
     orderQueryRepository,
+    ledgerRepository,
+    settlementRepository,
 
     // Services
     userService,
@@ -92,6 +107,7 @@ export function createDependencies(overrides = {}) {
     productService,
     schoolService,
     orderService,
+    settlementService,
 
     // Controllers
     userController,
@@ -99,5 +115,6 @@ export function createDependencies(overrides = {}) {
     productController,
     schoolController,
     orderController,
+    settlementController: settlementCtrl,
   };
 }

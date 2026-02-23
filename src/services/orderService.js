@@ -12,7 +12,8 @@ export class OrderService {
     userRepository,
     orderEventRepository,
     orderQueryRepository,
-    warehouseRepository
+    warehouseRepository,
+    ledgerRepository,
   ) {
     this.orderRepository = orderRepository;
     this.productRepository = productRepository;
@@ -20,6 +21,7 @@ export class OrderService {
     this.orderEventRepository = orderEventRepository;
     this.orderQueryRepository = orderQueryRepository;
     this.warehouseRepository = warehouseRepository;
+    this.ledgerRepository = ledgerRepository;
   }
 
   /**
@@ -51,7 +53,7 @@ export class OrderService {
         shippingAddress,
         paymentMethod,
         contactPhone,
-        contactEmail
+        contactEmail,
       );
 
       // Phase 2: Atomic stock reservation and order creation
@@ -92,7 +94,7 @@ export class OrderService {
     shippingAddress,
     paymentMethod,
     contactPhone,
-    contactEmail
+    contactEmail,
   ) {
     const validationErrors = [];
 
@@ -134,7 +136,7 @@ export class OrderService {
           }
           if (item.quantity > 1000) {
             validationErrors.push(
-              `Item ${i + 1}: Quantity exceeds maximum limit (1000)`
+              `Item ${i + 1}: Quantity exceeds maximum limit (1000)`,
             );
           }
         }
@@ -157,14 +159,14 @@ export class OrderService {
           !/^\d{6}$/.test(shippingAddress.postalCode)
         ) {
           validationErrors.push(
-            "Invalid postal code format. Expected 6 digits."
+            "Invalid postal code format. Expected 6 digits.",
           );
         }
 
         // Validate required contact information in address or separately
         if (!shippingAddress.recipientName) {
           validationErrors.push(
-            "Recipient name is required in shipping address"
+            "Recipient name is required in shipping address",
           );
         }
 
@@ -183,7 +185,7 @@ export class OrderService {
       ];
       if (!paymentMethod || !validPaymentMethods.includes(paymentMethod)) {
         validationErrors.push(
-          `Invalid payment method. Allowed: ${validPaymentMethods.join(", ")}`
+          `Invalid payment method. Allowed: ${validPaymentMethods.join(", ")}`,
         );
       }
 
@@ -199,7 +201,7 @@ export class OrderService {
       if (validationErrors.length > 0) {
         throw new AppError(
           `Order validation failed: ${validationErrors.join("; ")}`,
-          400
+          400,
         );
       }
 
@@ -222,15 +224,15 @@ export class OrderService {
         userRepositoryExists: !!this.userRepository,
         userRepositoryMethods: this.userRepository
           ? Object.getOwnPropertyNames(
-            Object.getPrototypeOf(this.userRepository)
-          )
+              Object.getPrototypeOf(this.userRepository),
+            )
           : "N/A",
       });
 
       if (error instanceof AppError) throw error;
       throw new AppError(
         `Order validation failed due to system error: ${error.message}`,
-        500
+        500,
       );
     }
   }
@@ -255,18 +257,21 @@ export class OrderService {
         // Step 1: Validate and reserve stock for all items atomically
         // Batch-resolve warehouse IDs for all products in one query
         const productIds = items.map((item) => item.productId).filter(Boolean);
-        const warehouseMap = await this.warehouseRepository.getWarehouseIdsByProductIds(productIds);
+        const warehouseMap =
+          await this.warehouseRepository.getWarehouseIdsByProductIds(
+            productIds,
+          );
 
         const validatedItems = await this._validateAndReserveStock(
           connection,
           items,
-          warehouseMap
+          warehouseMap,
         );
 
         // Step 2: Calculate final pricing with current rates
         const orderSummary = await this._calculateAtomicOrderSummary(
           connection,
-          validatedItems
+          validatedItems,
         );
 
         // Step 3: Create order record
@@ -296,7 +301,7 @@ export class OrderService {
 
         const order = await this.orderRepository.createWithConnection(
           connection,
-          orderPayload
+          orderPayload,
         );
 
         // Step 4: Create initial order event (with error handling for missing table)
@@ -339,7 +344,7 @@ export class OrderService {
             error: error.message,
             userId,
             itemCount: items.length,
-          }
+          },
         );
         throw error;
       }
@@ -361,9 +366,11 @@ export class OrderService {
         // Helper to extract best image
         const getBestImage = (images) => {
           if (!images || images.length === 0) return null;
-          const primary = images.find(img => img.is_primary);
+          const primary = images.find((img) => img.is_primary);
           if (primary) return primary.url;
-          const sorted = [...images].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+          const sorted = [...images].sort(
+            (a, b) => (a.sort_order || 0) - (b.sort_order || 0),
+          );
           return sorted[0]?.url;
         };
 
@@ -384,7 +391,7 @@ export class OrderService {
                 compare_at_price
               ),
               product_images(url, is_primary, sort_order)
-            `
+            `,
             )
             .eq("id", item.productId)
             .eq("product_variants.id", item.variantId)
@@ -393,7 +400,7 @@ export class OrderService {
 
           if (productError || !productData) {
             stockErrors.push(
-              `Product ${item.productId} (variant ${item.variantId}) not found or inactive`
+              `Product ${item.productId} (variant ${item.variantId}) not found or inactive`,
             );
             continue;
           }
@@ -402,7 +409,8 @@ export class OrderService {
             ...productData,
             variant_stock: productData.product_variants[0]?.stock,
             variant_price: productData.product_variants[0]?.price,
-            variant_compare_at_price: productData.product_variants[0]?.compare_at_price,
+            variant_compare_at_price:
+              productData.product_variants[0]?.compare_at_price,
             variant_sku: productData.product_variants[0]?.sku,
             variant_metadata: productData.product_variants[0]?.metadata,
           };
@@ -412,10 +420,12 @@ export class OrderService {
           // Get product without variant
           const { data: productData, error: productError } = await connection
             .from("products")
-            .select(`
+            .select(
+              `
               *,
               product_images(url, is_primary, sort_order)
-            `)
+            `,
+            )
             .eq("id", item.productId)
             .eq("is_active", true)
             .single();
@@ -438,13 +448,15 @@ export class OrderService {
 
         // Calculate original price (MRP) for discount calculation
         const originalPrice = item.variantId
-          ? product.variant_compare_at_price || product.compare_at_price || currentPrice
+          ? product.variant_compare_at_price ||
+            product.compare_at_price ||
+            currentPrice
           : product.compare_at_price || currentPrice;
 
         // Check stock availability
         if (availableStock < item.quantity) {
           stockErrors.push(
-            `${product.title}: Insufficient stock. Available: ${availableStock}, Requested: ${item.quantity}`
+            `${product.title}: Insufficient stock. Available: ${availableStock}, Requested: ${item.quantity}`,
           );
           continue;
         }
@@ -453,7 +465,7 @@ export class OrderService {
         const minOrderQty = product.min_order_quantity || 1;
         if (item.quantity < minOrderQty) {
           stockErrors.push(
-            `${product.title}: Minimum order quantity is ${minOrderQty}`
+            `${product.title}: Minimum order quantity is ${minOrderQty}`,
           );
           continue;
         }
@@ -462,7 +474,7 @@ export class OrderService {
         const maxOrderQty = product.max_order_quantity || 1000;
         if (item.quantity > maxOrderQty) {
           stockErrors.push(
-            `${product.title}: Maximum order quantity is ${maxOrderQty}`
+            `${product.title}: Maximum order quantity is ${maxOrderQty}`,
           );
           continue;
         }
@@ -517,7 +529,7 @@ export class OrderService {
           error: error.message,
         });
         stockErrors.push(
-          `${item.productId}: Stock validation failed - ${error.message}`
+          `${item.productId}: Stock validation failed - ${error.message}`,
         );
       }
     }
@@ -525,7 +537,7 @@ export class OrderService {
     if (stockErrors.length > 0) {
       throw new AppError(
         `Stock validation failed: ${stockErrors.join("; ")}`,
-        409
+        409,
       );
     }
 
@@ -557,14 +569,18 @@ export class OrderService {
     // Calculate fees and taxes with business rules
     const deliveryFee = this._calculateDeliveryFee(
       subtotal,
-      totalDeliveryCharge
+      totalDeliveryCharge,
     );
     const platformFee = this._calculatePlatformFee(subtotal);
     const tax = this._calculateTax(subtotal);
 
     // Calculate Discount: (MRP * Qty) - (Selling Price * Qty)
     // Note: subtotal is already (Selling Price * Qty)
-    const totalMRP = validatedItems.reduce((sum, item) => sum + ((item.originalPrice || item.unitPrice) * item.quantity), 0);
+    const totalMRP = validatedItems.reduce(
+      (sum, item) =>
+        sum + (item.originalPrice || item.unitPrice) * item.quantity,
+      0,
+    );
     const discount = Math.max(0, totalMRP - subtotal);
 
     // Total = Subtotal + Fees - (Discount is ALREADY applied in subtotal because subtotal = selling price)
@@ -618,8 +634,9 @@ export class OrderService {
 
           if (fetchError || !variantData) {
             throw new Error(
-              `Failed to fetch variant stock: ${fetchError?.message || "Variant not found"
-              }`
+              `Failed to fetch variant stock: ${
+                fetchError?.message || "Variant not found"
+              }`,
             );
           }
 
@@ -638,7 +655,7 @@ export class OrderService {
 
           if (variantError) {
             throw new Error(
-              `Failed to update variant stock: ${variantError.message}`
+              `Failed to update variant stock: ${variantError.message}`,
             );
           }
         } else {
@@ -651,8 +668,9 @@ export class OrderService {
 
           if (fetchError || !productData) {
             throw new Error(
-              `Failed to fetch product stock: ${fetchError?.message || "Product not found"
-              }`
+              `Failed to fetch product stock: ${
+                fetchError?.message || "Product not found"
+              }`,
             );
           }
 
@@ -671,7 +689,7 @@ export class OrderService {
 
           if (productError) {
             throw new Error(
-              `Failed to update product stock: ${productError.message}`
+              `Failed to update product stock: ${productError.message}`,
             );
           }
         }
@@ -687,7 +705,10 @@ export class OrderService {
           variantId: item.variantId,
           error: error.message,
         });
-        throw new AppError(`Failed to update stock levels: ${error.message}`, 500);
+        throw new AppError(
+          `Failed to update stock levels: ${error.message}`,
+          500,
+        );
       }
     }
   }
@@ -736,7 +757,7 @@ export class OrderService {
       // Add event counts for each order
       for (const order of orders.orders || orders) {
         const eventCount = await this.orderEventRepository.countByOrderId(
-          order.id
+          order.id,
         );
         order.eventCount = eventCount;
       }
@@ -767,7 +788,7 @@ export class OrderService {
       if (filters.status && !validStatuses.includes(filters.status)) {
         throw new AppError(
           `Invalid status filter. Must be one of: ${validStatuses.join(", ")}`,
-          400
+          400,
         );
       }
 
@@ -778,9 +799,9 @@ export class OrderService {
       ) {
         throw new AppError(
           `Invalid payment status. Must be one of: ${validPaymentStatuses.join(
-            ", "
+            ", ",
           )}`,
-          400
+          400,
         );
       }
 
@@ -799,7 +820,7 @@ export class OrderService {
     status,
     changedBy,
     note = null,
-    metadata = {}
+    metadata = {},
   ) {
     try {
       // Validate status
@@ -816,7 +837,7 @@ export class OrderService {
       if (!validStatuses.includes(status)) {
         throw new AppError(
           `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
-          400
+          400,
         );
       }
 
@@ -832,7 +853,7 @@ export class OrderService {
       if (!this._isValidStatusTransition(currentStatus, status)) {
         throw new AppError(
           `Invalid status transition from ${currentStatus} to ${status}`,
-          400
+          400,
         );
       }
 
@@ -840,7 +861,7 @@ export class OrderService {
       const updatedOrder = await this.orderRepository.updateStatus(
         orderId,
         status,
-        metadata
+        metadata,
       );
 
       // Create order event
@@ -861,7 +882,7 @@ export class OrderService {
       }
 
       logger.info(
-        `Order ${orderId} status updated from ${currentStatus} to ${status}`
+        `Order ${orderId} status updated from ${currentStatus} to ${status}`,
       );
       return updatedOrder;
     } catch (error) {
@@ -869,7 +890,6 @@ export class OrderService {
       throw error;
     }
   }
-
 
   /**
    * Update order item status with event tracking
@@ -880,7 +900,7 @@ export class OrderService {
     status,
     changedBy,
     note = null,
-    metadata = {}
+    metadata = {},
   ) {
     try {
       // Validate status
@@ -898,7 +918,7 @@ export class OrderService {
       if (!validStatuses.includes(status)) {
         throw new AppError(
           `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
-          400
+          400,
         );
       }
 
@@ -919,7 +939,7 @@ export class OrderService {
       // Update item status
       const updatedItem = await this.orderRepository.updateOrderItemStatus(
         itemId,
-        status
+        status,
       );
 
       // Create event
@@ -932,6 +952,23 @@ export class OrderService {
         note: note || `Item status updated to ${status}`,
         metadata,
       });
+
+      // ── Ledger trigger: create entries when item is delivered ──────────
+      if (status === "delivered" && this.ledgerRepository) {
+        try {
+          await this._createDeliveryLedgerEntries(order, item);
+        } catch (ledgerError) {
+          logger.error("Failed to create ledger entries for delivered item", {
+            orderId,
+            itemId,
+            error: ledgerError.message,
+          });
+          throw new AppError(
+            `Ledger entry creation failed for item ${itemId}: ${ledgerError.message}`,
+            500,
+          );
+        }
+      }
 
       return updatedItem;
     } catch (error) {
@@ -965,7 +1002,7 @@ export class OrderService {
       if (nonCancellableStatuses.includes(order.status)) {
         throw new AppError(
           `Cannot cancel order with status: ${order.status}`,
-          400
+          400,
         );
       }
 
@@ -988,7 +1025,10 @@ export class OrderService {
 
       // Check permissions
       if (order.userId !== userId) {
-        throw new AppError("You can only cancel items from your own orders", 403);
+        throw new AppError(
+          "You can only cancel items from your own orders",
+          403,
+        );
       }
 
       const item = order.items.find((i) => i.id === itemId);
@@ -1003,13 +1043,13 @@ export class OrderService {
         "delivered",
         "cancelled",
         "refunded",
-        "returned"
+        "returned",
       ];
 
       if (nonCancellableStatuses.includes(item.status)) {
         throw new AppError(
           `Cannot cancel item with status: ${item.status}`,
-          400
+          400,
         );
       }
 
@@ -1019,7 +1059,7 @@ export class OrderService {
         itemId,
         "cancelled",
         userId,
-        reason
+        reason,
       );
 
       // 2. Restock inventory automatically
@@ -1030,7 +1070,7 @@ export class OrderService {
         logger.error("Failed to restock cancelled item", {
           orderId,
           itemId,
-          error: restockError.message
+          error: restockError.message,
         });
       }
 
@@ -1041,7 +1081,7 @@ export class OrderService {
         logger.error("Failed to process partial refund", {
           orderId,
           itemId,
-          error: refundError.message
+          error: refundError.message,
         });
       }
 
@@ -1067,14 +1107,15 @@ export class OrderService {
     try {
       // Batch-resolve warehouse IDs for all products upfront
       const productIds = items.map((item) => item.productId).filter(Boolean);
-      const warehouseMap = await this.warehouseRepository.getWarehouseIdsByProductIds(productIds);
+      const warehouseMap =
+        await this.warehouseRepository.getWarehouseIdsByProductIds(productIds);
 
       for (const item of items) {
         // Validate item structure
         if (!item.productId || !item.quantity || item.quantity <= 0) {
           throw new AppError(
             "Invalid item: productId and positive quantity required",
-            400
+            400,
           );
         }
 
@@ -1082,7 +1123,7 @@ export class OrderService {
         if (!product || !product.isActive) {
           throw new AppError(
             `Product ${item.productId} not found or inactive`,
-            404
+            404,
           );
         }
 
@@ -1090,7 +1131,7 @@ export class OrderService {
         if (product.stock < item.quantity) {
           throw new AppError(
             `Insufficient stock for ${product.title}. Available: ${product.stock}`,
-            400
+            400,
           );
         }
 
@@ -1101,12 +1142,12 @@ export class OrderService {
         // Handle variant pricing
         if (item.variantId) {
           const variant = product.variants?.find(
-            (v) => v.id === item.variantId
+            (v) => v.id === item.variantId,
           );
           if (!variant) {
             throw new AppError(
               `Product variant not found for ${product.title}`,
-              404
+              404,
             );
           }
 
@@ -1114,7 +1155,7 @@ export class OrderService {
           if (variant.stock < item.quantity) {
             throw new AppError(
               `Insufficient stock for ${product.title}. Available: ${variant.stock}`,
-              400
+              400,
             );
           }
 
@@ -1136,7 +1177,8 @@ export class OrderService {
           compareAtPrice,
           totalPrice: itemTotal,
           warehouseId: warehouseMap.get(item.productId) || null,
-          deliveryCharge: parseFloat(product.delivery_charge || product.deliveryCharge) || 0,
+          deliveryCharge:
+            parseFloat(product.delivery_charge || product.deliveryCharge) || 0,
           productSnapshot: {
             type: product.productType,
             brand: product.brands?.[0]?.name,
@@ -1162,7 +1204,7 @@ export class OrderService {
       // Calculate fees and taxes
       const deliveryFee = this._calculateDeliveryFee(
         subtotal,
-        totalDeliveryCharge
+        totalDeliveryCharge,
       );
       const platformFee = this._calculatePlatformFee(subtotal);
       const tax = this._calculateTax(subtotal);
@@ -1183,7 +1225,7 @@ export class OrderService {
             (item.compareAtPrice
               ? (item.compareAtPrice - item.unitPrice) * item.quantity
               : 0),
-          0
+          0,
         ),
       };
     } catch (error) {
@@ -1222,13 +1264,26 @@ export class OrderService {
       logger.info("Checking warehouse ownership", { retailerId, warehouseId });
 
       // Verify retailer owns this warehouse
-      const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
-      logger.info("isLinkedToRetailer result", { isLinked, retailerId, warehouseId });
+      const isLinked = await this.warehouseRepository.isLinkedToRetailer(
+        retailerId,
+        warehouseId,
+      );
+      logger.info("isLinkedToRetailer result", {
+        isLinked,
+        retailerId,
+        warehouseId,
+      });
       if (!isLinked) {
-        throw new AppError("Access denied. You do not own this warehouse.", 403);
+        throw new AppError(
+          "Access denied. You do not own this warehouse.",
+          403,
+        );
       }
 
-      const result = await this.orderRepository.getByWarehouseId(warehouseId, filters);
+      const result = await this.orderRepository.getByWarehouseId(
+        warehouseId,
+        filters,
+      );
 
       logger.info("Fetched orders for warehouse", {
         warehouseId,
@@ -1254,7 +1309,8 @@ export class OrderService {
       }
 
       // Get all warehouse IDs for this retailer
-      const warehouses = await this.warehouseRepository.findByRetailerId(retailerId);
+      const warehouses =
+        await this.warehouseRepository.findByRetailerId(retailerId);
       const warehouseIds = (warehouses || []).map((w) => w.id);
 
       if (warehouseIds.length === 0) {
@@ -1273,7 +1329,10 @@ export class OrderService {
         };
       }
 
-      const result = await this.orderRepository.getByWarehouseIds(warehouseIds, filters);
+      const result = await this.orderRepository.getByWarehouseIds(
+        warehouseIds,
+        filters,
+      );
       result.warehouseCount = warehouseIds.length;
 
       logger.info("Fetched all retailer orders", {
@@ -1299,12 +1358,21 @@ export class OrderService {
       }
 
       // Verify retailer owns this warehouse
-      const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
+      const isLinked = await this.warehouseRepository.isLinkedToRetailer(
+        retailerId,
+        warehouseId,
+      );
       if (!isLinked) {
-        throw new AppError("Access denied. You do not own this warehouse.", 403);
+        throw new AppError(
+          "Access denied. You do not own this warehouse.",
+          403,
+        );
       }
 
-      const stats = await this.orderRepository.getWarehouseOrderStats(warehouseId, filters);
+      const stats = await this.orderRepository.getWarehouseOrderStats(
+        warehouseId,
+        filters,
+      );
 
       logger.info("Fetched warehouse order stats", {
         warehouseId,
@@ -1329,12 +1397,18 @@ export class OrderService {
       }
 
       // Get all warehouse IDs for this retailer
-      const warehouses = await this.warehouseRepository.findByRetailerId(retailerId);
+      const warehouses =
+        await this.warehouseRepository.findByRetailerId(retailerId);
       const warehouseIds = (warehouses || []).map((w) => w.id);
 
       if (warehouseIds.length === 0) {
         return {
-          summary: { totalOrders: 0, totalRevenue: 0, averageOrderValue: 0, totalItems: 0 },
+          summary: {
+            totalOrders: 0,
+            totalRevenue: 0,
+            averageOrderValue: 0,
+            totalItems: 0,
+          },
           byStatus: {},
           byPaymentStatus: {},
           byWarehouse: {},
@@ -1344,7 +1418,12 @@ export class OrderService {
 
       // Get stats per warehouse and aggregate
       const aggregated = {
-        summary: { totalOrders: 0, totalRevenue: 0, averageOrderValue: 0, totalItems: 0 },
+        summary: {
+          totalOrders: 0,
+          totalRevenue: 0,
+          averageOrderValue: 0,
+          totalItems: 0,
+        },
         byStatus: {},
         byPaymentStatus: {},
         byWarehouse: {},
@@ -1352,7 +1431,11 @@ export class OrderService {
       };
 
       for (const warehouse of warehouses) {
-        const warehouseStats = await this.orderRepository.getWarehouseOrderStats(warehouse.id, filters);
+        const warehouseStats =
+          await this.orderRepository.getWarehouseOrderStats(
+            warehouse.id,
+            filters,
+          );
 
         aggregated.summary.totalOrders += warehouseStats.summary.totalOrders;
         aggregated.summary.totalRevenue += warehouseStats.summary.totalRevenue;
@@ -1368,7 +1451,9 @@ export class OrderService {
         }
 
         // Merge payment status counts
-        for (const [pStatus, data] of Object.entries(warehouseStats.byPaymentStatus)) {
+        for (const [pStatus, data] of Object.entries(
+          warehouseStats.byPaymentStatus,
+        )) {
           if (!aggregated.byPaymentStatus[pStatus]) {
             aggregated.byPaymentStatus[pStatus] = { count: 0 };
           }
@@ -1385,7 +1470,9 @@ export class OrderService {
       // Calculate overall average
       if (aggregated.summary.totalOrders > 0) {
         aggregated.summary.averageOrderValue = parseFloat(
-          (aggregated.summary.totalRevenue / aggregated.summary.totalOrders).toFixed(2)
+          (
+            aggregated.summary.totalRevenue / aggregated.summary.totalOrders
+          ).toFixed(2),
         );
       }
 
@@ -1408,7 +1495,8 @@ export class OrderService {
 
       // Check if any order item belongs to retailer's warehouses
       // Items with NULL warehouse_id belong to the warehouse set on the order itself
-      const warehouses = await this.warehouseRepository.findByRetailerId(retailerId);
+      const warehouses =
+        await this.warehouseRepository.findByRetailerId(retailerId);
       const warehouseIds = new Set((warehouses || []).map((w) => w.id));
       const orderWarehouseId = order.warehouseId;
 
@@ -1419,7 +1507,10 @@ export class OrderService {
       const hasAccess = order.items?.some(isRetailerItem);
 
       if (!hasAccess) {
-        throw new AppError("Access denied. This order does not belong to your warehouses.", 403);
+        throw new AppError(
+          "Access denied. This order does not belong to your warehouses.",
+          403,
+        );
       }
 
       // Filter items to only show retailer's warehouse items
@@ -1481,9 +1572,9 @@ export class OrderService {
       if (!validPaymentStatuses.includes(paymentStatus)) {
         throw new AppError(
           `Invalid payment status. Must be one of: ${validPaymentStatuses.join(
-            ", "
+            ", ",
           )}`,
-          400
+          400,
         );
       }
 
@@ -1496,7 +1587,7 @@ export class OrderService {
       await this.orderRepository.updatePaymentStatus(
         orderId,
         paymentStatus,
-        paymentData
+        paymentData,
       );
 
       // Auto-update order status based on payment
@@ -1505,12 +1596,12 @@ export class OrderService {
           orderId,
           "processed",
           null,
-          "Payment confirmed - auto-processed"
+          "Payment confirmed - auto-processed",
         );
       }
 
       logger.info(
-        `Payment status updated for order ${orderId}: ${paymentStatus}`
+        `Payment status updated for order ${orderId}: ${paymentStatus}`,
       );
       return true;
     } catch (error) {
@@ -1537,7 +1628,7 @@ export class OrderService {
 
   _calculateDeliveryFee(subtotal, totalDeliveryCharge) {
     // Free delivery above ₹399 (Frontend Logic)
-    // Note: Frontend also has item-specific delivery charges. 
+    // Note: Frontend also has item-specific delivery charges.
     // Ideally, this service should receive the fully calculated delivery fee or replicate the precise logic.
     // For now, aligning the base logic:
     const baseFee = subtotal >= 399 ? 0 : 50;
@@ -1554,12 +1645,114 @@ export class OrderService {
   _calculateTax(subtotal) {
     // 18% GST (Included in price usually, returning 0 for additive tax unless specified)
     // Frontend doesn't add extra tax on top of subtotal + fees
-    return 0; // subtotal * 0.18; 
+    return 0; // subtotal * 0.18;
   }
 
   async _handleOrderDelivered(orderId) {
-    // Handle post-delivery logic (e.g., enable reviews, loyalty points)
     logger.info(`Order ${orderId} delivered - enabling post-delivery features`);
+
+    // Create ledger entries for all deliverable items in this order
+    if (this.ledgerRepository) {
+      try {
+        const order = await this.orderRepository.findById(orderId);
+        if (!order || !order.items) return;
+
+        for (const item of order.items) {
+          // Skip items that were already cancelled/refunded
+          if (["cancelled", "refunded", "returned"].includes(item.status))
+            continue;
+
+          await this._createDeliveryLedgerEntries(order, item);
+        }
+
+        logger.info(`Ledger entries created for all items in order ${orderId}`);
+      } catch (ledgerError) {
+        logger.error("Failed to create ledger entries on order delivery", {
+          orderId,
+          error: ledgerError.message,
+        });
+        throw new AppError(
+          `Ledger entry creation failed for order ${orderId}: ${ledgerError.message}`,
+          500,
+        );
+      }
+    }
+  }
+
+  /**
+   * Create multi-line ledger entries for a delivered order item.
+   *
+   * Inserts two immutable rows:
+   *   1. ORDER_REVENUE  (CREDIT) – the retailer's gross revenue.
+   *   2. PLATFORM_FEE   (DEBIT)  – Bukizz's commission.
+   *
+   * Both start as PENDING with a trigger_date 3 days in the future.
+   *
+   * @param {Object} order - Full order object (from findById).
+   * @param {Object} item  - The specific order item being delivered.
+   */
+  async _createDeliveryLedgerEntries(order, item) {
+    const grossAmount = parseFloat(item.totalPrice || item.total_price || 0);
+    if (grossAmount <= 0) {
+      logger.warn("Skipping ledger creation: item has no positive amount", {
+        orderId: order.id,
+        itemId: item.id,
+      });
+      return;
+    }
+
+    // Commission rate from snapshot or default (flat ₹10 fallback)
+    const commissionRate = item.commissionRate || item.commission_rate || 0;
+    const platformFee =
+      commissionRate > 0 ? grossAmount * (commissionRate / 100) : 10; // Flat ₹10 default matches OrderService._calculatePlatformFee
+
+    // 3-day hold period before funds become AVAILABLE
+    const triggerDate = new Date(
+      Date.now() + 3 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    const retailerId =
+      order.retailerId || order.retailer_id || item.warehouseRetailerId;
+    const warehouseId =
+      item.warehouseId ||
+      item.warehouse_id ||
+      order.warehouseId ||
+      order.warehouse_id;
+
+    const ledgerEntries = [
+      {
+        retailer_id: retailerId,
+        warehouse_id: warehouseId || null,
+        order_id: order.id,
+        order_item_id: item.id,
+        transaction_type: "ORDER_REVENUE",
+        entry_type: "CREDIT",
+        amount: grossAmount,
+        status: "PENDING",
+        trigger_date: triggerDate,
+      },
+      {
+        retailer_id: retailerId,
+        warehouse_id: warehouseId || null,
+        order_id: order.id,
+        order_item_id: item.id,
+        transaction_type: "PLATFORM_FEE",
+        entry_type: "DEBIT",
+        amount: platformFee,
+        status: "PENDING",
+        trigger_date: triggerDate,
+      },
+    ];
+
+    await this.ledgerRepository.createEntries(ledgerEntries);
+
+    logger.info("Delivery ledger entries created", {
+      orderId: order.id,
+      itemId: item.id,
+      grossAmount,
+      platformFee,
+      triggerDate,
+    });
   }
 
   async _handleOrderCancelled(orderId, cancelledBy, reason) {
@@ -1620,8 +1813,9 @@ export class OrderService {
 
             if (fetchError || !variantData) {
               throw new Error(
-                `Failed to fetch variant stock for restocking: ${fetchError?.message || "Variant not found"
-                }`
+                `Failed to fetch variant stock for restocking: ${
+                  fetchError?.message || "Variant not found"
+                }`,
               );
             }
 
@@ -1638,7 +1832,7 @@ export class OrderService {
 
             if (variantError) {
               throw new Error(
-                `Failed to restock variant: ${variantError.message}`
+                `Failed to restock variant: ${variantError.message}`,
               );
             }
           } else {
@@ -1651,8 +1845,9 @@ export class OrderService {
 
             if (fetchError || !productData) {
               throw new Error(
-                `Failed to fetch product stock for restocking: ${fetchError?.message || "Product not found"
-                }`
+                `Failed to fetch product stock for restocking: ${
+                  fetchError?.message || "Product not found"
+                }`,
               );
             }
 
@@ -1669,7 +1864,7 @@ export class OrderService {
 
             if (productError) {
               throw new Error(
-                `Failed to restock product: ${productError.message}`
+                `Failed to restock product: ${productError.message}`,
               );
             }
           }
@@ -1685,7 +1880,7 @@ export class OrderService {
       }
 
       logger.info(
-        `Successfully restocked ${order.items.length} items for cancelled order ${orderId}`
+        `Successfully restocked ${order.items.length} items for cancelled order ${orderId}`,
       );
     });
   }
@@ -1706,7 +1901,9 @@ export class OrderService {
           .single();
 
         if (fetchError || !variantData) {
-          throw new Error(`Variant not found for restocking: ${item.variantId}`);
+          throw new Error(
+            `Variant not found for restocking: ${item.variantId}`,
+          );
         }
 
         const newStock = variantData.stock + item.quantity;
@@ -1716,7 +1913,6 @@ export class OrderService {
           .from("product_variants")
           .update({ stock: newStock })
           .eq("id", item.variantId);
-
       } else {
         // Get current product stock
         const { data: productData, error: fetchError } = await connection
@@ -1726,7 +1922,9 @@ export class OrderService {
           .single();
 
         if (fetchError || !productData) {
-          throw new Error(`Product not found for restocking: ${item.productId}`);
+          throw new Error(
+            `Product not found for restocking: ${item.productId}`,
+          );
         }
 
         const newStock = productData.stock + item.quantity;
@@ -1752,13 +1950,17 @@ export class OrderService {
     // 2. Call Razorpay/Stripe API to refund 'item.totalPrice'
     // 3. Update order payment record
 
-    if (order.paymentStatus === 'paid') {
-      logger.info(`[REFUND REQUIRED] Process partial refund of ₹${item.totalPrice} for Item ${item.id} in Order ${order.id}`);
+    if (order.paymentStatus === "paid") {
+      logger.info(
+        `[REFUND REQUIRED] Process partial refund of ₹${item.totalPrice} for Item ${item.id} in Order ${order.id}`,
+      );
       logger.info(`Refund Reason: ${reason}`);
 
       // We could ideally create a 'refund_request' record in DB here
     } else {
-      logger.info(`Skipping refund for Item ${item.id} - Order payment status is ${order.paymentStatus}`);
+      logger.info(
+        `Skipping refund for Item ${item.id} - Order payment status is ${order.paymentStatus}`,
+      );
     }
   }
 }

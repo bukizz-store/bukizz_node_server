@@ -157,7 +157,7 @@ export const categorySchemas = {
     rootOnly: Joi.boolean().optional(),
     sortBy: Joi.string().valid("createdAt", "name").default("name"),
     sortOrder: Joi.string().valid("asc", "desc").default("asc"),
-    schoolCat: Joi.boolean().optional().default(false)
+    schoolCat: Joi.boolean().optional().default(false),
   }),
 };
 
@@ -945,3 +945,48 @@ productSchemas.warehouseProductQuery = Joi.object({
   categoryId: optionalUuidSchema,
   status: Joi.string().valid("active", "inactive", "all").default("active"),
 });
+
+/**
+ * Settlement validation schemas
+ */
+export const settlementSchemas = {
+  ledgerQuery: Joi.object({
+    retailerId: Joi.string().uuid().optional(),
+    warehouseId: Joi.string().uuid().optional(),
+    status: Joi.string()
+      .valid("ON_HOLD", "PENDING", "AVAILABLE", "PARTIALLY_SETTLED", "SETTLED")
+      .optional(),
+    transactionType: Joi.string()
+      .valid(
+        "ORDER_REVENUE",
+        "PLATFORM_FEE",
+        "REFUND_CLAWBACK",
+        "MANUAL_ADJUSTMENT",
+      )
+      .optional(),
+    startDate: Joi.date().iso().optional(),
+    endDate: Joi.date().iso().optional(),
+  }),
+
+  manualAdjustment: Joi.object({
+    retailerId: Joi.string().uuid().required(),
+    warehouseId: Joi.string().uuid().optional(),
+    amount: Joi.number().positive().required(),
+    entryType: Joi.string().valid("CREDIT", "DEBIT").required(),
+    notes: Joi.string().max(500).optional(),
+  }),
+
+  settlementExecution: Joi.object({
+    retailerId: Joi.string().uuid().required(),
+    amount: Joi.number().positive().required(),
+    paymentMode: Joi.string().valid("MANUAL_BANK_TRANSFER", "CASH").required(),
+    referenceNumber: Joi.string().optional(),
+    notes: Joi.string().max(500).optional(),
+    receiptUrl: Joi.string().uri().optional(),
+  }),
+
+  settlementQuery: Joi.object({
+    retailerId: Joi.string().uuid().optional(),
+    status: Joi.string().valid("COMPLETED", "FAILED").optional(),
+  }),
+};

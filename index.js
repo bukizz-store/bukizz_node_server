@@ -37,6 +37,10 @@ import BrandRepository from "./src/repositories/brandRepository.js";
 import ProductOptionRepository from "./src/repositories/productOptionRepository.js";
 import { SchoolRepository } from "./src/repositories/schoolRepository.js";
 import { UserRepository } from "./src/repositories/userRepository.js";
+import { ledgerRepository } from "./src/repositories/ledgerRepository.js";
+import { settlementRepository } from "./src/repositories/settlementRepository.js";
+import { SettlementService } from "./src/services/settlementService.js";
+import { settlementController } from "./src/controllers/settlementController.js";
 
 // Import middleware and utilities
 import { errorHandler } from "./src/middleware/errorHandler.js";
@@ -107,6 +111,13 @@ async function startServer() {
     const userController = new UserController(userService);
     const authController = new AuthController(authService);
 
+    // Initialize settlement layer
+    const settlementService = new SettlementService(
+      ledgerRepository,
+      settlementRepository,
+    );
+    const settlementCtrl = settlementController({ settlementService });
+
     // Dependency injection container
     const dependencies = {
       supabase,
@@ -115,16 +126,20 @@ async function startServer() {
       productController,
       schoolController,
       orderController,
+      settlementController: settlementCtrl,
       authService,
       userService,
       productService,
       schoolService,
       orderService,
+      settlementService,
       productRepository,
       brandRepository,
       productOptionRepository,
       schoolRepository,
       userRepository,
+      ledgerRepository,
+      settlementRepository,
     };
 
     // Setup all routes
