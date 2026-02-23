@@ -52,7 +52,8 @@ export class OrderRepository {
 
     try {
       // Determine warehouse_id from the first item that has one
-      const orderWarehouseId = items.find((item) => item.warehouseId)?.warehouseId || null;
+      const orderWarehouseId =
+        items.find((item) => item.warehouseId)?.warehouseId || null;
 
       // Create main order record using Supabase
       const { data: orderData, error: orderError } = await this.supabase
@@ -655,7 +656,8 @@ export class OrderRepository {
       // Group by order_id
       const itemsMap = {};
       enriched.forEach((item) => {
-        if (!itemsMap[item.orderId || item._orderId]) itemsMap[item.orderId || item._orderId] = [];
+        if (!itemsMap[item.orderId || item._orderId])
+          itemsMap[item.orderId || item._orderId] = [];
         itemsMap[item.orderId || item._orderId].push(item);
       });
 
@@ -697,19 +699,19 @@ export class OrderRepository {
    */
   async _enrichItemsWithVariantData(items) {
     try {
-      const variantIds = items
-        .map((item) => item.variantId)
-        .filter(Boolean);
+      const variantIds = items.map((item) => item.variantId).filter(Boolean);
 
       if (variantIds.length === 0) return items;
 
       // Fetch variants with nested option values and their attributes
       const { data: variants, error } = await this.supabase
         .from("product_variants")
-        .select(`
+        .select(
+          `
           id, sku, price, compare_at_price, stock, weight, metadata,
           option_value_1, option_value_2, option_value_3
-        `)
+        `,
+        )
         .in("id", variantIds);
 
       if (error || !variants || variants.length === 0) {
@@ -730,12 +732,14 @@ export class OrderRepository {
       if (optionValueIds.size > 0) {
         const { data: optionValues, error: ovError } = await this.supabase
           .from("product_option_values")
-          .select(`
+          .select(
+            `
             id, value, sort_order, image_url,
             attribute:attribute_id (
               id, name, position, is_required
             )
-          `)
+          `,
+          )
           .in("id", [...optionValueIds]);
 
         if (!ovError && optionValues) {
@@ -745,11 +749,13 @@ export class OrderRepository {
               value: ov.value,
               imageUrl: ov.image_url,
               sortOrder: ov.sort_order,
-              attribute: ov.attribute ? {
-                id: ov.attribute.id,
-                name: ov.attribute.name,
-                position: ov.attribute.position,
-              } : null,
+              attribute: ov.attribute
+                ? {
+                    id: ov.attribute.id,
+                    name: ov.attribute.name,
+                    position: ov.attribute.position,
+                  }
+                : null,
             };
           });
         }
@@ -773,7 +779,9 @@ export class OrderRepository {
           id: v.id,
           sku: v.sku,
           price: parseFloat(v.price || 0),
-          compareAtPrice: v.compare_at_price ? parseFloat(v.compare_at_price) : null,
+          compareAtPrice: v.compare_at_price
+            ? parseFloat(v.compare_at_price)
+            : null,
           stock: v.stock,
           weight: v.weight,
           metadata: v.metadata || {},
@@ -784,7 +792,7 @@ export class OrderRepository {
       // Attach variant data to each item
       return items.map((item) => ({
         ...item,
-        variant: item.variantId ? (variantMap[item.variantId] || null) : null,
+        variant: item.variantId ? variantMap[item.variantId] || null : null,
       }));
     } catch (error) {
       logger.error("Error enriching items with variant data:", error);
@@ -881,7 +889,15 @@ export class OrderRepository {
       } = filters;
 
       const offset = (page - 1) * limit;
-      const validOrderStatuses = ["initialized", "processed", "shipped", "out_for_delivery", "delivered", "cancelled", "refunded"];
+      const validOrderStatuses = [
+        "initialized",
+        "processed",
+        "shipped",
+        "out_for_delivery",
+        "delivered",
+        "cancelled",
+        "refunded",
+      ];
 
       // ITEM-FIRST approach: status lives on order_items, not orders.
       // Step 1a: Get order IDs from items directly assigned to this warehouse
@@ -897,7 +913,9 @@ export class OrderRepository {
       const { data: matchedItems, error: itemError } = await itemQuery;
 
       if (itemError) {
-        throw new Error(`Failed to fetch warehouse order items: ${itemError.message}`);
+        throw new Error(
+          `Failed to fetch warehouse order items: ${itemError.message}`,
+        );
       }
 
       // Step 1b: Fallback — orders with warehouse_id at order level (for items with NULL warehouse_id)
@@ -910,7 +928,11 @@ export class OrderRepository {
       // If status filter is active, further filter fallback orders
       // by checking if they have ANY item with that status
       let filteredFallbackIds = fallbackOrderIds;
-      if (status && validOrderStatuses.includes(status) && fallbackOrderIds.length > 0) {
+      if (
+        status &&
+        validOrderStatuses.includes(status) &&
+        fallbackOrderIds.length > 0
+      ) {
         const { data: fallbackItems } = await this.supabase
           .from("order_items")
           .select("order_id")
@@ -919,8 +941,12 @@ export class OrderRepository {
         filteredFallbackIds = (fallbackItems || []).map((i) => i.order_id);
       }
 
-      const orderIdsFromItems = (matchedItems || []).map((item) => item.order_id);
-      const orderIds = [...new Set([...orderIdsFromItems, ...filteredFallbackIds])];
+      const orderIdsFromItems = (matchedItems || []).map(
+        (item) => item.order_id,
+      );
+      const orderIds = [
+        ...new Set([...orderIdsFromItems, ...filteredFallbackIds]),
+      ];
 
       if (orderIds.length === 0) {
         return {
@@ -948,7 +974,7 @@ export class OrderRepository {
 
       if (searchTerm) {
         query = query.or(
-          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`
+          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`,
         );
       }
 
@@ -965,7 +991,10 @@ export class OrderRepository {
 
       // 3. Batch fetch items for all orders (only items for this warehouse)
       const fetchedOrderIds = (orders || []).map((o) => o.id);
-      const itemsMap = await this._getWarehouseItemsForOrders(fetchedOrderIds, warehouseId);
+      const itemsMap = await this._getWarehouseItemsForOrders(
+        fetchedOrderIds,
+        warehouseId,
+      );
 
       const formattedOrders = (orders || []).map((order) => {
         const formattedOrder = this._formatOrder(order);
@@ -1011,7 +1040,15 @@ export class OrderRepository {
       } = filters;
 
       const offset = (page - 1) * limit;
-      const validOrderStatuses = ["initialized", "processed", "shipped", "out_for_delivery", "delivered", "cancelled", "refunded"];
+      const validOrderStatuses = [
+        "initialized",
+        "processed",
+        "shipped",
+        "out_for_delivery",
+        "delivered",
+        "cancelled",
+        "refunded",
+      ];
 
       if (!warehouseIds || warehouseIds.length === 0) {
         return {
@@ -1041,7 +1078,9 @@ export class OrderRepository {
       const { data: matchedItems, error: itemError } = await itemQuery;
 
       if (itemError) {
-        throw new Error(`Failed to fetch warehouse order items: ${itemError.message}`);
+        throw new Error(
+          `Failed to fetch warehouse order items: ${itemError.message}`,
+        );
       }
 
       // Step 1b: Fallback — orders with warehouse_id at order level
@@ -1051,7 +1090,11 @@ export class OrderRepository {
         .in("warehouse_id", warehouseIds);
 
       let filteredFallbackIds = (fallbackOrders || []).map((o) => o.id);
-      if (status && validOrderStatuses.includes(status) && filteredFallbackIds.length > 0) {
+      if (
+        status &&
+        validOrderStatuses.includes(status) &&
+        filteredFallbackIds.length > 0
+      ) {
         const { data: fallbackItems } = await this.supabase
           .from("order_items")
           .select("order_id")
@@ -1060,8 +1103,12 @@ export class OrderRepository {
         filteredFallbackIds = (fallbackItems || []).map((i) => i.order_id);
       }
 
-      const orderIdsFromItems = (matchedItems || []).map((item) => item.order_id);
-      const orderIds = [...new Set([...orderIdsFromItems, ...filteredFallbackIds])];
+      const orderIdsFromItems = (matchedItems || []).map(
+        (item) => item.order_id,
+      );
+      const orderIds = [
+        ...new Set([...orderIdsFromItems, ...filteredFallbackIds]),
+      ];
 
       if (orderIds.length === 0) {
         return {
@@ -1089,7 +1136,7 @@ export class OrderRepository {
 
       if (searchTerm) {
         query = query.or(
-          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`
+          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`,
         );
       }
 
@@ -1106,7 +1153,10 @@ export class OrderRepository {
 
       // Batch fetch items (only items belonging to retailer's warehouses)
       const fetchedOrderIds = (orders || []).map((o) => o.id);
-      const itemsMap = await this._getWarehouseItemsForOrdersBulk(fetchedOrderIds, warehouseIds);
+      const itemsMap = await this._getWarehouseItemsForOrdersBulk(
+        fetchedOrderIds,
+        warehouseIds,
+      );
 
       const formattedOrders = (orders || []).map((order) => {
         const formattedOrder = this._formatOrder(order);
@@ -1141,13 +1191,18 @@ export class OrderRepository {
       const { startDate, endDate } = filters;
 
       // Get all order_items for this warehouse (status lives on items, not orders)
-      const { data: warehouseOrderItems, error: itemError } = await this.supabase
-        .from("order_items")
-        .select("order_id, unit_price, quantity, total_price, status, warehouse_id")
-        .or(`warehouse_id.eq.${warehouseId},warehouse_id.is.null`);
+      const { data: warehouseOrderItems, error: itemError } =
+        await this.supabase
+          .from("order_items")
+          .select(
+            "order_id, unit_price, quantity, total_price, status, warehouse_id",
+          )
+          .or(`warehouse_id.eq.${warehouseId},warehouse_id.is.null`);
 
       if (itemError) {
-        throw new Error(`Failed to fetch warehouse order items: ${itemError.message}`);
+        throw new Error(
+          `Failed to fetch warehouse order items: ${itemError.message}`,
+        );
       }
 
       // Also include items from orders that have warehouse_id set at the order level
@@ -1162,7 +1217,8 @@ export class OrderRepository {
         // Directly assigned to this warehouse
         if (item.warehouse_id === warehouseId) return true;
         // NULL warehouse but order belongs to this warehouse
-        if (!item.warehouse_id && fallbackOrderIds.has(item.order_id)) return true;
+        if (!item.warehouse_id && fallbackOrderIds.has(item.order_id))
+          return true;
         return false;
       });
 
@@ -1170,7 +1226,12 @@ export class OrderRepository {
 
       if (orderIds.length === 0) {
         return {
-          summary: { totalOrders: 0, totalRevenue: 0, averageOrderValue: 0, totalItems: 0 },
+          summary: {
+            totalOrders: 0,
+            totalRevenue: 0,
+            averageOrderValue: 0,
+            totalItems: 0,
+          },
           byStatus: {},
           byPaymentStatus: {},
         };
@@ -1184,29 +1245,36 @@ export class OrderRepository {
       const { data: orders, error } = await query;
 
       if (error) {
-        throw new Error(`Failed to get warehouse order stats: ${error.message}`);
+        throw new Error(
+          `Failed to get warehouse order stats: ${error.message}`,
+        );
       }
 
       // Only count items that belong to date-filtered orders
       const filteredOrderIds = new Set((orders || []).map((o) => o.id));
-      const filteredItems = relevantItems.filter((i) => filteredOrderIds.has(i.order_id));
+      const filteredItems = relevantItems.filter((i) =>
+        filteredOrderIds.has(i.order_id),
+      );
 
       // Calculate warehouse-specific revenue from order_items
       const warehouseRevenue = filteredItems.reduce(
-        (sum, item) => sum + parseFloat(item.total_price || 0), 0
+        (sum, item) => sum + parseFloat(item.total_price || 0),
+        0,
       );
 
       const totalItems = filteredItems.reduce(
-        (sum, item) => sum + parseInt(item.quantity || 0), 0
+        (sum, item) => sum + parseInt(item.quantity || 0),
+        0,
       );
 
       const stats = {
         summary: {
           totalOrders: orders?.length || 0,
           totalRevenue: parseFloat(warehouseRevenue.toFixed(2)),
-          averageOrderValue: orders?.length > 0
-            ? parseFloat((warehouseRevenue / orders.length).toFixed(2))
-            : 0,
+          averageOrderValue:
+            orders?.length > 0
+              ? parseFloat((warehouseRevenue / orders.length).toFixed(2))
+              : 0,
           totalItems,
         },
         byStatus: {},
@@ -1225,7 +1293,9 @@ export class OrderRepository {
 
       // Round revenue values
       for (const key of Object.keys(stats.byStatus)) {
-        stats.byStatus[key].revenue = parseFloat(stats.byStatus[key].revenue.toFixed(2));
+        stats.byStatus[key].revenue = parseFloat(
+          stats.byStatus[key].revenue.toFixed(2),
+        );
       }
 
       // byPaymentStatus from orders table (payment is order-level)
@@ -1292,7 +1362,9 @@ export class OrderRepository {
     try {
       // Fetch items matching any of the warehouse IDs OR with NULL warehouse_id
       // (NULL items belong to orders found via orders.warehouse_id fallback)
-      const warehouseFilter = warehouseIds.map(id => `warehouse_id.eq.${id}`).join(",");
+      const warehouseFilter = warehouseIds
+        .map((id) => `warehouse_id.eq.${id}`)
+        .join(",");
       const { data: items, error } = await this.supabase
         .from("order_items")
         .select("*")
@@ -1367,6 +1439,7 @@ export class OrderRepository {
       productSnapshot: row.product_snapshot || {},
       warehouseId: row.warehouse_id,
       status: row.status || "initialized", // Default for backward compatibility
+      dispatchId: row.dispatch_id || null,
       createdAt: row.created_at,
     };
   }
