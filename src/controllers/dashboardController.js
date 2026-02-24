@@ -193,12 +193,12 @@ export class DashboardController {
     try {
       const orderRepo = new OrderRepository(supabase);
       const result = await orderRepo.getByWarehouseIds(warehouseIds, {
+        processed,
         limit: 5,
         page: 1,
         sortBy: "created_at",
         sortOrder: "desc",
         validOrderStatuses: [
-          "initialized",
           "processed",
         ]
       });
