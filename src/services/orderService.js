@@ -15,6 +15,8 @@ export class OrderService {
     orderEventRepository,
     orderQueryRepository,
     warehouseRepository,
+    productPaymentMethodRepository,
+    variantCommissionRepository,
   ) {
     this.orderRepository = orderRepository;
     this.productRepository = productRepository;
@@ -1826,8 +1828,8 @@ export class OrderService {
   }
 
   async _handleOrderDelivered(orderId) {
-    // Handle post-delivery logic (e.g., enable reviews, loyalty points)
     logger.info(`Order ${orderId} delivered - enabling post-delivery features`);
+    // Post-delivery features will be implemented here (like product reviews)
   }
 
   async _handleOrderCancelled(orderId, cancelledBy, reason) {

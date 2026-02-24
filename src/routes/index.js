@@ -13,6 +13,7 @@ import retailerRoutes from "./retailerRoutes.js";
 import retailerSchoolRoutes from "./retailerSchoolRoutes.js";
 import retailerOrderRoutes from "./retailerOrderRoutes.js";
 import retailerBankAccountRoutes from "./retailerBankAccountRoutes.js";
+import settlementRoutes from "./settlementRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
@@ -54,6 +55,7 @@ export function setupRoutes(app, dependencies = {}) {
         retailerSchools: `${apiV1}/retailer-schools`,
         retailerOrders: `${apiV1}/retailer/orders`,
         retailerBankAccounts: `${apiV1}/retailer/bank-accounts`,
+        settlements: `${apiV1}/settlements`,
       },
     });
   });
@@ -74,6 +76,10 @@ export function setupRoutes(app, dependencies = {}) {
   app.use(`${apiV1}/retailer-schools`, retailerSchoolRoutes);
   app.use(`${apiV1}/retailer/orders`, retailerOrderRoutes);
   app.use(`${apiV1}/images`, imageRoutes);
+  app.use(
+    `${apiV1}/settlements`,
+    settlementRoutes(dependencies.settlementController),
+  );
 
   // Handle 404 for all other routes
   app.use("*", notFoundHandler);
