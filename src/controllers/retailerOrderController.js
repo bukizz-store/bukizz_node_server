@@ -399,6 +399,12 @@ export class RetailerOrderController {
                     currency: order.currency || "INR",
                     shippingAddress: {
                         studentName: order.shippingAddress?.studentName || null,
+                        recipientName: order.shippingAddress?.recipientName || null,
+                        line1: order.shippingAddress?.line1,
+                        line2: order.shippingAddress?.line2,
+                        city: order.shippingAddress?.city,
+                        state: order.shippingAddress?.state,
+                        postalCode:order.shippingAddress?.postalCode
                     },
                     createdAt: order.createdAt,
                     items: [

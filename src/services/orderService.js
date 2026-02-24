@@ -306,7 +306,7 @@ export class OrderService {
           contactEmail: contactEmail || "",
           paymentMethod,
           paymentStatus: paymentMethod === "cod" ? "pending" : "pending",
-          status: "initialized",
+          status: "processed",
           metadata: {
             ...metadata,
             orderSummary,
@@ -330,7 +330,7 @@ export class OrderService {
             await this.orderEventRepository.createWithConnection(connection, {
               orderId: order.id,
               previousStatus: null,
-              newStatus: "initialized",
+              newStatus: "processed",
               changedBy: userId,
               note: "Order created successfully",
               metadata: {
