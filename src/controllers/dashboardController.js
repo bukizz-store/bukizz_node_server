@@ -91,12 +91,6 @@ export class DashboardController {
 
     const allItems = items || [];
 
-    // Total sales = sum of all item total_price
-    const totalSales = allItems.reduce(
-      (sum, item) => sum + parseFloat(item.total_price || 0),
-      0,
-    );
-
     // Active orders = distinct order IDs where at least one item is NOT delivered/cancelled
     const activeStatuses = new Set([
       'initialized',
@@ -104,6 +98,19 @@ export class DashboardController {
       'shipped',
       "out_for_delivery",
     ]);
+
+    // Total sales = sum of item total_price for active statuses only
+    const totalSales = allItems.reduce(
+      (sum, item) => {
+        if (activeStatuses.has(item.status)) {
+          return sum + parseFloat(item.total_price || 0);
+        }
+        return sum;
+      },
+      0,
+    );
+
+
     const activeOrderIds = new Set();
     allItems.forEach((item) => {
       if (activeStatuses.has(item.status)) {
@@ -190,6 +197,10 @@ export class DashboardController {
         page: 1,
         sortBy: "created_at",
         sortOrder: "desc",
+        validOrderStatuses: [
+          "initialized",
+          "processed",
+        ]
       });
 
       const orders = result.orders || [];

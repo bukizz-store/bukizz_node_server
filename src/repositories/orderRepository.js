@@ -1107,10 +1107,7 @@ export class OrderRepository {
         sortOrder = "desc",
         searchTerm,
         paymentStatus,
-      } = filters;
-
-      const offset = (page - 1) * limit;
-      const validOrderStatuses = [
+        validOrderStatuses = [
         "initialized",
         "processed",
         "shipped",
@@ -1118,7 +1115,10 @@ export class OrderRepository {
         "delivered",
         "cancelled",
         "refunded",
-      ];
+      ]
+      } = filters;
+
+      const offset = (page - 1) * limit;
 
       if (!warehouseIds || warehouseIds.length === 0) {
         return {

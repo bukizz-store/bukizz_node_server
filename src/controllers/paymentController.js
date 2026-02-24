@@ -509,15 +509,15 @@ export class PaymentController {
 
                         // Fallback: direct DB updates for status and items
                         try {
-                            await this.serviceClient.from("orders").update({
-                                status: "cancelled", updated_at: new Date().toISOString(),
-                            }).eq("id", orderId).eq("status", "initialized");
+                            // await this.serviceClient.from("orders").update({
+                            //     status: "cancelled", updated_at: new Date().toISOString(),
+                            // }).eq("id", orderId).eq("status", "initialized");
 
-                            await this.serviceClient.from("order_items").update({
-                                status: "cancelled",
-                            }).eq("order_id", orderId).neq("status", "cancelled");
+                            // await this.serviceClient.from("order_items").update({
+                            //     status: "cancelled",
+                            // }).eq("order_id", orderId).neq("status", "cancelled");
 
-                            logger.info("Webhook fallback: Order and items directly cancelled", { orderId });
+                            // logger.info("Webhook fallback: Order and items directly cancelled", { orderId });
                         } catch (fallbackError) {
                             logger.error("Webhook fallback cancellation also failed", { orderId, error: fallbackError.message });
                         }
