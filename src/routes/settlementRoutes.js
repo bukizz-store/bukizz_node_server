@@ -5,6 +5,7 @@ import {
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { settlementSchemas } from "../models/schemas.js";
+import Joi from "joi";
 
 /**
  * Settlement Routes Factory
@@ -17,10 +18,24 @@ export default function settlementRoutes(controller) {
   // All settlement routes require authentication
   router.use(authenticateToken);
 
+  // ── Header Validation for Retailers ──────────────────────────────────
+  const warehouseHeaderSchema = Joi.object({
+    "x-warehouse-id": Joi.string().uuid().required(),
+  }).unknown(true);
+
+  // ── Dashboard Summary ────────────────────────────────────────────────
+  router.get(
+    "/summary",
+    requireRoles("admin", "retailer"),
+    validate(warehouseHeaderSchema, "headers"),
+    controller.getSummary,
+  );
+
   // ── Ledger History (admin + retailer) ────────────────────────────────
   router.get(
     "/ledgers",
     requireRoles("admin", "retailer"),
+    validate(warehouseHeaderSchema, "headers"),
     validate(settlementSchemas.ledgerQuery, "query"),
     controller.getLedgers,
   );
@@ -29,6 +44,7 @@ export default function settlementRoutes(controller) {
   router.get(
     "/",
     requireRoles("admin", "retailer"),
+    validate(warehouseHeaderSchema, "headers"),
     validate(settlementSchemas.settlementQuery, "query"),
     controller.getSettlements,
   );

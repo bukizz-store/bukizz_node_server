@@ -12,11 +12,41 @@ import { logger } from "../utils/logger.js";
 export function settlementController({ settlementService }) {
   return {
     /**
+     * GET /summary
+     * Fetch settlement dashboard summary. Retailers are scoped to their own data via warehouseId.
+     */
+    getSummary: asyncHandler(async (req, res) => {
+      const warehouseId = req.headers["x-warehouse-id"];
+      let retailerId = req.query.retailerId; // Admin can specify
+
+      if (req.user.roles?.includes("retailer")) {
+        retailerId = req.user.id;
+      }
+
+      if (!retailerId || !warehouseId) {
+        return res
+          .status(400)
+          .json({ success: false, error: "Missing retailerId or warehouseId" });
+      }
+
+      const result = await settlementService.getDashboardSummary(
+        retailerId,
+        warehouseId,
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    }),
+
+    /**
      * GET /ledgers
      * Fetch ledger history. Retailers are scoped to their own data.
      */
     getLedgers: asyncHandler(async (req, res) => {
       const filters = { ...req.query };
+      filters.warehouseId = req.headers["x-warehouse-id"];
 
       // Security: retailers can only view their own ledger
       if (req.user.roles?.includes("retailer")) {
@@ -37,6 +67,7 @@ export function settlementController({ settlementService }) {
      */
     getSettlements: asyncHandler(async (req, res) => {
       const filters = { ...req.query };
+      filters.warehouseId = req.headers["x-warehouse-id"];
 
       // Security: retailers can only view their own settlements
       if (req.user.roles?.includes("retailer")) {

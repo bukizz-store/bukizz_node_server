@@ -64,7 +64,6 @@ export function createDependencies(overrides = {}) {
       orderEventRepository,
       orderQueryRepository,
       warehouseRepository,
-      ledgerRepository,
     );
 
   // Settlement

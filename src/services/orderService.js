@@ -15,7 +15,8 @@ export class OrderService {
     orderEventRepository,
     orderQueryRepository,
     warehouseRepository,
-    ledgerRepository,
+    productPaymentMethodRepository,
+    variantCommissionRepository,
   ) {
     this.orderRepository = orderRepository;
     this.productRepository = productRepository;
@@ -23,7 +24,6 @@ export class OrderService {
     this.orderEventRepository = orderEventRepository;
     this.orderQueryRepository = orderQueryRepository;
     this.warehouseRepository = warehouseRepository;
-    this.ledgerRepository = ledgerRepository;
     this.productPaymentMethodRepository = productPaymentMethodRepository;
     this.variantCommissionRepository = variantCommissionRepository;
   }
@@ -995,23 +995,6 @@ export class OrderService {
         metadata,
       });
 
-      // ── Ledger trigger: create entries when item is delivered ──────────
-      if (status === "delivered" && this.ledgerRepository) {
-        try {
-          await this._createDeliveryLedgerEntries(order, item);
-        } catch (ledgerError) {
-          logger.error("Failed to create ledger entries for delivered item", {
-            orderId,
-            itemId,
-            error: ledgerError.message,
-          });
-          throw new AppError(
-            `Ledger entry creation failed for item ${itemId}: ${ledgerError.message}`,
-            500,
-          );
-        }
-      }
-
       return updatedItem;
     } catch (error) {
       logger.error("Failed to update order item status:", error);
@@ -1801,109 +1784,7 @@ export class OrderService {
 
   async _handleOrderDelivered(orderId) {
     logger.info(`Order ${orderId} delivered - enabling post-delivery features`);
-
-    // Create ledger entries for all deliverable items in this order
-    if (this.ledgerRepository) {
-      try {
-        const order = await this.orderRepository.findById(orderId);
-        if (!order || !order.items) return;
-
-        for (const item of order.items) {
-          // Skip items that were already cancelled/refunded
-          if (["cancelled", "refunded", "returned"].includes(item.status))
-            continue;
-
-          await this._createDeliveryLedgerEntries(order, item);
-        }
-
-        logger.info(`Ledger entries created for all items in order ${orderId}`);
-      } catch (ledgerError) {
-        logger.error("Failed to create ledger entries on order delivery", {
-          orderId,
-          error: ledgerError.message,
-        });
-        throw new AppError(
-          `Ledger entry creation failed for order ${orderId}: ${ledgerError.message}`,
-          500,
-        );
-      }
-    }
-  }
-
-  /**
-   * Create multi-line ledger entries for a delivered order item.
-   *
-   * Inserts two immutable rows:
-   *   1. ORDER_REVENUE  (CREDIT) – the retailer's gross revenue.
-   *   2. PLATFORM_FEE   (DEBIT)  – Bukizz's commission.
-   *
-   * Both start as PENDING with a trigger_date 3 days in the future.
-   *
-   * @param {Object} order - Full order object (from findById).
-   * @param {Object} item  - The specific order item being delivered.
-   */
-  async _createDeliveryLedgerEntries(order, item) {
-    const grossAmount = parseFloat(item.totalPrice || item.total_price || 0);
-    if (grossAmount <= 0) {
-      logger.warn("Skipping ledger creation: item has no positive amount", {
-        orderId: order.id,
-        itemId: item.id,
-      });
-      return;
-    }
-
-    // Commission rate from snapshot or default (flat ₹10 fallback)
-    const commissionRate = item.commissionRate || item.commission_rate || 0;
-    const platformFee =
-      commissionRate > 0 ? grossAmount * (commissionRate / 100) : 10; // Flat ₹10 default matches OrderService._calculatePlatformFee
-
-    // 3-day hold period before funds become AVAILABLE
-    const triggerDate = new Date(
-      Date.now() + 3 * 24 * 60 * 60 * 1000,
-    ).toISOString();
-
-    const retailerId =
-      order.retailerId || order.retailer_id || item.warehouseRetailerId;
-    const warehouseId =
-      item.warehouseId ||
-      item.warehouse_id ||
-      order.warehouseId ||
-      order.warehouse_id;
-
-    const ledgerEntries = [
-      {
-        retailer_id: retailerId,
-        warehouse_id: warehouseId || null,
-        order_id: order.id,
-        order_item_id: item.id,
-        transaction_type: "ORDER_REVENUE",
-        entry_type: "CREDIT",
-        amount: grossAmount,
-        status: "PENDING",
-        trigger_date: triggerDate,
-      },
-      {
-        retailer_id: retailerId,
-        warehouse_id: warehouseId || null,
-        order_id: order.id,
-        order_item_id: item.id,
-        transaction_type: "PLATFORM_FEE",
-        entry_type: "DEBIT",
-        amount: platformFee,
-        status: "PENDING",
-        trigger_date: triggerDate,
-      },
-    ];
-
-    await this.ledgerRepository.createEntries(ledgerEntries);
-
-    logger.info("Delivery ledger entries created", {
-      orderId: order.id,
-      itemId: item.id,
-      grossAmount,
-      platformFee,
-      triggerDate,
-    });
+    // Post-delivery features will be implemented here (like product reviews)
   }
 
   async _handleOrderCancelled(orderId, cancelledBy, reason) {

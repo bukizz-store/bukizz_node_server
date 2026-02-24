@@ -24,98 +24,6 @@ export class SettlementService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
-  //  LEDGER ENTRY CREATION
-  // ════════════════════════════════════════════════════════════════════════
-
-  /**
-   * Create the multi-line ledger entries that accompany a completed order.
-   *
-   * For every order we insert TWO immutable rows:
-   *   1. ORDER_REVENUE  (CREDIT) — the retailer's share of the sale.
-   *   2. PLATFORM_FEE   (DEBIT)  — Bukizz's commission deducted from the retailer.
-   *
-   * Both rows start with status ON_HOLD (released later by a scheduler or admin).
-   *
-   * @param {Object} params
-   * @param {string} params.orderId
-   * @param {string} params.retailerId
-   * @param {string} params.warehouseId
-   * @param {number} params.orderAmount      - Total order amount (including delivery, before platform fee).
-   * @param {number} params.platformFeeAmount - The platform commission to deduct.
-   * @param {string} [params.notes]
-   * @returns {Promise<Array<Object>>} The two inserted ledger rows.
-   */
-  async createOrderLedgerEntries({
-    orderId,
-    retailerId,
-    warehouseId,
-    orderAmount,
-    platformFeeAmount,
-    notes = null,
-  }) {
-    try {
-      if (!orderId || !retailerId || !orderAmount) {
-        throw new AppError(
-          "orderId, retailerId, and orderAmount are required to create ledger entries",
-          400,
-        );
-      }
-
-      if (orderAmount <= 0) {
-        throw new AppError("orderAmount must be positive", 400);
-      }
-
-      const now = new Date().toISOString();
-      const fee = platformFeeAmount ?? this._calculatePlatformFee(orderAmount);
-
-      const entries = [
-        {
-          id: uuidv4(),
-          retailer_id: retailerId,
-          warehouse_id: warehouseId || null,
-          order_id: orderId,
-          transaction_type: "ORDER_REVENUE",
-          entry_type: "CREDIT",
-          amount: orderAmount,
-          settled_amount: 0,
-          status: "ON_HOLD",
-          trigger_date: now,
-          notes: notes || `Revenue for order ${orderId}`,
-          created_at: now,
-        },
-        {
-          id: uuidv4(),
-          retailer_id: retailerId,
-          warehouse_id: warehouseId || null,
-          order_id: orderId,
-          transaction_type: "PLATFORM_FEE",
-          entry_type: "DEBIT",
-          amount: fee,
-          settled_amount: 0,
-          status: "ON_HOLD",
-          trigger_date: now,
-          notes: notes || `Platform fee for order ${orderId}`,
-          created_at: now,
-        },
-      ];
-
-      const result = await this.ledgerRepository.createEntries(entries);
-
-      logger.info("Multi-line ledger entries created for order", {
-        orderId,
-        retailerId,
-        revenue: orderAmount,
-        platformFee: fee,
-      });
-
-      return result;
-    } catch (error) {
-      logger.error("Error creating order ledger entries:", error);
-      throw error;
-    }
-  }
-
-  // ════════════════════════════════════════════════════════════════════════
   //  MANUAL ADJUSTMENTS
   // ════════════════════════════════════════════════════════════════════════
 
@@ -385,6 +293,24 @@ export class SettlementService {
   // ════════════════════════════════════════════════════════════════════════
   //  QUERY METHODS
   // ════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Get the dashboard summary (total orders, total sales, etc.) for a specific warehouse.
+   */
+  async getDashboardSummary(retailerId, warehouseId) {
+    try {
+      if (!retailerId || !warehouseId) {
+        throw new AppError("Retailer ID and Warehouse ID are required", 400);
+      }
+      return await this.ledgerRepository.getDashboardSummary(
+        retailerId,
+        warehouseId,
+      );
+    } catch (error) {
+      logger.error("Error fetching dashboard summary:", error);
+      throw error;
+    }
+  }
 
   /**
    * Get paginated ledger history with optional filters.
