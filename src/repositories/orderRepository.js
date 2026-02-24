@@ -92,6 +92,8 @@ export class OrderRepository {
         quantity: item.quantity,
         unit_price: item.unitPrice,
         total_price: item.totalPrice,
+        delivery_fee: item.itemDeliveryFee || 0,
+        platform_fee: item.itemPlatformFee || 0,
         product_snapshot: item.productSnapshot,
         warehouse_id: item.warehouseId,
         status: status, // Initialize with order status or defaults
@@ -171,6 +173,9 @@ export class OrderRepository {
         totalAmount += price * item.quantity;
       }
 
+      // COD orders skip 'initialized' and go directly to 'processed'
+      const orderStatus = paymentMethod === "cod" ? "processed" : "initialized";
+
       // Create order
       const { error: orderError } = await connection.from("orders").insert({
         id: orderId,
@@ -183,6 +188,7 @@ export class OrderRepository {
         contact_phone: contactPhone,
         contact_email: contactEmail,
         payment_method: paymentMethod,
+        status: orderStatus,
       });
 
       if (orderError) {
@@ -222,7 +228,7 @@ export class OrderRepository {
               productType: product.product_type,
               basePrice: product.base_price,
             },
-            status: "initialized",
+            status: orderStatus,
           });
 
         if (itemError) {
@@ -236,8 +242,8 @@ export class OrderRepository {
         .insert({
           id: uuidv4(),
           order_id: orderId,
-          new_status: "initialized",
-          note: "Order created",
+          new_status: orderStatus,
+          note: paymentMethod === "cod" ? "COD order created and processed" : "Order created",
         });
 
       if (eventError) {
@@ -755,10 +761,10 @@ export class OrderRepository {
               sortOrder: ov.sort_order,
               attribute: ov.attribute
                 ? {
-                    id: ov.attribute.id,
-                    name: ov.attribute.name,
-                    position: ov.attribute.position,
-                  }
+                  id: ov.attribute.id,
+                  name: ov.attribute.name,
+                  position: ov.attribute.position,
+                }
                 : null,
             };
           });
@@ -1108,14 +1114,14 @@ export class OrderRepository {
         searchTerm,
         paymentStatus,
         validOrderStatuses = [
-        "initialized",
-        "processed",
-        "shipped",
-        "out_for_delivery",
-        "delivered",
-        "cancelled",
-        "refunded",
-      ]
+          "initialized",
+          "processed",
+          "shipped",
+          "out_for_delivery",
+          "delivered",
+          "cancelled",
+          "refunded",
+        ]
       } = filters;
 
       const offset = (page - 1) * limit;
@@ -1511,6 +1517,8 @@ export class OrderRepository {
       quantity: parseInt(row.quantity || 0),
       unitPrice: parseFloat(row.unit_price || 0),
       totalPrice: parseFloat(row.total_price || 0),
+      deliveryFee: parseFloat(row.delivery_fee || 0),
+      platformFee: parseFloat(row.platform_fee || 0),
       productSnapshot: row.product_snapshot || {},
       warehouseId: row.warehouse_id,
       status: row.status || "initialized", // Default for backward compatibility

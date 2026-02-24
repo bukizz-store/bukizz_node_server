@@ -242,8 +242,8 @@ export class OrderService {
         userRepositoryExists: !!this.userRepository,
         userRepositoryMethods: this.userRepository
           ? Object.getOwnPropertyNames(
-              Object.getPrototypeOf(this.userRepository),
-            )
+            Object.getPrototypeOf(this.userRepository),
+          )
           : "N/A",
       });
 
@@ -293,6 +293,9 @@ export class OrderService {
         );
 
         // Step 3: Create order record
+        // COD orders skip 'initialized' and go directly to 'processed'
+        const orderStatus = paymentMethod === "cod" ? "processed" : "initialized";
+
         const orderPayload = {
           userId,
           items: validatedItems,
@@ -304,7 +307,7 @@ export class OrderService {
           contactEmail: contactEmail || "",
           paymentMethod,
           paymentStatus: paymentMethod === "cod" ? "pending" : "pending",
-          status: "processed",
+          status: orderStatus,
           metadata: {
             ...metadata,
             orderSummary,
@@ -328,9 +331,11 @@ export class OrderService {
             await this.orderEventRepository.createWithConnection(connection, {
               orderId: order.id,
               previousStatus: null,
-              newStatus: "processed",
+              newStatus: orderStatus,
               changedBy: userId,
-              note: "Order created successfully",
+              note: paymentMethod === "cod"
+                ? "COD order created and processed"
+                : "Order created successfully",
               metadata: {
                 source: metadata.source || "web",
                 deviceInfo: metadata.deviceInfo,
@@ -467,8 +472,8 @@ export class OrderService {
         // Calculate original price (MRP) for discount calculation
         const originalPrice = item.variantId
           ? product.variant_compare_at_price ||
-            product.compare_at_price ||
-            currentPrice
+          product.compare_at_price ||
+          currentPrice
           : product.compare_at_price || currentPrice;
 
         // Fetch active commission for variant, if any
@@ -546,9 +551,9 @@ export class OrderService {
                 metadata: product.variant_metadata || {},
                 commission: activeCommission
                   ? {
-                      type: activeCommission.commission_type,
-                      value: parseFloat(activeCommission.commission_value),
-                    }
+                    type: activeCommission.commission_type,
+                    value: parseFloat(activeCommission.commission_value),
+                  }
                   : null,
               },
             }),
@@ -606,7 +611,7 @@ export class OrderService {
       warehouseGroups.get(warehouseId).push(item);
     }
 
-    // Calculate fees and taxes with business rules
+    // Calculate order-level fees
     const deliveryFee = this._calculateDeliveryFee(
       subtotal,
       totalDeliveryCharge,
@@ -614,8 +619,41 @@ export class OrderService {
     const platformFee = this._calculatePlatformFee(subtotal);
     const tax = this._calculateTax(subtotal);
 
+    // --- Bifurcate fees across items proportionally ---
+    const baseFee = subtotal >= 399 ? 0 : 50; // Base delivery fee (same logic as _calculateDeliveryFee)
+
+    let runningDeliveryTotal = 0;
+    let runningPlatformTotal = 0;
+
+    for (let i = 0; i < itemDetails.length; i++) {
+      const item = itemDetails[i];
+      const proportion = subtotal > 0 ? item.totalPrice / subtotal : 1 / itemDetails.length;
+
+      // Product-specific delivery charge + proportional share of base fee
+      const itemProductDelivery = (item.deliveryCharge || 0) * item.quantity;
+      const itemBaseFeeShare = parseFloat((proportion * baseFee).toFixed(2));
+      const itemPlatformShare = parseFloat((proportion * platformFee).toFixed(2));
+
+      if (i === itemDetails.length - 1) {
+        // Last item absorbs rounding difference to ensure exact totals
+        item.itemDeliveryFee = parseFloat(
+          (deliveryFee - runningDeliveryTotal).toFixed(2),
+        );
+        item.itemPlatformFee = parseFloat(
+          (platformFee - runningPlatformTotal).toFixed(2),
+        );
+      } else {
+        item.itemDeliveryFee = parseFloat(
+          (itemProductDelivery + itemBaseFeeShare).toFixed(2),
+        );
+        item.itemPlatformFee = itemPlatformShare;
+      }
+
+      runningDeliveryTotal += item.itemDeliveryFee;
+      runningPlatformTotal += item.itemPlatformFee;
+    }
+
     // Calculate Discount: (MRP * Qty) - (Selling Price * Qty)
-    // Note: subtotal is already (Selling Price * Qty)
     const totalMRP = validatedItems.reduce(
       (sum, item) =>
         sum + (item.originalPrice || item.unitPrice) * item.quantity,
@@ -623,26 +661,8 @@ export class OrderService {
     );
     const discount = Math.max(0, totalMRP - subtotal);
 
-    // Total = Subtotal + Fees - (Discount is ALREADY applied in subtotal because subtotal = selling price)
-    // Wait, the frontend logic is: Total = Subtotal (Selling Price) + Fees.
-    // The "Discount" is just for display: MRP - Selling Price.
-    // So the stored Total Amount should be: Subtotal + Delivery + Platform + Tax (if extra, usually included).
-    // Let's assume Tax is included in price or strictly additive?
-    // In frontend: totalAmount = subtotal + platformFees + deliveryCharges.
-    // Discount is NOT subtracted from Total, because Subtotal is ALREADY the discounted price.
-    // The previous backend logic had: total = subtotal + ... - discount.
-    // If backend "discount" variable was meant to be a COUPON discount, then subtracting it is correct.
-    // But here we are talking about Product Discount (MRP - Price).
-    // So we should NOT subtract `discount` if it represents Product Discount.
-    // However, if we want to store the "Savings" value, we can return it.
-
-    // Matched Frontend Logic:
-    // Total = Subtotal + Platform Fee + Delivery Charges (Tax usually included or handled separately)
-    // Ensuring Tax isn't double counted if included in price.
-    // Previous logic: subtotal + delivery + platform + tax - discount.
-    // I will align to: Total = Subtotal + Fees.
-
-    const total = subtotal + deliveryFee + platformFee; // Tax assumed included in price or not added on top for now to match frontend
+    // Total = Subtotal + Platform Fee + Delivery Fee (tax included in price)
+    const total = subtotal + deliveryFee + platformFee;
 
     return {
       items: itemDetails,
@@ -650,7 +670,7 @@ export class OrderService {
       deliveryFee: parseFloat(deliveryFee.toFixed(2)),
       platformFee: parseFloat(platformFee.toFixed(2)),
       tax: parseFloat(tax.toFixed(2)),
-      discount: parseFloat(discount.toFixed(2)), // Return product savings for display/analytics
+      discount: parseFloat(discount.toFixed(2)),
       total: parseFloat(total.toFixed(2)),
       currency: "INR",
       warehouseCount: warehouseGroups.size,
@@ -674,8 +694,7 @@ export class OrderService {
 
           if (fetchError || !variantData) {
             throw new Error(
-              `Failed to fetch variant stock: ${
-                fetchError?.message || "Variant not found"
+              `Failed to fetch variant stock: ${fetchError?.message || "Variant not found"
               }`,
             );
           }
@@ -708,8 +727,7 @@ export class OrderService {
 
           if (fetchError || !productData) {
             throw new Error(
-              `Failed to fetch product stock: ${
-                fetchError?.message || "Product not found"
+              `Failed to fetch product stock: ${fetchError?.message || "Product not found"
               }`,
             );
           }
@@ -1233,6 +1251,31 @@ export class OrderService {
       const tax = this._calculateTax(subtotal);
       const total = subtotal + deliveryFee + platformFee + tax;
 
+      // --- Bifurcate fees across items proportionally ---
+      const baseFee = subtotal >= 399 ? 0 : 50;
+      let runningDeliveryTotal = 0;
+      let runningPlatformTotal = 0;
+
+      for (let i = 0; i < itemDetails.length; i++) {
+        const item = itemDetails[i];
+        const proportion = subtotal > 0 ? item.totalPrice / subtotal : 1 / itemDetails.length;
+
+        const itemProductDelivery = (item.deliveryCharge || 0) * item.quantity;
+        const itemBaseFeeShare = parseFloat((proportion * baseFee).toFixed(2));
+        const itemPlatformShare = parseFloat((proportion * platformFee).toFixed(2));
+
+        if (i === itemDetails.length - 1) {
+          item.itemDeliveryFee = parseFloat((deliveryFee - runningDeliveryTotal).toFixed(2));
+          item.itemPlatformFee = parseFloat((platformFee - runningPlatformTotal).toFixed(2));
+        } else {
+          item.itemDeliveryFee = parseFloat((itemProductDelivery + itemBaseFeeShare).toFixed(2));
+          item.itemPlatformFee = itemPlatformShare;
+        }
+
+        runningDeliveryTotal += item.itemDeliveryFee;
+        runningPlatformTotal += item.itemPlatformFee;
+      }
+
       return {
         items: itemDetails,
         subtotal,
@@ -1624,6 +1667,8 @@ export class OrderService {
         variantId: item.variantId,
         unitPrice: item.unitPrice,
         totalPrice: item.totalPrice,
+        deliveryFee: item.deliveryFee || 0,
+        platformFee: item.platformFee || 0,
         warehouseId: item.warehouseId,
         dispatchId: item.dispatchId,
         status: item.status,
@@ -1843,8 +1888,7 @@ export class OrderService {
 
             if (fetchError || !variantData) {
               throw new Error(
-                `Failed to fetch variant stock for restocking: ${
-                  fetchError?.message || "Variant not found"
+                `Failed to fetch variant stock for restocking: ${fetchError?.message || "Variant not found"
                 }`,
               );
             }
@@ -1875,8 +1919,7 @@ export class OrderService {
 
             if (fetchError || !productData) {
               throw new Error(
-                `Failed to fetch product stock for restocking: ${
-                  fetchError?.message || "Product not found"
+                `Failed to fetch product stock for restocking: ${fetchError?.message || "Product not found"
                 }`,
               );
             }
