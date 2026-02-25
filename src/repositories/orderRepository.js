@@ -404,9 +404,14 @@ export class OrderRepository {
         sortBy = "created_at",
         sortOrder = "desc",
         searchTerm,
+        search, // alias used by admin frontend
+        retailerId,
+        warehouseId,
       } = filters;
 
-      const offset = (page - 1) * limit;
+      const effectiveSearchTerm = searchTerm || search;
+
+      const offset = (page - 1) * parseInt(limit);
 
       // Valid order statuses from the database enum
       const validOrderStatuses = [
@@ -419,6 +424,66 @@ export class OrderRepository {
         "refunded",
       ];
 
+      // ── retailerId / warehouseId → pre-resolve matching order IDs ──────────
+      let warehouseIds = null;
+
+      if (retailerId) {
+        const { data: retailerWarehouses } = await this.supabase
+          .from("warehouses")
+          .select("id")
+          .eq("user_id", retailerId);
+        if (retailerWarehouses && retailerWarehouses.length > 0) {
+          warehouseIds = retailerWarehouses.map((w) => w.id);
+        } else {
+          return {
+            orders: [],
+            pagination: {
+              page: parseInt(page),
+              limit: parseInt(limit),
+              total: 0,
+              totalPages: 0,
+              hasNext: false,
+              hasPrev: false,
+            },
+          };
+        }
+      } else if (warehouseId) {
+        warehouseIds = [warehouseId];
+      }
+
+      let filteredOrderIds = null;
+      if (warehouseIds) {
+        const { data: itemRows } = await this.supabase
+          .from("order_items")
+          .select("order_id")
+          .in("warehouse_id", warehouseIds);
+        const { data: orderRows } = await this.supabase
+          .from("orders")
+          .select("id")
+          .in("warehouse_id", warehouseIds);
+        const combined = [
+          ...new Set([
+            ...(itemRows || []).map((i) => i.order_id),
+            ...(orderRows || []).map((o) => o.id),
+          ]),
+        ];
+        if (combined.length === 0) {
+          return {
+            orders: [],
+            pagination: {
+              page: parseInt(page),
+              limit: parseInt(limit),
+              total: 0,
+              totalPages: 0,
+              hasNext: false,
+              hasPrev: false,
+            },
+          };
+        }
+        filteredOrderIds = combined;
+      }
+
+      // ── Build main query ────────────────────────────────────────────────────
       let query = this.supabase.from("orders").select("*", { count: "exact" });
 
       // Apply filters - validate status against enum values
@@ -428,10 +493,11 @@ export class OrderRepository {
       if (paymentStatus) query = query.eq("payment_status", paymentStatus);
       if (startDate) query = query.gte("created_at", startDate);
       if (endDate) query = query.lte("created_at", endDate);
+      if (filteredOrderIds) query = query.in("id", filteredOrderIds);
 
-      if (searchTerm) {
+      if (effectiveSearchTerm) {
         query = query.or(
-          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`,
+          `order_number.ilike.%${effectiveSearchTerm}%,contact_email.ilike.%${effectiveSearchTerm}%,contact_phone.ilike.%${effectiveSearchTerm}%`,
         );
       }
 
@@ -439,7 +505,7 @@ export class OrderRepository {
       const ascending = sortOrder.toLowerCase() === "asc";
       query = query
         .order(sortBy, { ascending })
-        .range(offset, offset + limit - 1);
+        .range(offset, offset + parseInt(limit) - 1);
 
       const { data: orders, error, count } = await query;
 
@@ -1108,14 +1174,14 @@ export class OrderRepository {
         searchTerm,
         paymentStatus,
         validOrderStatuses = [
-        "initialized",
-        "processed",
-        "shipped",
-        "out_for_delivery",
-        "delivered",
-        "cancelled",
-        "refunded",
-      ]
+          "initialized",
+          "processed",
+          "shipped",
+          "out_for_delivery",
+          "delivered",
+          "cancelled",
+          "refunded",
+        ],
       } = filters;
 
       const offset = (page - 1) * limit;
