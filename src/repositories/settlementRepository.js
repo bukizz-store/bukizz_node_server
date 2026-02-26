@@ -189,4 +189,86 @@ export const settlementRepository = {
       throw error;
     }
   },
+
+  /**
+   * Admin: Fetch full settlement (payout) history for a specific retailer.
+   * Ordered by created_at DESC (newest first).
+   *
+   * @param {string} retailerId - UUID of the retailer.
+   * @returns {Promise<Array<Object>>} All settlement records for the retailer.
+   */
+  async getSettlementHistoryForRetailer(retailerId) {
+    try {
+      const supabase = getSupabase();
+
+      const { data, error } = await supabase
+        .from("settlements")
+        .select("*")
+        .eq("retailer_id", retailerId)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        logger.error("Error fetching settlement history for retailer:", error);
+        throw error;
+      }
+
+      return data || [];
+    } catch (error) {
+      logger.error(
+        "settlementRepository.getSettlementHistoryForRetailer failed:",
+        error,
+      );
+      throw error;
+    }
+  },
+
+  /**
+   * Retailer: Fetch a single settlement with its associated ledger entries
+   * via the settlement_ledger_items mapping table, secured by retailerId.
+   * Includes deep joins for order and product details required by the UI.
+   *
+   * @param {string} settlementId - UUID of the settlement.
+   * @param {string} retailerId - UUID of the retailer.
+   * @returns {Promise<Object|null>} Settlement with nested ledger items, or null.
+   */
+  async getRetailerSettlementDetails(settlementId, retailerId) {
+    try {
+      const supabase = getSupabase();
+
+      const { data, error } = await supabase
+        .from("settlements")
+        .select(
+          `
+          *,
+          settlement_ledger_items (
+            id,
+            amount_applied,
+            seller_ledgers (
+              id, amount, status, trigger_date, transaction_type, entry_type,
+              orders!left ( order_number, user_id, created_at ),
+              order_items!left ( title, sku, quantity )
+            )
+          )
+        `,
+        )
+        .eq("id", settlementId)
+        .eq("retailer_id", retailerId)
+        .single();
+
+      if (error) {
+        // Not found
+        if (error.code === "PGRST116") return null;
+        logger.error("Error fetching retailer settlement details:", error);
+        throw error;
+      }
+
+      return data;
+    } catch (error) {
+      logger.error(
+        "settlementRepository.getRetailerSettlementDetails failed:",
+        error,
+      );
+      throw error;
+    }
+  },
 };

@@ -231,13 +231,16 @@ export const variantCommissionSchemas = {
     commissionValue: Joi.number().min(0).precision(2).required(),
   }),
   bulkSetCommission: Joi.object({
-    commissions: Joi.array().items(
-      Joi.object({
-        variantId: uuidSchema,
-        commissionType: Joi.string().valid("percentage", "amount").required(),
-        commissionValue: Joi.number().min(0).precision(2).required(),
-      })
-    ).min(1).required(),
+    commissions: Joi.array()
+      .items(
+        Joi.object({
+          variantId: uuidSchema,
+          commissionType: Joi.string().valid("percentage", "amount").required(),
+          commissionValue: Joi.number().min(0).precision(2).required(),
+        }),
+      )
+      .min(1)
+      .required(),
   }),
 };
 
@@ -985,7 +988,14 @@ export const settlementSchemas = {
     retailerId: Joi.string().uuid().optional(),
     warehouseId: Joi.string().uuid().optional(),
     status: Joi.string()
-      .valid("ON_HOLD", "PENDING", "AVAILABLE", "PARTIALLY_SETTLED", "SETTLED")
+      .valid(
+        "ON_HOLD",
+        "PENDING",
+        "AVAILABLE",
+        "PARTIALLY_SETTLED",
+        "SETTLED",
+        "unsettled",
+      )
       .optional(),
     transactionType: Joi.string()
       .valid(
@@ -1019,5 +1029,16 @@ export const settlementSchemas = {
   settlementQuery: Joi.object({
     retailerId: Joi.string().uuid().optional(),
     status: Joi.string().valid("COMPLETED", "FAILED").optional(),
+  }),
+
+  // Admin-initiated payout: flexible paymentMode (NEFT, UPI, CASH, etc.)
+  // and required referenceNumber
+  adminSettlementExecution: Joi.object({
+    retailerId: Joi.string().uuid().required(),
+    amount: Joi.number().positive().required(),
+    paymentMode: Joi.string().required(),
+    referenceNumber: Joi.string().required(),
+    notes: Joi.string().max(500).optional(),
+    receiptUrl: Joi.string().uri().optional(),
   }),
 };
