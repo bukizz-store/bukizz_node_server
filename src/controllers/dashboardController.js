@@ -33,13 +33,16 @@ export class DashboardController {
 
     // Run all queries in parallel
     const [
-      salesAndOrdersResult,
+      totalSalesResult,
+      activeOrdersResult,
       lowStockResult,
       schoolsResult,
       recentOrdersResult,
     ] = await Promise.all([
-      // 1. Total Sales + Active Orders
-      this._getSalesAndActiveOrders(supabase, warehouseIds),
+      // 1a. Total Sales (from settlements)
+      this._getTotalSales(supabase, retailerId),
+      // 1b. Active Orders (from order_items)
+      this._getActiveOrders(supabase, warehouseIds),
       // 2. Low Stock Variants (stock < 10)
       this._getLowStockVariantCount(supabase, warehouseIds),
       // 3. Active & Pending Schools
@@ -49,8 +52,8 @@ export class DashboardController {
     ]);
 
     const data = {
-      totalSales: salesAndOrdersResult.totalSales,
-      activeOrders: salesAndOrdersResult.activeOrders,
+      totalSales: totalSalesResult,
+      activeOrders: activeOrdersResult,
       lowStockVariants: lowStockResult,
       activeSchools: schoolsResult.activeSchools,
       pendingSchools: schoolsResult.pendingSchools,
@@ -70,54 +73,60 @@ export class DashboardController {
   });
 
   /**
-   * Get total sales (sum of order_items.total_price) and number of active orders
+   * Get total sales by summing up the amount for all 'ORDER_REVENUE' transactions
+   * in the seller_ledgers table. This is a global metric for the retailer, so it ignores warehouseIds.
+   * Matches logic: COALESCE(SUM(amount) FILTER (WHERE transaction_type = 'ORDER_REVENUE'), 0) AS total_sales
+   */
+  async _getTotalSales(supabase, retailerId) {
+    const { data, error } = await supabase
+      .from("seller_ledgers")
+      .select("amount")
+      .eq("retailer_id", retailerId)
+      .eq("transaction_type", "ORDER_REVENUE");
+
+    if (error) {
+      logger.error("Error fetching ledgers for dashboard total sales:", error);
+      return 0;
+    }
+
+    const totalSales = (data || []).reduce((sum, record) => {
+      return sum + parseFloat(record.amount || 0);
+    }, 0);
+
+    return parseFloat(totalSales.toFixed(2));
+  }
+
+  /**
+   * Get the number of active orders
    * Active orders = orders whose items are NOT in a terminal state (delivered, cancelled)
    */
-  async _getSalesAndActiveOrders(supabase, warehouseIds) {
+  async _getActiveOrders(supabase, warehouseIds) {
     if (warehouseIds.length === 0) {
-      return { totalSales: 0, activeOrders: 0 };
+      return 0;
     }
 
     // Get all order items for these warehouses
     const { data: items, error } = await supabase
       .from("order_items")
-      .select("order_id, total_price, status, warehouse_id")
+      .select("order_id, status")
       .in("warehouse_id", warehouseIds);
 
     if (error) {
-      logger.error("Error fetching order items for dashboard:", error);
-      return { totalSales: 0, activeOrders: 0 };
+      logger.error(
+        "Error fetching order items for dashboard active orders:",
+        error,
+      );
+      return 0;
     }
 
     const allItems = items || [];
 
-    // Active orders = distinct order IDs where at least one item is NOT delivered/cancelled
-    const activeStatusesForTotalSales = new Set([
-      'initialized',
-      'processed',
-      'shipped',
-      'delivered',
-      "out_for_delivery",
-    ]);
-
-    // Total sales = sum of item total_price for active statuses only
-    const totalSales = allItems.reduce(
-      (sum, item) => {
-        if (activeStatusesForTotalSales.has(item.status)) {
-          return sum + parseFloat(item.total_price || 0);
-        }
-        return sum;
-      },
-      0,
-    );
-
     const activeStatusesForActiveOrders = new Set([
-      'initialized',
-      'processed',
-      'shipped',
+      "initialized",
+      "processed",
+      "shipped",
       "out_for_delivery",
     ]);
-
 
     const activeOrderIds = new Set();
     allItems.forEach((item) => {
@@ -126,10 +135,7 @@ export class DashboardController {
       }
     });
 
-    return {
-      totalSales: parseFloat(totalSales.toFixed(2)),
-      activeOrders: activeOrderIds.size,
-    };
+    return activeOrderIds.size;
   }
 
   /**
@@ -201,14 +207,11 @@ export class DashboardController {
     try {
       const orderRepo = new OrderRepository(supabase);
       const result = await orderRepo.getByWarehouseIds(warehouseIds, {
-        processed,
         limit: 5,
         page: 1,
         sortBy: "created_at",
         sortOrder: "desc",
-        validOrderStatuses: [
-          "processed",
-        ]
+        validOrderStatuses: ["processed"],
       });
 
       const orders = result.orders || [];
@@ -220,14 +223,24 @@ export class DashboardController {
         const formattedItems = (order.items || []).map((item) => {
           let variantDetail = null;
 
-          if (item.variant && item.variant.options && item.variant.options.length > 0) {
+          if (
+            item.variant &&
+            item.variant.options &&
+            item.variant.options.length > 0
+          ) {
             variantDetail = item.variant.options
-              .map((opt) => (opt.attribute?.name ? `${opt.attribute.name}: ${opt.value}` : opt.value))
+              .map((opt) =>
+                opt.attribute?.name
+                  ? `${opt.attribute.name}: ${opt.value}`
+                  : opt.value,
+              )
               .join(" • ");
           } else if (item.productSnapshot) {
             const parts = [];
-            if (item.productSnapshot.size) parts.push(`Size: ${item.productSnapshot.size}`);
-            if (item.productSnapshot.color) parts.push(`Color: ${item.productSnapshot.color}`);
+            if (item.productSnapshot.size)
+              parts.push(`Size: ${item.productSnapshot.size}`);
+            if (item.productSnapshot.color)
+              parts.push(`Color: ${item.productSnapshot.color}`);
             if (parts.length > 0) variantDetail = parts.join(" • ");
           }
 
