@@ -140,7 +140,15 @@ export const ledgerRepository = {
         query = query.eq("warehouse_id", filters.warehouseId);
       }
       if (filters.status) {
-        query = query.eq("status", filters.status);
+        if (filters.status === "unsettled") {
+          query = query.in("status", [
+            "PENDING",
+            "AVAILABLE",
+            "PARTIALLY_SETTLED",
+          ]);
+        } else {
+          query = query.eq("status", filters.status);
+        }
       }
       if (filters.transactionType) {
         query = query.eq("transaction_type", filters.transactionType);
@@ -180,6 +188,106 @@ export const ledgerRepository = {
       };
     } catch (error) {
       logger.error("ledgerRepository.getHistory failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Admin: Compute the financial summary for a retailer across all warehouses.
+   *
+   * @param {string} retailerId
+   * @returns {Promise<{ totalOwed: number, pendingEscrow: number }>}
+   */
+  async getAdminRetailerSummary(retailerId) {
+    try {
+      const supabase = getSupabase();
+
+      // Rows that count toward the settable balance
+      const { data: availableRows, error: availErr } = await supabase
+        .from("seller_ledgers")
+        .select("entry_type, amount, settled_amount")
+        .eq("retailer_id", retailerId)
+        .in("status", ["AVAILABLE", "PARTIALLY_SETTLED"]);
+
+      if (availErr) {
+        logger.error(
+          "Error fetching available ledger rows for summary:",
+          availErr,
+        );
+        throw availErr;
+      }
+
+      // Rows in escrow (not yet released)
+      const { data: pendingRows, error: pendErr } = await supabase
+        .from("seller_ledgers")
+        .select("entry_type, amount, settled_amount")
+        .eq("retailer_id", retailerId)
+        .eq("status", "PENDING");
+
+      if (pendErr) {
+        logger.error(
+          "Error fetching pending ledger rows for summary:",
+          pendErr,
+        );
+        throw pendErr;
+      }
+
+      const calcNet = (rows) =>
+        (rows || []).reduce((acc, row) => {
+          const remaining =
+            parseFloat(row.amount) - parseFloat(row.settled_amount || 0);
+          return row.entry_type === "CREDIT"
+            ? acc + remaining
+            : acc - remaining;
+        }, 0);
+
+      return {
+        totalOwed: parseFloat(calcNet(availableRows).toFixed(2)),
+        pendingEscrow: parseFloat(calcNet(pendingRows).toFixed(2)),
+      };
+    } catch (error) {
+      logger.error("ledgerRepository.getAdminRetailerSummary failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Admin: Fetch all unsettled ledger rows for a retailer, with order and
+   * order-item joins so the UI can display the dual-line (Revenue + Fee) context.
+   *
+   * Statuses: AVAILABLE, PARTIALLY_SETTLED, PENDING
+   * Ordered by trigger_date ASC (oldest first — FIFO view)
+   *
+   * @param {string} retailerId
+   * @returns {Promise<Array<Object>>}
+   */
+  async getUnsettledLedgers(retailerId) {
+    try {
+      const supabase = getSupabase();
+
+      const { data, error } = await supabase
+        .from("seller_ledgers")
+        .select(
+          `
+          id, retailer_id, warehouse_id, order_id, order_item_id,
+          transaction_type, entry_type, amount, settled_amount, status,
+          trigger_date, notes, created_at,
+          orders!left ( order_number ),
+          order_items!left ( title )
+          `,
+        )
+        .eq("retailer_id", retailerId)
+        .in("status", ["AVAILABLE", "PARTIALLY_SETTLED", "PENDING"])
+        .order("trigger_date", { ascending: true });
+
+      if (error) {
+        logger.error("Error fetching unsettled ledgers for admin:", error);
+        throw error;
+      }
+
+      return data || [];
+    } catch (error) {
+      logger.error("ledgerRepository.getUnsettledLedgers failed:", error);
       throw error;
     }
   },

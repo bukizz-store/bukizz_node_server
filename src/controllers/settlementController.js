@@ -129,5 +129,138 @@ export function settlementController({ settlementService }) {
         message: "Settlement executed successfully",
       });
     }),
+
+    // ── Admin-only endpoints ──────────────────────────────────────────────
+
+    /**
+     * GET /admin/retailers/:retailerId/summary
+     * Admin-only: full financial summary for a retailer.
+     */
+    getAdminRetailerSummary: asyncHandler(async (req, res) => {
+      const { retailerId } = req.params;
+
+      const result =
+        await settlementService.getAdminRetailerSummary(retailerId);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    }),
+
+    /**
+     * GET /admin/retailers/:retailerId/ledgers/unsettled
+     * Admin-only: all unsettled ledger rows for a retailer (FIFO order).
+     */
+    getAdminUnsettledLedgers: asyncHandler(async (req, res) => {
+      const { retailerId } = req.params;
+
+      const data = await settlementService.getAdminUnsettledLedgers(retailerId);
+
+      res.status(200).json({
+        success: true,
+        data,
+      });
+    }),
+
+    /**
+     * GET /admin/retailers/:retailerId/history
+     * Admin-only: full payout history for a retailer (newest first).
+     */
+    getAdminSettlementHistory: asyncHandler(async (req, res) => {
+      const { retailerId } = req.params;
+
+      const data =
+        await settlementService.getAdminSettlementHistory(retailerId);
+
+      res.status(200).json({
+        success: true,
+        data,
+      });
+    }),
+
+    /**
+     * POST /admin/execute
+     * Admin-only: execute a FIFO payout. Reuses the same service logic
+     * as the existing executeSettlement handler but exposed on the
+     * admin sub-router.
+     */
+    executeAdminFifoPayout: asyncHandler(async (req, res) => {
+      const result = await settlementService.executeSettlement({
+        ...req.body,
+        adminId: req.user.id,
+      });
+
+      logger.info("Admin FIFO payout executed", {
+        adminId: req.user.id,
+        settlementId: result.settlementId,
+        retailerId: req.body.retailerId,
+        amount: req.body.amount,
+        paymentMode: req.body.paymentMode,
+      });
+
+      res.status(201).json({
+        success: true,
+        data: result,
+        message: "FIFO payout executed successfully",
+      });
+    }),
+
+    // ── Retailer-only endpoints ───────────────────────────────────────────
+
+    /**
+     * GET /retailer/ledgers
+     * Retailer: dashboard ledgers (all or unsettled).
+     */
+    getRetailerLedgers: asyncHandler(async (req, res) => {
+      const warehouseId = req.headers["x-warehouse-id"];
+      const retailerId = req.user.id;
+
+      const result = await settlementService.getRetailerLedgers(
+        retailerId,
+        warehouseId,
+        req.query,
+      );
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    }),
+
+    /**
+     * GET /retailer/history
+     * Retailer: payout history list.
+     */
+    getRetailerSettlementHistory: asyncHandler(async (req, res) => {
+      const retailerId = req.user.id;
+
+      const data =
+        await settlementService.getRetailerSettlementHistory(retailerId);
+
+      res.status(200).json({
+        success: true,
+        data,
+      });
+    }),
+
+    /**
+     * GET /retailer/history/:settlementId
+     * Retailer: detailed drill-down of a single settlement.
+     */
+    getRetailerSettlementDetails: asyncHandler(async (req, res) => {
+      const { settlementId } = req.params;
+      const retailerId = req.user.id;
+
+      const data = await settlementService.getRetailerSettlementDetails(
+        settlementId,
+        retailerId,
+      );
+
+      res.status(200).json({
+        success: true,
+        data,
+      });
+    }),
   };
 }

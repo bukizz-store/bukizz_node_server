@@ -388,6 +388,193 @@ export class SettlementService {
   }
 
   // ════════════════════════════════════════════════════════════════════════
+  //  ADMIN METHODS
+  // ════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Admin: Get the full financial summary for a retailer.
+   *
+   * Returns:
+   *   totalOwed     — net CREDIT-DEBIT balance across AVAILABLE + PARTIALLY_SETTLED rows.
+   *   pendingEscrow — same calculation for PENDING rows (not yet released).
+   *   lifetimePaid  — total_amount sum across all COMPLETED settlements.
+   *
+   * @param {string} retailerId
+   * @returns {Promise<{ totalOwed: number, pendingEscrow: number, lifetimePaid: number }>}
+   */
+  async getAdminRetailerSummary(retailerId) {
+    try {
+      if (!retailerId) {
+        throw new AppError("Retailer ID is required", 400);
+      }
+
+      const [ledgerSummary, settlementHistory] = await Promise.all([
+        this.ledgerRepository.getAdminRetailerSummary(retailerId),
+        this.settlementRepository.getSettlementHistoryForRetailer(retailerId),
+      ]);
+
+      const lifetimePaid = settlementHistory
+        .filter((s) => s.status === "COMPLETED")
+        .reduce(
+          (acc, s) => acc + parseFloat(s.total_amount || s.amount || 0),
+          0,
+        );
+
+      return {
+        totalOwed: ledgerSummary.totalOwed,
+        pendingEscrow: ledgerSummary.pendingEscrow,
+        lifetimePaid: parseFloat(lifetimePaid.toFixed(2)),
+      };
+    } catch (error) {
+      logger.error("Error fetching admin retailer summary:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Admin: Get all unsettled ledger entries for a retailer (AVAILABLE,
+   * PARTIALLY_SETTLED, PENDING), ordered oldest-first so the UI
+   * mirrors the FIFO settlement queue.
+   *
+   * @param {string} retailerId
+   * @returns {Promise<Array<Object>>}
+   */
+  async getAdminUnsettledLedgers(retailerId) {
+    try {
+      if (!retailerId) {
+        throw new AppError("Retailer ID is required", 400);
+      }
+      return await this.ledgerRepository.getUnsettledLedgers(retailerId);
+    } catch (error) {
+      logger.error("Error fetching admin unsettled ledgers:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Admin: Get full payout history for a retailer (newest first).
+   *
+   * @param {string} retailerId
+   * @returns {Promise<Array<Object>>}
+   */
+  async getAdminSettlementHistory(retailerId) {
+    try {
+      if (!retailerId) {
+        throw new AppError("Retailer ID is required", 400);
+      }
+      return await this.settlementRepository.getSettlementHistoryForRetailer(
+        retailerId,
+      );
+    } catch (error) {
+      logger.error("Error fetching admin settlement history:", error);
+      throw error;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  //  RETAILER METHODS
+  // ════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Retailer: Get ledger history for the dashboard (Tabs 1 & 2).
+   */
+  async getRetailerLedgers(retailerId, warehouseId, queryParams = {}) {
+    try {
+      if (!retailerId || !warehouseId) {
+        throw new AppError("Retailer ID and Warehouse ID are required", 400);
+      }
+      return await this.ledgerRepository.getHistory({
+        ...queryParams,
+        retailerId,
+        warehouseId,
+      });
+    } catch (error) {
+      logger.error("Error fetching retailer ledgers:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Retailer: Get settlement payout history (Tab 3).
+   */
+  async getRetailerSettlementHistory(retailerId) {
+    try {
+      if (!retailerId) {
+        throw new AppError("Retailer ID is required", 400);
+      }
+      // Reusing the same repo method used by Admin
+      return await this.settlementRepository.getSettlementHistoryForRetailer(
+        retailerId,
+      );
+    } catch (error) {
+      logger.error("Error fetching retailer settlement history:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Retailer: Get single settlement details with Razorpay-style breakdown.
+   */
+  async getRetailerSettlementDetails(settlementId, retailerId) {
+    try {
+      if (!settlementId || !retailerId) {
+        throw new AppError("Settlement ID and Retailer ID are required", 400);
+      }
+
+      const details =
+        await this.settlementRepository.getRetailerSettlementDetails(
+          settlementId,
+          retailerId,
+        );
+
+      if (!details) {
+        throw new AppError("Settlement not found", 404);
+      }
+
+      // Calculate the Razorpay-style breakdown
+      let grossSales = 0;
+      let platformFees = 0;
+
+      const ledgers = (details.settlement_ledger_items || []).map((item) => {
+        const ledger = item.seller_ledgers;
+        // Depending on the transaction_type, bucket the applied amount
+        if (ledger.transaction_type === "ORDER_REVENUE") {
+          grossSales += parseFloat(item.amount_applied || 0);
+        } else if (ledger.transaction_type === "PLATFORM_FEE") {
+          platformFees += parseFloat(item.amount_applied || 0);
+        }
+
+        return {
+          ...ledger,
+          amount_applied_in_this_settlement: item.amount_applied,
+        };
+      });
+
+      // Format the response to match UI expectations
+      return {
+        settlement: {
+          id: details.id,
+          total_amount: parseFloat(details.amount || details.total_amount || 0),
+          payment_mode: details.payment_mode,
+          reference_number: details.reference_number,
+          receipt_url: details.receipt_url,
+          created_at: details.created_at,
+          status: details.status,
+          notes: details.notes,
+        },
+        breakup: {
+          grossSales: parseFloat(grossSales.toFixed(2)),
+          platformFees: parseFloat(platformFees.toFixed(2)),
+        },
+        ledgers,
+      };
+    } catch (error) {
+      logger.error("Error fetching retailer settlement details:", error);
+      throw error;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   //  PRIVATE HELPERS
   // ════════════════════════════════════════════════════════════════════════
 
