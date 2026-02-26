@@ -2,6 +2,8 @@ import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
 import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
 import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
+// import { smsService } from "./smsService.js";
+import { emailService } from "./emailService.js";
 
 /**
  * Order Service
@@ -76,6 +78,16 @@ export class OrderService {
         orderId: order.id,
         orderNumber: order.orderNumber,
         totalAmount: order.totalAmount,
+      });
+
+      // Phase 3: Send notifications (non-blocking)
+      this._sendOrderNotifications(order, {
+        contactPhone,
+        contactEmail,
+        shippingAddress,
+        paymentMethod,
+      }).catch(err => {
+        logger.error("Non-blocking notification dispatch failed", { orderId: order.id, error: err.message });
       });
 
       return order;
@@ -244,8 +256,8 @@ export class OrderService {
         userRepositoryExists: !!this.userRepository,
         userRepositoryMethods: this.userRepository
           ? Object.getOwnPropertyNames(
-              Object.getPrototypeOf(this.userRepository),
-            )
+            Object.getPrototypeOf(this.userRepository),
+          )
           : "N/A",
       });
 
@@ -295,6 +307,9 @@ export class OrderService {
         );
 
         // Step 3: Create order record
+        // COD orders skip 'initialized' and go directly to 'processed'
+        const orderStatus = paymentMethod === "cod" ? "processed" : "initialized";
+
         const orderPayload = {
           userId,
           items: validatedItems,
@@ -306,7 +321,7 @@ export class OrderService {
           contactEmail: contactEmail || "",
           paymentMethod,
           paymentStatus: paymentMethod === "cod" ? "pending" : "pending",
-          status: "processed",
+          status: orderStatus,
           metadata: {
             ...metadata,
             orderSummary,
@@ -330,9 +345,11 @@ export class OrderService {
             await this.orderEventRepository.createWithConnection(connection, {
               orderId: order.id,
               previousStatus: null,
-              newStatus: "processed",
+              newStatus: orderStatus,
               changedBy: userId,
-              note: "Order created successfully",
+              note: paymentMethod === "cod"
+                ? "COD order created and processed"
+                : "Order created successfully",
               metadata: {
                 source: metadata.source || "web",
                 deviceInfo: metadata.deviceInfo,
@@ -469,8 +486,8 @@ export class OrderService {
         // Calculate original price (MRP) for discount calculation
         const originalPrice = item.variantId
           ? product.variant_compare_at_price ||
-            product.compare_at_price ||
-            currentPrice
+          product.compare_at_price ||
+          currentPrice
           : product.compare_at_price || currentPrice;
 
         // Fetch active commission for variant, if any
@@ -548,9 +565,9 @@ export class OrderService {
                 metadata: product.variant_metadata || {},
                 commission: activeCommission
                   ? {
-                      type: activeCommission.commission_type,
-                      value: parseFloat(activeCommission.commission_value),
-                    }
+                    type: activeCommission.commission_type,
+                    value: parseFloat(activeCommission.commission_value),
+                  }
                   : null,
               },
             }),
@@ -608,7 +625,7 @@ export class OrderService {
       warehouseGroups.get(warehouseId).push(item);
     }
 
-    // Calculate fees and taxes with business rules
+    // Calculate order-level fees
     const deliveryFee = this._calculateDeliveryFee(
       subtotal,
       totalDeliveryCharge,
@@ -616,8 +633,41 @@ export class OrderService {
     const platformFee = this._calculatePlatformFee(subtotal);
     const tax = this._calculateTax(subtotal);
 
+    // --- Bifurcate fees across items proportionally ---
+    const baseFee = subtotal >= 399 ? 0 : 50; // Base delivery fee (same logic as _calculateDeliveryFee)
+
+    let runningDeliveryTotal = 0;
+    let runningPlatformTotal = 0;
+
+    for (let i = 0; i < itemDetails.length; i++) {
+      const item = itemDetails[i];
+      const proportion = subtotal > 0 ? item.totalPrice / subtotal : 1 / itemDetails.length;
+
+      // Product-specific delivery charge + proportional share of base fee
+      const itemProductDelivery = (item.deliveryCharge || 0) * item.quantity;
+      const itemBaseFeeShare = parseFloat((proportion * baseFee).toFixed(2));
+      const itemPlatformShare = parseFloat((proportion * platformFee).toFixed(2));
+
+      if (i === itemDetails.length - 1) {
+        // Last item absorbs rounding difference to ensure exact totals
+        item.itemDeliveryFee = parseFloat(
+          (deliveryFee - runningDeliveryTotal).toFixed(2),
+        );
+        item.itemPlatformFee = parseFloat(
+          (platformFee - runningPlatformTotal).toFixed(2),
+        );
+      } else {
+        item.itemDeliveryFee = parseFloat(
+          (itemProductDelivery + itemBaseFeeShare).toFixed(2),
+        );
+        item.itemPlatformFee = itemPlatformShare;
+      }
+
+      runningDeliveryTotal += item.itemDeliveryFee;
+      runningPlatformTotal += item.itemPlatformFee;
+    }
+
     // Calculate Discount: (MRP * Qty) - (Selling Price * Qty)
-    // Note: subtotal is already (Selling Price * Qty)
     const totalMRP = validatedItems.reduce(
       (sum, item) =>
         sum + (item.originalPrice || item.unitPrice) * item.quantity,
@@ -625,26 +675,8 @@ export class OrderService {
     );
     const discount = Math.max(0, totalMRP - subtotal);
 
-    // Total = Subtotal + Fees - (Discount is ALREADY applied in subtotal because subtotal = selling price)
-    // Wait, the frontend logic is: Total = Subtotal (Selling Price) + Fees.
-    // The "Discount" is just for display: MRP - Selling Price.
-    // So the stored Total Amount should be: Subtotal + Delivery + Platform + Tax (if extra, usually included).
-    // Let's assume Tax is included in price or strictly additive?
-    // In frontend: totalAmount = subtotal + platformFees + deliveryCharges.
-    // Discount is NOT subtracted from Total, because Subtotal is ALREADY the discounted price.
-    // The previous backend logic had: total = subtotal + ... - discount.
-    // If backend "discount" variable was meant to be a COUPON discount, then subtracting it is correct.
-    // But here we are talking about Product Discount (MRP - Price).
-    // So we should NOT subtract `discount` if it represents Product Discount.
-    // However, if we want to store the "Savings" value, we can return it.
-
-    // Matched Frontend Logic:
-    // Total = Subtotal + Platform Fee + Delivery Charges (Tax usually included or handled separately)
-    // Ensuring Tax isn't double counted if included in price.
-    // Previous logic: subtotal + delivery + platform + tax - discount.
-    // I will align to: Total = Subtotal + Fees.
-
-    const total = subtotal + deliveryFee + platformFee; // Tax assumed included in price or not added on top for now to match frontend
+    // Total = Subtotal + Platform Fee + Delivery Fee (tax included in price)
+    const total = subtotal + deliveryFee + platformFee;
 
     return {
       items: itemDetails,
@@ -652,7 +684,7 @@ export class OrderService {
       deliveryFee: parseFloat(deliveryFee.toFixed(2)),
       platformFee: parseFloat(platformFee.toFixed(2)),
       tax: parseFloat(tax.toFixed(2)),
-      discount: parseFloat(discount.toFixed(2)), // Return product savings for display/analytics
+      discount: parseFloat(discount.toFixed(2)),
       total: parseFloat(total.toFixed(2)),
       currency: "INR",
       warehouseCount: warehouseGroups.size,
@@ -676,8 +708,7 @@ export class OrderService {
 
           if (fetchError || !variantData) {
             throw new Error(
-              `Failed to fetch variant stock: ${
-                fetchError?.message || "Variant not found"
+              `Failed to fetch variant stock: ${fetchError?.message || "Variant not found"
               }`,
             );
           }
@@ -710,8 +741,7 @@ export class OrderService {
 
           if (fetchError || !productData) {
             throw new Error(
-              `Failed to fetch product stock: ${
-                fetchError?.message || "Product not found"
+              `Failed to fetch product stock: ${fetchError?.message || "Product not found"
               }`,
             );
           }
@@ -1235,6 +1265,31 @@ export class OrderService {
       const tax = this._calculateTax(subtotal);
       const total = subtotal + deliveryFee + platformFee + tax;
 
+      // --- Bifurcate fees across items proportionally ---
+      const baseFee = subtotal >= 399 ? 0 : 50;
+      let runningDeliveryTotal = 0;
+      let runningPlatformTotal = 0;
+
+      for (let i = 0; i < itemDetails.length; i++) {
+        const item = itemDetails[i];
+        const proportion = subtotal > 0 ? item.totalPrice / subtotal : 1 / itemDetails.length;
+
+        const itemProductDelivery = (item.deliveryCharge || 0) * item.quantity;
+        const itemBaseFeeShare = parseFloat((proportion * baseFee).toFixed(2));
+        const itemPlatformShare = parseFloat((proportion * platformFee).toFixed(2));
+
+        if (i === itemDetails.length - 1) {
+          item.itemDeliveryFee = parseFloat((deliveryFee - runningDeliveryTotal).toFixed(2));
+          item.itemPlatformFee = parseFloat((platformFee - runningPlatformTotal).toFixed(2));
+        } else {
+          item.itemDeliveryFee = parseFloat((itemProductDelivery + itemBaseFeeShare).toFixed(2));
+          item.itemPlatformFee = itemPlatformShare;
+        }
+
+        runningDeliveryTotal += item.itemDeliveryFee;
+        runningPlatformTotal += item.itemPlatformFee;
+      }
+
       return {
         items: itemDetails,
         subtotal,
@@ -1526,19 +1581,20 @@ export class OrderService {
       const orderWarehouseId = order.warehouseId;
 
       const isRetailerItem = (item) =>
-        warehouseIds.has(item.warehouseId) ||
-        (!item.warehouseId && warehouseIds.has(orderWarehouseId));
+        item.status !== "initialized" &&
+        (warehouseIds.has(item.warehouseId) ||
+          (!item.warehouseId && warehouseIds.has(orderWarehouseId)));
 
-      const hasAccess = order.items?.some(isRetailerItem);
+      const hasAccess = (order.status !== "initialized") && order.items?.some(isRetailerItem);
 
       if (!hasAccess) {
         throw new AppError(
-          "Access denied. This order does not belong to your warehouses.",
+          "Access denied. This order does not belong to your warehouses or is not yet processed.",
           403,
         );
       }
 
-      // Filter items to only show retailer's warehouse items
+      // Filter items to only show retailer's warehouse items and exclude initialized
       order.items = order.items.filter(isRetailerItem);
 
       return order;
@@ -1626,6 +1682,8 @@ export class OrderService {
         variantId: item.variantId,
         unitPrice: item.unitPrice,
         totalPrice: item.totalPrice,
+        deliveryFee: item.deliveryFee || 0,
+        platformFee: item.platformFee || 0,
         warehouseId: item.warehouseId,
         dispatchId: item.dispatchId,
         status: item.status,
@@ -1760,7 +1818,143 @@ export class OrderService {
     return transitions[currentStatus]?.includes(newStatus) || false;
   }
 
+  // ==========================================
+  // NOTIFICATION DISPATCH
+  // ==========================================
+
+  /**
+   * Send order confirmation notifications to customer and retailers
+   * Non-blocking: errors are logged but do not affect order flow
+   */
+  async _sendOrderNotifications(order, context) {
+    const { contactPhone, contactEmail, shippingAddress, paymentMethod } = context;
+
+    try {
+      const studentName = shippingAddress?.studentName
+        || shippingAddress?.recipientName
+        || "Customer";
+
+      const itemsList = (order.items || []).map(item => ({
+        title: item.title,
+        quantity: item.quantity,
+        totalPrice: item.totalPrice,
+        variantLabel: item.productSnapshot?.variantInfo?.metadata?.label || null,
+      }));
+
+      const customerOrderData = {
+        orderNumber: order.orderNumber,
+        studentName,
+        items: itemsList,
+        totalAmount: order.totalAmount,
+        address: shippingAddress,
+        paymentMethod,
+        itemCount: itemsList.length,
+      };
+
+      // === CUSTOMER NOTIFICATIONS ===
+      // SMS: Order confirmation to customer
+      const customerPhone = contactPhone || shippingAddress?.phone;
+      /*
+      if (customerPhone) {
+        smsService.sendOrderConfirmationToCustomer(customerPhone, customerOrderData)
+          .catch(err => logger.error("Customer order SMS failed", { orderId: order.id, error: err.message }));
+      }
+      */
+
+      // Email: Order confirmation to customer
+      if (contactEmail) {
+        emailService.sendOrderConfirmationEmail(contactEmail, customerOrderData)
+          .catch(err => logger.error("Customer order email failed", { orderId: order.id, error: err.message }));
+      }
+
+      // === RETAILER NOTIFICATIONS ===
+      // Group items by warehouseId to identify distinct retailers
+      const warehouseItemsMap = new Map();
+      for (const item of (order.items || [])) {
+        const wId = item.warehouseId || "default";
+        if (!warehouseItemsMap.has(wId)) {
+          warehouseItemsMap.set(wId, []);
+        }
+        warehouseItemsMap.get(wId).push(item);
+      }
+
+      // For each warehouse, resolve retailer contact and send notification
+      for (const [warehouseId, items] of warehouseItemsMap) {
+        if (warehouseId === "default") continue; // Skip if no warehouse assigned
+
+        try {
+          const warehouseWithRetailer = await this.warehouseRepository.findByIdWithRetailer(warehouseId);
+          const retailer = warehouseWithRetailer?.retailer;
+
+          if (!retailer) {
+            logger.warn("No retailer found for warehouse, skipping notification", { warehouseId });
+            continue;
+          }
+
+          const retailerItems = items.map(item => ({
+            title: item.title,
+            quantity: item.quantity,
+            totalPrice: item.totalPrice,
+            variantLabel: item.productSnapshot?.variantInfo?.metadata?.label || null,
+          }));
+
+          const retailerTotalAmount = items.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0);
+
+          const retailerItemSummary = retailerItems
+            .map(i => `${i.title} x${i.quantity}`)
+            .join(", ")
+            .substring(0, 120); // Truncate for SMS character limits
+
+          const retailerData = {
+            orderNumber: order.orderNumber,
+            studentName,
+            items: retailerItems,
+            totalAmount: retailerTotalAmount,
+            address: shippingAddress,
+            itemSummary: retailerItemSummary,
+          };
+
+          // SMS: Order notification to retailer
+          const retailerPhone = retailer.phone || warehouseWithRetailer.contact_phone;
+          /*
+          if (retailerPhone) {
+            smsService.sendOrderConfirmationToRetailer(retailerPhone, retailerData)
+              .catch(err => logger.error("Retailer order SMS failed", { warehouseId, error: err.message }));
+          }
+          */
+
+          // Email: Order notification to retailer
+          const retailerEmail = retailer.email || warehouseWithRetailer.contact_email;
+          if (retailerEmail) {
+            emailService.sendRetailerOrderNotificationEmail(retailerEmail, retailerData)
+              .catch(err => logger.error("Retailer order email failed", { warehouseId, error: err.message }));
+          }
+
+          logger.info("Retailer notification dispatched", {
+            warehouseId,
+            retailerPhone,
+            retailerEmail,
+            itemCount: retailerItems.length,
+          });
+        } catch (retailerErr) {
+          logger.error("Failed to send retailer notification", {
+            warehouseId,
+            error: retailerErr.message,
+          });
+        }
+      }
+
+      logger.info("All order notifications dispatched", { orderId: order.id });
+    } catch (error) {
+      logger.error("Error in _sendOrderNotifications", {
+        orderId: order.id,
+        error: error.message,
+      });
+    }
+  }
+
   _calculateDeliveryFee(subtotal, totalDeliveryCharge) {
+
     // Free delivery above ₹399 (Frontend Logic)
     // Note: Frontend also has item-specific delivery charges.
     // Ideally, this service should receive the fully calculated delivery fee or replicate the precise logic.
@@ -1784,7 +1978,46 @@ export class OrderService {
 
   async _handleOrderDelivered(orderId) {
     logger.info(`Order ${orderId} delivered - enabling post-delivery features`);
-    // Post-delivery features will be implemented here (like product reviews)
+
+    // Send delivery notifications to customer
+    try {
+      const order = await this.orderRepository.findById(orderId);
+      if (!order) return;
+
+      const studentName = order.shippingAddress?.studentName
+        || order.shippingAddress?.recipientName
+        || "Customer";
+
+      const orderData = {
+        orderNumber: order.orderNumber,
+        studentName,
+        items: (order.items || []).map(item => ({
+          title: item.title,
+          quantity: item.quantity,
+          totalPrice: item.totalPrice,
+          variantLabel: item.productSnapshot?.variantInfo?.metadata?.label || null,
+        })),
+        totalAmount: order.totalAmount,
+      };
+
+      // SMS: Delivery confirmation to customer
+      const customerPhone = order.contactPhone || order.shippingAddress?.phone;
+      /*
+      if (customerPhone) {
+        smsService.sendDeliveryConfirmationToCustomer(customerPhone, orderData)
+          .catch(err => logger.error("Delivery SMS failed", { orderId, error: err.message }));
+      }
+      */
+
+      // Email: Delivery confirmation to customer
+      const customerEmail = order.contactEmail;
+      if (customerEmail) {
+        emailService.sendOrderDeliveryEmail(customerEmail, orderData)
+          .catch(err => logger.error("Delivery email failed", { orderId, error: err.message }));
+      }
+    } catch (error) {
+      logger.error("Error sending delivery notifications", { orderId, error: error.message });
+    }
   }
 
   async _handleOrderCancelled(orderId, cancelledBy, reason) {
@@ -1845,8 +2078,7 @@ export class OrderService {
 
             if (fetchError || !variantData) {
               throw new Error(
-                `Failed to fetch variant stock for restocking: ${
-                  fetchError?.message || "Variant not found"
+                `Failed to fetch variant stock for restocking: ${fetchError?.message || "Variant not found"
                 }`,
               );
             }
@@ -1877,8 +2109,7 @@ export class OrderService {
 
             if (fetchError || !productData) {
               throw new Error(
-                `Failed to fetch product stock for restocking: ${
-                  fetchError?.message || "Product not found"
+                `Failed to fetch product stock for restocking: ${fetchError?.message || "Product not found"
                 }`,
               );
             }

@@ -7,6 +7,8 @@ import { UserRepository } from "../repositories/userRepository.js";
 import { OrderEventRepository } from "../repositories/orderEventRepository.js";
 import { OrderQueryRepository } from "../repositories/orderQueryRepository.js";
 import { WarehouseRepository } from "../repositories/warehouseRepository.js";
+import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
+import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
 import { AppError } from "../middleware/errorHandler.js";
 import { getSupabase } from "../db/index.js";
 
@@ -31,6 +33,8 @@ function getOrderService() {
       orderEventRepository,
       orderQueryRepository,
       warehouseRepository,
+      productPaymentMethodRepository,
+      variantCommissionRepository,
     );
   }
   return orderService;
@@ -1116,7 +1120,7 @@ export class OrderController {
         "Your order is ready for shipment",
         "You will receive tracking information once shipped",
         "Estimated delivery: " +
-          OrderController._calculateEstimatedDelivery(order),
+        OrderController._calculateEstimatedDelivery(order),
       ],
       shipped: [
         "Your order is on the way",

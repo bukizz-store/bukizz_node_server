@@ -561,6 +561,7 @@ export class AuthService {
         .update(refreshToken)
         .digest("hex");
 
+      // First, try to find a non-revoked token (normal path)
       const { data: tokens, error } = await this.supabase
         .from("refresh_tokens")
         .select(
@@ -573,28 +574,61 @@ export class AuthService {
         .is("revoked_at", null)
         .single();
 
-      if (error || !tokens) {
+      if (!error && tokens) {
+        // Normal path: token is valid and not revoked
+        if (new Date() > new Date(tokens.expires_at)) {
+          throw new Error("Refresh token expired");
+        }
+
+        if (!tokens.users.is_active) {
+          throw new Error("User account is inactive");
+        }
+
+        // Revoke old token (rotation)
+        await this.supabase
+          .from("refresh_tokens")
+          .update({ revoked_at: new Date().toISOString() })
+          .eq("id", tokens.id);
+
+        // Generate new tokens
+        return await this.generateTokens(tokens.user_id, tokens.device_info);
+      }
+
+      // Grace period path: token may have been recently revoked by a concurrent request
+      // This handles the race condition where multiple tabs/requests try to refresh simultaneously
+      const GRACE_PERIOD_MS = 30 * 1000; // 30 seconds
+      const graceCutoff = new Date(Date.now() - GRACE_PERIOD_MS).toISOString();
+
+      const { data: revokedToken, error: revokedError } = await this.supabase
+        .from("refresh_tokens")
+        .select(
+          `
+          id, user_id, device_info, expires_at, revoked_at,
+          users!inner(is_active)
+        `
+        )
+        .eq("token_hash", tokenHash)
+        .not("revoked_at", "is", null)
+        .gte("revoked_at", graceCutoff)
+        .single();
+
+      if (revokedError || !revokedToken) {
         throw new Error("Invalid refresh token");
       }
 
-      // Check if token is expired
-      if (new Date() > new Date(tokens.expires_at)) {
+      // Token was recently revoked — likely a race condition
+      logger.info(`Refresh token reuse detected within grace period for user ${revokedToken.user_id}`);
+
+      if (new Date() > new Date(revokedToken.expires_at)) {
         throw new Error("Refresh token expired");
       }
 
-      // Check if user is active
-      if (!tokens.users.is_active) {
+      if (!revokedToken.users.is_active) {
         throw new Error("User account is inactive");
       }
 
-      // Revoke old token
-      await this.supabase
-        .from("refresh_tokens")
-        .update({ revoked_at: new Date().toISOString() })
-        .eq("id", tokens.id);
-
-      // Generate new tokens
-      return await this.generateTokens(tokens.user_id, tokens.device_info);
+      // Generate new tokens for the user (don't revoke any more — the rotation already happened)
+      return await this.generateTokens(revokedToken.user_id, revokedToken.device_info);
     } catch (error) {
       logger.error("Token refresh error:", error);
       throw error;

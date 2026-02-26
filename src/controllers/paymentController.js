@@ -186,15 +186,38 @@ export class PaymentController {
                 logger.info("Transaction updated successfully", { gateway_order_id: razorpay_order_id });
             }
 
-            // 2. Update Order Status
-            // Use service client to ensure privileged update (bypass RLS)
+            // 2. Fetch order to check if it was a COD order
+            const verifiedOrder = await this.orderRepository.findById(orderId);
+            const wasCOD = verifiedOrder?.paymentMethod === 'cod';
+
+            // 2.1 Build update payload — keep payment_method as-is, add remark for COD
+            const orderUpdatePayload = {
+                payment_status: "paid",
+                updated_at: new Date().toISOString(),
+            };
+
+            // Only move to 'processed' if order is still 'initialized' (online payment orders)
+            // COD orders are already 'processed', so don't downgrade
+            if (!wasCOD && (verifiedOrder?.status === 'initialized')) {
+                orderUpdatePayload.status = "processed";
+            }
+
+            // Add remark in metadata for COD orders paid online
+            if (wasCOD) {
+                const existingMetadata = verifiedOrder?.metadata || {};
+                orderUpdatePayload.metadata = {
+                    ...existingMetadata,
+                    paid_online: true,
+                    paid_online_at: new Date().toISOString(),
+                    online_payment_id: razorpay_payment_id,
+                    remark: "COD order paid online by customer",
+                };
+            }
+
+            // Update Order Status
             const { data: updateData, error: updateError } = await this.serviceClient
                 .from("orders")
-                .update({
-                    payment_status: "paid",
-                    status: "processed", // Move to processing after payment
-                    updated_at: new Date().toISOString(),
-                })
+                .update(orderUpdatePayload)
                 .eq("id", orderId)
                 .eq("user_id", userId)
                 .select();
@@ -205,30 +228,31 @@ export class PaymentController {
                     orderId,
                     userId
                 });
-                // Payment valid but DB update failed - critical error
                 throw new AppError("Payment verified but failed to update order. Please contact support.", 500);
             } else {
                 logger.info("Order status updated successfully", {
                     orderId,
                     updatedData: updateData,
-                    newStatus: "paid"
+                    wasCOD,
                 });
 
-                // 2.1 Update Order Items Status
-                const { error: itemsUpdateError } = await this.serviceClient
-                    .from("order_items")
-                    .update({
-                        status: "processed",
-                    })
-                    .eq("order_id", orderId);
+                // 2.2 Update Order Items Status (only if they need to move to processed)
+                if (!wasCOD) {
+                    const { error: itemsUpdateError } = await this.serviceClient
+                        .from("order_items")
+                        .update({
+                            status: "processed",
+                        })
+                        .eq("order_id", orderId);
 
-                if (itemsUpdateError) {
-                    logger.error("Failed to update order items status after payment", {
-                        error: itemsUpdateError,
-                        orderId
-                    });
-                } else {
-                    logger.info("Order items status updated to processed", { orderId });
+                    if (itemsUpdateError) {
+                        logger.error("Failed to update order items status after payment", {
+                            error: itemsUpdateError,
+                            orderId
+                        });
+                    } else {
+                        logger.info("Order items status updated to processed", { orderId });
+                    }
                 }
             }
 
@@ -407,41 +431,65 @@ export class PaymentController {
 
                 if (orderId) {
                     try {
-                        // Ensure order is marked as paid
+                        // Fetch order to check if it was COD
+                        const webhookOrder = await this.orderRepository.findById(orderId);
+                        const wasCODWebhook = webhookOrder?.paymentMethod === 'cod';
+
+                        // Build update payload
+                        const webhookUpdatePayload = {
+                            payment_status: "paid",
+                            updated_at: new Date().toISOString(),
+                        };
+
+                        // Only set status to processed if not COD (COD is already processed)
+                        if (!wasCODWebhook) {
+                            webhookUpdatePayload.status = "processed";
+                        }
+
+                        // Add remark for COD orders paid online
+                        if (wasCODWebhook) {
+                            const existingMeta = webhookOrder?.metadata || {};
+                            webhookUpdatePayload.metadata = {
+                                ...existingMeta,
+                                paid_online: true,
+                                paid_online_at: new Date().toISOString(),
+                                online_payment_id: payment.id,
+                                remark: "COD order paid online by customer",
+                            };
+                        }
+
                         const { error: orderError } = await this.serviceClient
                             .from("orders")
-                            .update({
-                                payment_status: "paid",
-                                status: "processed",
-                                updated_at: new Date().toISOString(),
-                            })
+                            .update(webhookUpdatePayload)
                             .eq("id", orderId);
 
                         if (orderError) throw new Error(`Orders update failed: ${orderError.message}`);
 
-                        // Update order items too
-                        const { error: itemsError } = await this.serviceClient
-                            .from("order_items")
-                            .update({
-                                status: "processed",
-                            })
-                            .eq("order_id", orderId);
+                        // Update order items only if not COD (COD items already processed)
+                        if (!wasCODWebhook) {
+                            const { error: itemsError } = await this.serviceClient
+                                .from("order_items")
+                                .update({
+                                    status: "processed",
+                                })
+                                .eq("order_id", orderId);
 
-                        if (itemsError) throw new Error(`Order items update failed: ${itemsError.message}`);
+                            if (itemsError) throw new Error(`Order items update failed: ${itemsError.message}`);
+                        }
 
                         // Update transaction too
                         const { error: txnError } = await this.serviceClient
                             .from("transactions")
                             .update({
                                 payment_id: payment.id,
-                                status: "completed", // or captured
+                                status: "completed",
                                 updated_at: new Date().toISOString(),
                             })
                             .eq("gateway_order_id", payment.order_id);
 
                         if (txnError) throw new Error(`Transaction update failed: ${txnError.message}`);
 
-                        logger.info("Webhook: Successfully processed captured payment", { orderId, paymentId: payment.id });
+                        logger.info("Webhook: Successfully processed captured payment", { orderId, paymentId: payment.id, wasCOD: wasCODWebhook });
                     } catch (captureError) {
                         logger.error("Webhook: Failed to process captured payment updates", {
                             orderId,
