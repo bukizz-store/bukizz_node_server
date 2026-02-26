@@ -168,7 +168,7 @@ export const settlementRepository = {
           *,
           settlement_ledger_items (
             id,
-            amount_applied,
+            allocated_amount,
             seller_ledgers (*)
           )
         `,
@@ -242,7 +242,7 @@ export const settlementRepository = {
           *,
           settlement_ledger_items (
             id,
-            amount_applied,
+            allocated_amount,
             seller_ledgers (
               id, amount, status, trigger_date, transaction_type, entry_type,
               orders!left ( order_number, user_id, created_at ),

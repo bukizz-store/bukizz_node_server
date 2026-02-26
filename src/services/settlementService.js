@@ -243,7 +243,7 @@ export class SettlementService {
       const settlementRecord = {
         id: settlementId,
         retailer_id: retailerId,
-        amount,
+        total_amount: amount,
         payment_mode: paymentMode,
         reference_number: referenceNumber || null,
         receipt_url: receiptUrl || null,
@@ -539,14 +539,14 @@ export class SettlementService {
         const ledger = item.seller_ledgers;
         // Depending on the transaction_type, bucket the applied amount
         if (ledger.transaction_type === "ORDER_REVENUE") {
-          grossSales += parseFloat(item.amount_applied || 0);
+          grossSales += parseFloat(item.allocated_amount || 0);
         } else if (ledger.transaction_type === "PLATFORM_FEE") {
-          platformFees += parseFloat(item.amount_applied || 0);
+          platformFees += parseFloat(item.allocated_amount || 0);
         }
 
         return {
           ...ledger,
-          amount_applied_in_this_settlement: item.amount_applied,
+          amount_applied_in_this_settlement: item.allocated_amount,
         };
       });
 
@@ -648,7 +648,7 @@ export class SettlementService {
       mappingRecords.push({
         id: uuidv4(),
         ledger_id: entry.id,
-        amount_applied: parseFloat(applied.toFixed(2)),
+        allocated_amount: parseFloat(applied.toFixed(2)),
       });
 
       remaining = parseFloat((remaining - applied).toFixed(2));
