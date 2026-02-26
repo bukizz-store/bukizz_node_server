@@ -245,8 +245,8 @@ export const settlementRepository = {
             allocated_amount,
             seller_ledgers (
               id, amount, status, trigger_date, transaction_type, entry_type,
-              orders!left ( order_number, user_id, created_at ),
-              order_items!left ( id, title, sku, quantity,dispatch_id )
+              orders!left ( order_number, user_id, created_at, shipping_address ),
+              order_items!left ( id, title, sku, quantity, status, dispatch_id )
             )
           )
         `,
