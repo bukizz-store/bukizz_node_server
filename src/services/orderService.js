@@ -2,6 +2,8 @@ import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
 import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
 import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
+// import { smsService } from "./smsService.js";
+import { emailService } from "./emailService.js";
 
 /**
  * Order Service
@@ -76,6 +78,16 @@ export class OrderService {
         orderId: order.id,
         orderNumber: order.orderNumber,
         totalAmount: order.totalAmount,
+      });
+
+      // Phase 3: Send notifications (non-blocking)
+      this._sendOrderNotifications(order, {
+        contactPhone,
+        contactEmail,
+        shippingAddress,
+        paymentMethod,
+      }).catch(err => {
+        logger.error("Non-blocking notification dispatch failed", { orderId: order.id, error: err.message });
       });
 
       return order;
@@ -1569,19 +1581,20 @@ export class OrderService {
       const orderWarehouseId = order.warehouseId;
 
       const isRetailerItem = (item) =>
-        warehouseIds.has(item.warehouseId) ||
-        (!item.warehouseId && warehouseIds.has(orderWarehouseId));
+        item.status !== "initialized" &&
+        (warehouseIds.has(item.warehouseId) ||
+          (!item.warehouseId && warehouseIds.has(orderWarehouseId)));
 
-      const hasAccess = order.items?.some(isRetailerItem);
+      const hasAccess = (order.status !== "initialized") && order.items?.some(isRetailerItem);
 
       if (!hasAccess) {
         throw new AppError(
-          "Access denied. This order does not belong to your warehouses.",
+          "Access denied. This order does not belong to your warehouses or is not yet processed.",
           403,
         );
       }
 
-      // Filter items to only show retailer's warehouse items
+      // Filter items to only show retailer's warehouse items and exclude initialized
       order.items = order.items.filter(isRetailerItem);
 
       return order;
@@ -1805,7 +1818,143 @@ export class OrderService {
     return transitions[currentStatus]?.includes(newStatus) || false;
   }
 
+  // ==========================================
+  // NOTIFICATION DISPATCH
+  // ==========================================
+
+  /**
+   * Send order confirmation notifications to customer and retailers
+   * Non-blocking: errors are logged but do not affect order flow
+   */
+  async _sendOrderNotifications(order, context) {
+    const { contactPhone, contactEmail, shippingAddress, paymentMethod } = context;
+
+    try {
+      const studentName = shippingAddress?.studentName
+        || shippingAddress?.recipientName
+        || "Customer";
+
+      const itemsList = (order.items || []).map(item => ({
+        title: item.title,
+        quantity: item.quantity,
+        totalPrice: item.totalPrice,
+        variantLabel: item.productSnapshot?.variantInfo?.metadata?.label || null,
+      }));
+
+      const customerOrderData = {
+        orderNumber: order.orderNumber,
+        studentName,
+        items: itemsList,
+        totalAmount: order.totalAmount,
+        address: shippingAddress,
+        paymentMethod,
+        itemCount: itemsList.length,
+      };
+
+      // === CUSTOMER NOTIFICATIONS ===
+      // SMS: Order confirmation to customer
+      const customerPhone = contactPhone || shippingAddress?.phone;
+      /*
+      if (customerPhone) {
+        smsService.sendOrderConfirmationToCustomer(customerPhone, customerOrderData)
+          .catch(err => logger.error("Customer order SMS failed", { orderId: order.id, error: err.message }));
+      }
+      */
+
+      // Email: Order confirmation to customer
+      if (contactEmail) {
+        emailService.sendOrderConfirmationEmail(contactEmail, customerOrderData)
+          .catch(err => logger.error("Customer order email failed", { orderId: order.id, error: err.message }));
+      }
+
+      // === RETAILER NOTIFICATIONS ===
+      // Group items by warehouseId to identify distinct retailers
+      const warehouseItemsMap = new Map();
+      for (const item of (order.items || [])) {
+        const wId = item.warehouseId || "default";
+        if (!warehouseItemsMap.has(wId)) {
+          warehouseItemsMap.set(wId, []);
+        }
+        warehouseItemsMap.get(wId).push(item);
+      }
+
+      // For each warehouse, resolve retailer contact and send notification
+      for (const [warehouseId, items] of warehouseItemsMap) {
+        if (warehouseId === "default") continue; // Skip if no warehouse assigned
+
+        try {
+          const warehouseWithRetailer = await this.warehouseRepository.findByIdWithRetailer(warehouseId);
+          const retailer = warehouseWithRetailer?.retailer;
+
+          if (!retailer) {
+            logger.warn("No retailer found for warehouse, skipping notification", { warehouseId });
+            continue;
+          }
+
+          const retailerItems = items.map(item => ({
+            title: item.title,
+            quantity: item.quantity,
+            totalPrice: item.totalPrice,
+            variantLabel: item.productSnapshot?.variantInfo?.metadata?.label || null,
+          }));
+
+          const retailerTotalAmount = items.reduce((sum, item) => sum + (parseFloat(item.totalPrice) || 0), 0);
+
+          const retailerItemSummary = retailerItems
+            .map(i => `${i.title} x${i.quantity}`)
+            .join(", ")
+            .substring(0, 120); // Truncate for SMS character limits
+
+          const retailerData = {
+            orderNumber: order.orderNumber,
+            studentName,
+            items: retailerItems,
+            totalAmount: retailerTotalAmount,
+            address: shippingAddress,
+            itemSummary: retailerItemSummary,
+          };
+
+          // SMS: Order notification to retailer
+          const retailerPhone = retailer.phone || warehouseWithRetailer.contact_phone;
+          /*
+          if (retailerPhone) {
+            smsService.sendOrderConfirmationToRetailer(retailerPhone, retailerData)
+              .catch(err => logger.error("Retailer order SMS failed", { warehouseId, error: err.message }));
+          }
+          */
+
+          // Email: Order notification to retailer
+          const retailerEmail = retailer.email || warehouseWithRetailer.contact_email;
+          if (retailerEmail) {
+            emailService.sendRetailerOrderNotificationEmail(retailerEmail, retailerData)
+              .catch(err => logger.error("Retailer order email failed", { warehouseId, error: err.message }));
+          }
+
+          logger.info("Retailer notification dispatched", {
+            warehouseId,
+            retailerPhone,
+            retailerEmail,
+            itemCount: retailerItems.length,
+          });
+        } catch (retailerErr) {
+          logger.error("Failed to send retailer notification", {
+            warehouseId,
+            error: retailerErr.message,
+          });
+        }
+      }
+
+      logger.info("All order notifications dispatched", { orderId: order.id });
+    } catch (error) {
+      logger.error("Error in _sendOrderNotifications", {
+        orderId: order.id,
+        error: error.message,
+      });
+    }
+  }
+
   _calculateDeliveryFee(subtotal, totalDeliveryCharge) {
+
     // Free delivery above ₹399 (Frontend Logic)
     // Note: Frontend also has item-specific delivery charges.
     // Ideally, this service should receive the fully calculated delivery fee or replicate the precise logic.
@@ -1829,7 +1978,46 @@ export class OrderService {
 
   async _handleOrderDelivered(orderId) {
     logger.info(`Order ${orderId} delivered - enabling post-delivery features`);
-    // Post-delivery features will be implemented here (like product reviews)
+
+    // Send delivery notifications to customer
+    try {
+      const order = await this.orderRepository.findById(orderId);
+      if (!order) return;
+
+      const studentName = order.shippingAddress?.studentName
+        || order.shippingAddress?.recipientName
+        || "Customer";
+
+      const orderData = {
+        orderNumber: order.orderNumber,
+        studentName,
+        items: (order.items || []).map(item => ({
+          title: item.title,
+          quantity: item.quantity,
+          totalPrice: item.totalPrice,
+          variantLabel: item.productSnapshot?.variantInfo?.metadata?.label || null,
+        })),
+        totalAmount: order.totalAmount,
+      };
+
+      // SMS: Delivery confirmation to customer
+      const customerPhone = order.contactPhone || order.shippingAddress?.phone;
+      /*
+      if (customerPhone) {
+        smsService.sendDeliveryConfirmationToCustomer(customerPhone, orderData)
+          .catch(err => logger.error("Delivery SMS failed", { orderId, error: err.message }));
+      }
+      */
+
+      // Email: Delivery confirmation to customer
+      const customerEmail = order.contactEmail;
+      if (customerEmail) {
+        emailService.sendOrderDeliveryEmail(customerEmail, orderData)
+          .catch(err => logger.error("Delivery email failed", { orderId, error: err.message }));
+      }
+    } catch (error) {
+      logger.error("Error sending delivery notifications", { orderId, error: error.message });
+    }
   }
 
   async _handleOrderCancelled(orderId, cancelledBy, reason) {

@@ -966,7 +966,6 @@ export class OrderRepository {
 
       const offset = (page - 1) * limit;
       const validOrderStatuses = [
-        "initialized",
         "processed",
         "shipped",
         "out_for_delivery",
@@ -984,6 +983,9 @@ export class OrderRepository {
 
       if (status && validOrderStatuses.includes(status)) {
         itemQuery = itemQuery.eq("status", status);
+      } else {
+        // Always exclude initialized orders for retailer/warehouse APIs
+        itemQuery = itemQuery.neq("status", "initialized");
       }
 
       const { data: matchedItems, error: itemError } = await itemQuery;
@@ -998,7 +1000,8 @@ export class OrderRepository {
       const { data: fallbackOrders } = await this.supabase
         .from("orders")
         .select("id")
-        .eq("warehouse_id", warehouseId);
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
       const fallbackOrderIds = (fallbackOrders || []).map((o) => o.id);
 
       // If status filter is active, further filter fallback orders
@@ -1042,7 +1045,8 @@ export class OrderRepository {
       let query = this.supabase
         .from("orders")
         .select("*", { count: "exact" })
-        .in("id", orderIds);
+        .in("id", orderIds)
+        .neq("status", "initialized");
 
       if (paymentStatus) query = query.eq("payment_status", paymentStatus);
       if (startDate) query = query.gte("created_at", startDate);
@@ -1114,7 +1118,6 @@ export class OrderRepository {
         searchTerm,
         paymentStatus,
         validOrderStatuses = [
-          "initialized",
           "processed",
           "shipped",
           "out_for_delivery",
@@ -1149,6 +1152,9 @@ export class OrderRepository {
 
       if (status && validOrderStatuses.includes(status)) {
         itemQuery = itemQuery.eq("status", status);
+      } else {
+        // Always exclude initialized orders for retailer/warehouse APIs
+        itemQuery = itemQuery.neq("status", "initialized");
       }
 
       const { data: matchedItems, error: itemError } = await itemQuery;
@@ -1163,7 +1169,8 @@ export class OrderRepository {
       const { data: fallbackOrders } = await this.supabase
         .from("orders")
         .select("id")
-        .in("warehouse_id", warehouseIds);
+        .in("warehouse_id", warehouseIds)
+        .neq("status", "initialized");
 
       let filteredFallbackIds = (fallbackOrders || []).map((o) => o.id);
       if (
@@ -1204,7 +1211,8 @@ export class OrderRepository {
       let query = this.supabase
         .from("orders")
         .select("*", { count: "exact" })
-        .in("id", orderIds);
+        .in("id", orderIds)
+        .neq("status", "initialized");
 
       if (paymentStatus) query = query.eq("payment_status", paymentStatus);
       if (startDate) query = query.gte("created_at", startDate);
@@ -1285,11 +1293,15 @@ export class OrderRepository {
       const { data: fallbackOrders } = await this.supabase
         .from("orders")
         .select("id")
-        .eq("warehouse_id", warehouseId);
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
       const fallbackOrderIds = new Set((fallbackOrders || []).map((o) => o.id));
 
       // For NULL-warehouse items, only include if the parent order belongs to this warehouse
       const relevantItems = (warehouseOrderItems || []).filter((item) => {
+        // Always exclude initialized items
+        if (item.status === "initialized") return false;
+
         // Directly assigned to this warehouse
         if (item.warehouse_id === warehouseId) return true;
         // NULL warehouse but order belongs to this warehouse
@@ -1314,7 +1326,7 @@ export class OrderRepository {
       }
 
       // Date filtering is applied at the order level
-      let query = this.supabase.from("orders").select("*").in("id", orderIds);
+      let query = this.supabase.from("orders").select("*").in("id", orderIds).neq("status", "initialized");
       if (startDate) query = query.gte("created_at", startDate);
       if (endDate) query = query.lte("created_at", endDate);
 
