@@ -254,7 +254,7 @@ export class DashboardController {
         });
 
         return {
-          id: order.id,
+          id: order.items.id,
           orderNumber: order.orderNumber,
           status: order.status,
           totalPrice: order.totalAmount || order.totalPrice, // Use totalAmount from Parent Order
