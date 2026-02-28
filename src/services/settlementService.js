@@ -534,14 +534,26 @@ export class SettlementService {
       // Calculate the Razorpay-style breakdown
       let grossSales = 0;
       let platformFees = 0;
+      let returns = 0;
+      let adjustments = 0;
 
       const ledgers = (details.settlement_ledger_items || []).map((item) => {
         const ledger = item.seller_ledgers;
         // Depending on the transaction_type, bucket the applied amount
+        const amount = parseFloat(item.allocated_amount || 0);
+
         if (ledger.transaction_type === "ORDER_REVENUE") {
-          grossSales += parseFloat(item.allocated_amount || 0);
+          grossSales += amount;
         } else if (ledger.transaction_type === "PLATFORM_FEE") {
-          platformFees += parseFloat(item.allocated_amount || 0);
+          platformFees += amount;
+        } else if (
+          ledger.transaction_type === "REFUND_CLAWBACK" ||
+          ledger.transaction_type === "RETURN_DEDUCTION" ||
+          ledger.transaction_type === "REFUND"
+        ) {
+          returns += amount;
+        } else if (ledger.transaction_type === "MANUAL_ADJUSTMENT") {
+          adjustments += amount;
         }
 
         return {
@@ -564,7 +576,14 @@ export class SettlementService {
         },
         breakup: {
           grossSales: parseFloat(grossSales.toFixed(2)),
-          platformFees: parseFloat(platformFees.toFixed(2)),
+          deductions: {
+            platformFees: Math.abs(parseFloat(platformFees.toFixed(2))),
+            returns: Math.abs(parseFloat(returns.toFixed(2))),
+            adjustments: Math.abs(parseFloat(adjustments.toFixed(2))),
+            totalDeductions: Math.abs(
+              parseFloat((platformFees + returns + adjustments).toFixed(2)),
+            ),
+          },
         },
         ledgers,
       };
