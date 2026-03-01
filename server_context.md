@@ -10,21 +10,54 @@
 | **Framework** | Express 4.18 |
 | **Database** | Supabase (PostgreSQL) |
 | **Auth** | JWT (custom) + Supabase Auth (Google OAuth) + OTP (email-based) |
-| **Payments** | Razorpay |
+| **Payments** | Razorpay (orders, webhooks, penny-drop bank verification) |
 | **Validation** | Joi |
 | **File Uploads** | Multer (memory storage → Supabase Storage) |
 | **Logging** | Winston (file + console) |
-| **Security** | Helmet, CORS, express-rate-limit, bcryptjs |
-| **Email** | Nodemailer (OTP delivery, password resets) |
+| **Security** | Helmet, CORS, express-rate-limit, bcryptjs, AES-256-GCM encryption |
+| **Email** | Nodemailer (OTP, order confirmations, retailer notifications, delivery confirmations, password resets) — HTML templates |
+| **SMS** | MSG91 Flow API (order confirmation, delivery notification) |
+| **Cron Jobs** | node-cron (daily sitemap generation) |
 | **Containerization** | Docker + docker-compose |
 
 ---
 
-## 2. Folder Structure
+## 2. Local Setup & Onboarding
+
+### Prerequisites
+- Node.js (≥ 18)
+- PostgreSQL / Supabase locally or hosted
+- Docker & docker-compose (optional, for running dependencies locally)
+
+### Step-by-Step Setup
+1. **Clone & Install:**
+   ```bash
+   cd Bukizz/server
+   npm install
+   ```
+2. **Environment Variables:**
+   Copy `.env.example` to `.env` and fill in the required values (refer to section 16 for variables).
+   ```bash
+   cp .env.example .env
+   ```
+3. **Database Setup:**
+   - Create a new project in Supabase (or run locally).
+   - Execute the SQL from `src/db/schema.sql` to initialize tables, types, triggers, and RPCs.
+   - Run the migrations from `src/db/` to ensure the schema is up-to-date.
+   - (Optional) Run `src/db/init.sql` to populate sample data.
+4. **Run the Development Server:**
+   ```bash
+   npm run dev
+   ```
+   The server will start on `http://localhost:3001` (or your configured `PORT`).
+
+---
+
+## 3. Folder Structure
 
 ```
 bukizz_node_server/
-├── index.js                    # Main entry point — boots server, wires DI, legacy auth routes
+├── index.js                    # Main entry point — boots server, wires DI, legacy auth routes, cron jobs
 ├── package.json                # Dependencies & scripts
 ├── Dockerfile                  # Docker image config
 ├── docker-compose.yml          # Multi-service orchestration
@@ -32,10 +65,8 @@ bukizz_node_server/
 ├── .env / .env.example         # Environment variables
 ├── nodemon.json                # Dev server config
 ├── postman.json                # Postman collection
-├── add_is_deleted_to_products.sql        # Migration: soft-delete for products
-├── add_otp_columns_to_users.sql          # Migration: OTP fields on users table
-├── add_product_attributes_to_categories.sql  # Migration: product_attributes JSONB on categories
-├── create_otp_verifications_table.sql    # Migration: otp_verifications table
+├── public/
+│   └── sitemap.xml             # Auto-generated sitemap (served statically)
 ├── scripts/
 │   ├── testCategoryApi.js      # Category API integration tests
 │   ├── testOrderApi.js         # Order API integration tests
@@ -43,7 +74,7 @@ bukizz_node_server/
 └── src/
     ├── app.js                  # Alternative entry (CJS, not actively used)
     ├── config/
-    │   ├── index.js            # Centralized config (env vars, CORS, JWT, DB, uploads)
+    │   ├── index.js            # Centralized config (env vars, CORS, JWT, DB, uploads, encryption)
     │   └── dependencies.js     # DI container factory (Repository→Service→Controller)
     ├── db/
     │   ├── index.js            # Supabase client init, query helpers, RPC helpers
@@ -52,15 +83,9 @@ bukizz_node_server/
     │   ├── sample_variant_data.sql
     │   ├── functions/
     │   │   └── create_comprehensive_product.sql  # RPC for atomic product creation
-    │   ├── emergency_order_tables_migration.sql   # Create order_events & order_queries
-    │   ├── migration_add_delivery_charge.sql      # Add delivery_charge to products
-    │   ├── migration_add_highlight_to_products.sql # Add highlight column to products
-    │   ├── migration_change_highlight_to_json.sql  # Change highlight TEXT → JSONB
-    │   ├── migration_add_image_to_option_values.sql # Add image_url to product_option_values
-    │   ├── migration_add_price_modifier.sql        # Add price_modifier to product_option_values
-    │   ├── migration_create_retailer_schools.sql   # Create retailer_schools table
-    │   ├── migration_fix_retailer_data_fkey.sql    # Fix retailer_data FK to public.users
-    │   └── migration_rename_retailer_to_warehouse_in_order_items.sql  # Rename retailer_id → warehouse_id
+    │   └── migrations (20 files)                 # See § Migration Summary
+    ├── jobs/
+    │   └── cronJobs.js         # Cron scheduler — daily sitemap generation + startup run
     ├── middleware/
     │   ├── index.js            # setupMiddleware() — helmet, cors, compression, rate limit
     │   ├── authMiddleware.js   # authenticateToken, optionalAuth, requireRoles, requireOwnership
@@ -69,51 +94,69 @@ bukizz_node_server/
     │   ├── upload.js           # Multer config (10MB, images only, memory storage)
     │   └── validator.js        # Joi validate() middleware, preprocessBody, sanitizeMiddleware
     ├── models/
-    │   └── schemas.js          # ALL Joi validation schemas (940 lines)
-    ├── controllers/            # Request handling layer — 13 controllers
+    │   └── schemas.js          # ALL Joi validation schemas (~1045 lines)
+    ├── templates/              # HTML email templates
+    │   ├── forgot-password.html
+    │   ├── order-confirmation-customer.html
+    │   ├── order-delivery-customer.html
+    │   └── order-notification-retailer.html
+    ├── controllers/            # Request handling layer — 17 controllers
     │   ├── authController.js
     │   ├── brandController.js
     │   ├── categoryController.js
+    │   ├── dashboardController.js          # Retailer dashboard aggregated overview
     │   ├── imageController.js
     │   ├── orderController.js
-    │   ├── paymentController.js
+    │   ├── paymentController.js            # Razorpay create/verify/webhook/reconcile + deferred emails
     │   ├── pincodeController.js
     │   ├── productController.js
-    │   ├── retailerController.js       # NEW — retailer onboarding & profile
-    │   ├── retailerSchoolController.js # NEW — retailer-school linking
+    │   ├── retailerBankAccountController.js # Bank account CRUD + Razorpay penny drop
+    │   ├── retailerController.js
+    │   ├── retailerOrderController.js      # Warehouse-scoped order management
+    │   ├── retailerSchoolController.js
     │   ├── schoolController.js
+    │   ├── settlementController.js         # Financial settlements, ledgers, payouts
     │   ├── userController.js
     │   └── warehouseController.js
-    ├── services/               # Business logic layer — 11 services
-    │   ├── authService.js      # Now includes OTP, retailer registration & verification
+    ├── services/               # Business logic layer — 15 services
+    │   ├── authService.js
     │   ├── categoryService.js
-    │   ├── emailService.js     # OTP email sending
+    │   ├── emailService.js                 # OTP, order confirmation, retailer notification, delivery, password reset
     │   ├── imageService.js
-    │   ├── orderService.js
+    │   ├── orderService.js                 # Commission tracking, deferred notifications, per-item cancellation
     │   ├── productService.js
-    │   ├── retailerService.js          # NEW — retailer profile management
-    │   ├── retailerSchoolService.js    # NEW — retailer-school link management
+    │   ├── razorpayVerificationService.js  # Bank account penny drop via Razorpay FAV API
+    │   ├── retailerBankAccountService.js   # Bank account business logic (AES encryption)
+    │   ├── retailerSchoolService.js
+    │   ├── retailerService.js
     │   ├── schoolService.js
+    │   ├── settlementService.js            # FIFO partial settlement algorithm
+    │   ├── smsService.js                   # MSG91 Flow API integration
     │   ├── userService.js
     │   └── warehouseService.js
-    ├── repositories/           # Data access layer — 16 repositories
+    ├── repositories/           # Data access layer — 21 repositories
     │   ├── brandRepository.js
     │   ├── categoryRepository.js
+    │   ├── ledgerRepository.js             # seller_ledgers CRUD, FIFO queries, dashboard summary
     │   ├── orderEventRepository.js
     │   ├── orderQueryRepository.js
     │   ├── orderRepository.js
-    │   ├── otpRepository.js            # NEW — OTP CRUD operations
+    │   ├── otpRepository.js
     │   ├── pincodeRepository.js
     │   ├── productImageRepository.js
     │   ├── productOptionRepository.js
+    │   ├── productPaymentMethodRepository.js # product_payment_methods CRUD
     │   ├── productRepository.js
     │   ├── productVariantRepository.js
-    │   ├── retailerRepository.js       # NEW — retailer_data CRUD
-    │   ├── retailerSchoolRepository.js # NEW — retailer_schools CRUD
+    │   ├── retailerBankAccountRepository.js  # retailer_bank_accounts CRUD
+    │   ├── retailerRepository.js
+    │   ├── retailerSchoolRepository.js
     │   ├── schoolRepository.js
+    │   ├── settlementRepository.js           # settlements & settlement_ledger_items, FIFO RPC
     │   ├── userRepository.js
+    │   ├── variantCommissionRepository.js    # variant_commissions CRUD (versioned, effective_from/to)
     │   └── warehouseRepository.js
-    ├── routes/                 # Route definitions — 14 files
+    ├── routes/                 # Route definitions — 17 files
     │   ├── index.js            # Master router — mounts all modules under /api/v1
     │   ├── authRoutes.js
     │   ├── brandRoutes.js
@@ -123,98 +166,59 @@ bukizz_node_server/
     │   ├── paymentRoutes.js
     │   ├── pincodeRoutes.js
     │   ├── productRoutes.js
-    │   ├── retailerRoutes.js           # NEW — /api/v1/retailer
-    │   ├── retailerSchoolRoutes.js     # NEW — /api/v1/retailer-schools
+    │   ├── retailerBankAccountRoutes.js     # /api/v1/retailer/bank-accounts
+    │   ├── retailerOrderRoutes.js           # /api/v1/retailer/orders
+    │   ├── retailerRoutes.js                # /api/v1/retailer
+    │   ├── retailerSchoolRoutes.js          # /api/v1/retailer-schools
     │   ├── schoolRoutes.js
+    │   ├── settlementRoutes.js              # /api/v1/settlements
     │   ├── userRoutes.js
     │   └── warehouseRoutes.js
     └── utils/
-        └── logger.js           # Winston logger, request logging middleware
+        ├── encryption.js       # AES-256-GCM encrypt/decrypt, maskAccountNumber
+        ├── logger.js           # Winston logger, request logging middleware
+        └── sitemapGenerator.js # Dynamic XML sitemap from DB (products, schools, categories)
 ```
 
 ---
 
-## 3. Architecture Pattern
+## 4. Architecture Pattern
 
-```
-┌──────────────────────────────────────────────────────┐
-│                     index.js                         │
-│                  (Entry Point)                       │
-│  ┌────────────────────────────────────────────────┐  │
-│  │  1. dotenv → env vars                         │  │
-│  │  2. connectDB() → Supabase client             │  │
-│  │  3. Instantiate Repos → Services → Controllers│  │
-│  │  4. Create DI container                       │  │
-│  │  5. setupRoutes(app, dependencies)            │  │
-│  │  6. app.listen(PORT)                          │  │
-│  └────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────┘
-                         │
-         ┌───────────────┼───────────────┐
-         ▼               ▼               ▼
-   ┌──────────┐   ┌──────────┐   ┌──────────┐
-   │  Routes  │   │Middleware│   │  Config   │
-   │ (Router  │   │  Chain   │   │+ DB Init  │
-   │ factories│   │          │   │           │
-   │  w/ DI)  │   │          │   │           │
-   └────┬─────┘   └──────────┘   └──────────┘
-        │
-        ▼
-   ┌──────────────┐
-   │ Controllers  │  ← Handles HTTP req/res
-   │              │
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │  Services    │  ← Business logic, validation, orchestration
-   │              │
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │ Repositories │  ← Data access via Supabase client
-   │              │
-   └──────┬───────┘
-          │
-          ▼
-   ┌──────────────┐
-   │  Supabase    │  ← PostgreSQL (hosted)
-   │  Database    │
-   └──────────────┘
+```mermaid
+graph TD
+    subgraph Boot [index.js - Entry Point]
+        A[Load dotenv] --> B[connectDB via Supabase]
+        B --> C[Instantiate Repositories]
+        C --> D[Instantiate Services]
+        D --> E[Instantiate Controllers]
+        E --> F[Create DI Container]
+        F --> G[setupRoutes]
+        G --> H[app.listen]
+    end
+
+    subgraph Pipeline [Request Handling]
+        Req[Incoming HTTP Request] --> M1[Helmet & CORS]
+        M1 --> M2[Rate Limiter 1000/15m]
+        M2 --> M3[Body Parser JSON/URLEncoded]
+        M3 --> Auth{Auth Middleware?}
+        Auth -- Yes --> AuthVerify[Verify JWT & Roles]
+        Auth -- No --> Val
+        AuthVerify --> Val{Joi Validation?}
+        Val -- Yes --> Schema[Validate params/body/query]
+        Val -- No --> Exec
+        Schema --> Exec
+    end
+
+    subgraph Business [Application Logic]
+        Exec[Controller layer] --> Srv[Service layer]
+        Srv --> Repo[Repository layer]
+        Repo --> DB[(Supabase PostgreSQL)]
+    end
+
+    Boot --> Req
 ```
 
 ### Dependency Injection Pattern
-Routes are **factory functions** that receive a `dependencies` object containing controllers, services, and repositories. Some newer modules (retailer, retailerSchool, warehouse, image) use **direct imports** instead of DI.
-
-```javascript
-// DI-based routes (authRoutes, userRoutes, productRoutes, schoolRoutes, orderRoutes, categoryRoutes, etc.)
-app.use(`${apiV1}/auth`, authRoutes(dependencies));
-
-// Direct-import routes (retailerRoutes, retailerSchoolRoutes, warehouseRoutes, imageRoutes)
-app.use(`${apiV1}/retailer`, retailerRoutes);
-app.use(`${apiV1}/retailer-schools`, retailerSchoolRoutes);
-app.use(`${apiV1}/warehouses`, warehouseRoutes);
-app.use(`${apiV1}/images`, imageRoutes);
-```
-
----
-
-## 4. Middleware Pipeline
-
-Every request flows through:
-
-```
-Request → Helmet → CORS → Rate Limiter → Body Parser → [Route-specific middleware] → Controller → Response
-                                                             │
-                                                    ┌────────┴────────┐
-                                                    │  authenticateToken  │ ← JWT verification
-                                                    │  requireRoles()     │ ← Role-based access
-                                                    │  requireOwnership() │ ← Resource ownership
-                                                    │  validate()         │ ← Joi schema validation
-                                                    │  upload.single()    │ ← File upload (Multer)
-                                                    └─────────────────────┘
-```
 
 ### Auth Middleware Details
 
@@ -227,8 +231,17 @@ Request → Helmet → CORS → Rate Limiter → Body Parser → [Route-specific
 | `requireVerification` | Blocks users with unverified emails |
 | `requireActiveUser` | Blocks deactivated accounts |
 
+### Rate Limiting
+
+| Context | Window | Max Requests |
+|---|---|---|
+| **Global** | 15 min | 1000 |
+| **Order creation** | 15 min | 20 |
+| **Order queries** | 1 min | 60 |
+| **Retailer order queries** | 1 min | 60 |
+
 ### Validation Middleware
-- Uses **Joi** schemas from `src/models/schemas.js` (940 lines)
+- Uses **Joi** schemas from `src/models/schemas.js` (~1045 lines)
 - `validate(schema, property)` — validates `req.body`, `req.query`, `req.params`, or `req.headers`
 - Auto-preprocesses JSON strings from FormData submissions
 - Strips unknown fields, converts types, reports all errors
@@ -243,30 +256,30 @@ All routes are mounted under **`/api/v1`**.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/register` | ❌ | Register new customer (email, password, fullName) |
-| POST | `/login` | ❌ | Login with email/password (supports `loginAs: customer/retailer/admin`) |
-| POST | `/login-retailer` | ❌ | Login specifically as retailer (email, password) |
-| POST | `/register-retailer` | ❌ | Register new retailer (fullName, email, password, phone) — account created as inactive/unauthorized |
-| POST | `/send-otp` | ❌ | Send OTP to email for customer registration |
-| POST | `/verify-otp` | ❌ | Verify OTP and complete customer registration |
-| POST | `/send-retailer-otp` | ❌ | Send OTP for retailer registration (email, fullName, password, phone) |
-| POST | `/verify-retailer-otp` | ❌ | Verify retailer OTP, create inactive retailer account |
+| POST | `/register` | ❌ | Register new customer |
+| POST | `/login` | ❌ | Login (supports `loginAs: customer/retailer/admin`) |
+| POST | `/login-retailer` | ❌ | Login as retailer |
+| POST | `/register-retailer` | ❌ | Register retailer (inactive/unauthorized) |
+| POST | `/send-otp` | ❌ | Send OTP for customer registration |
+| POST | `/verify-otp` | ❌ | Verify OTP, complete customer registration |
+| POST | `/send-retailer-otp` | ❌ | Send OTP for retailer registration |
+| POST | `/verify-retailer-otp` | ❌ | Verify retailer OTP, create inactive account |
 | POST | `/refresh-token` | ❌ | Refresh JWT token |
 | POST | `/forgot-password` | ❌ | Request password reset email |
 | POST | `/reset-password` | ❌ | Reset password with token |
-| POST | `/google-login` | ❌ | Google OAuth login (Supabase Auth token from client) |
-| POST | `/verify-token` | ❌ | Verify if a JWT token is valid |
-| PUT | `/verify-retailer` | ✅ | Admin action: authorize/deauthorize a retailer (body: `{retailerId, action}`) |
-| GET | `/me` | ✅ | Get current user's profile |
+| POST | `/google-login` | ❌ | Google OAuth login |
+| POST | `/verify-token` | ❌ | Check if JWT is valid |
+| PUT | `/verify-retailer` | ✅ | Admin: authorize/deauthorize retailer |
+| GET | `/me` | ✅ | Get current user profile |
 | POST | `/logout` | ✅ | Logout (revoke refresh tokens) |
 
 #### OTP Registration Flow (Customer)
-1. `POST /send-otp` → sends 6-digit OTP to email, stores hashed password + fullName in `otp_verifications` table
-2. `POST /verify-otp` → verifies OTP (10 min expiry), creates user + user_auth records, returns tokens
+1. `POST /send-otp` → 6-digit OTP to email, stores hashed password + fullName in `otp_verifications` table
+2. `POST /verify-otp` → verifies OTP (10 min expiry), creates user + user_auth, returns tokens
 
 #### OTP Registration Flow (Retailer)
-1. `POST /send-retailer-otp` → sends 6-digit OTP, stores metadata (fullName, passwordHash, phone, role)
-2. `POST /verify-retailer-otp` → verifies OTP, creates user with `is_active=false`, `role='retailer'`, `deactivation_reason='unauthorized'`, returns tokens for onboarding access
+1. `POST /send-retailer-otp` → OTP + metadata (fullName, passwordHash, phone, role)
+2. `POST /verify-retailer-otp` → creates user with `is_active=false`, `deactivation_reason='unauthorized'`
 3. Admin uses `PUT /verify-retailer` with `{retailerId, action: 'authorize'}` to activate
 
 #### Retailer Authorization States
@@ -286,7 +299,7 @@ All routes are mounted under **`/api/v1`**.
 | GET | `/profile` | ✅ | Any | Get own profile |
 | PUT | `/profile` | ✅ | Any | Update own profile |
 | GET | `/addresses` | ✅ | Any | List saved addresses |
-| POST | `/addresses` | ✅ | Any | Add new address |
+| POST | `/addresses` | ✅ | Any | Add new address (supports `studentName`) |
 | PUT | `/addresses/:addressId` | ✅ | Any | Update address |
 | DELETE | `/addresses/:addressId` | ✅ | Any | Delete address |
 | GET | `/preferences` | ✅ | Any | Get user preferences |
@@ -295,13 +308,13 @@ All routes are mounted under **`/api/v1`**.
 | DELETE | `/account` | ✅ | Any | Deactivate own account |
 | POST | `/verify-email` | ✅ | Any | Send verification email |
 | POST | `/verify-phone` | ✅ | Any | Verify phone number |
-| **Admin Routes** | | | | |
-| GET | `/admin/search` | ✅ | Admin | Search all users |
+| **Admin** | | | | |
+| GET | `/admin/search` | ✅ | Admin | Search users |
 | GET | `/admin/export` | ✅ | Admin | Export user data |
 | GET | `/admin/:userId` | ✅ | Admin | Get user by ID |
-| PUT | `/admin/:userId` | ✅ | Admin | Update user (admin) |
+| PUT | `/admin/:userId` | ✅ | Admin | Update user |
 | PUT | `/admin/:userId/role` | ✅ | Admin | Change user role |
-| POST | `/admin/:userId/reactivate` | ✅ | Admin | Reactivate deactivated account |
+| POST | `/admin/:userId/reactivate` | ✅ | Admin | Reactivate account |
 
 ---
 
@@ -312,41 +325,41 @@ All routes are mounted under **`/api/v1`**.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/` | Search/list products (paginated, filtered) |
-| GET | `/retailer-search` | Search products by retailer name |
+| GET | `/retailer-search` | Search by retailer name |
 | GET | `/featured` | Get featured products |
-| GET | `/stats` | Get product statistics |
+| GET | `/stats` | Product statistics |
 | GET | `/variants/search` | Search across all variants |
 | GET | `/variants/:variantId` | Get variant by ID |
-| GET | `/category/:categorySlug` | Get products by category slug |
-| GET | `/brand/:brandId` | Get products by brand |
-| GET | `/type/:productType` | Get products by type (bookset/uniform/stationary/general) |
-| GET | `/school/:schoolId` | Get products for a school |
-| GET | `/:id` | Get product by ID |
-| GET | `/:id/complete` | Get product with all details (images, brands, retailer) |
-| GET | `/:id/analytics` | Get product analytics |
-| GET | `/:id/availability` | Check stock availability |
-| GET | `/:id/options` | Get product option attributes |
-| GET | `/:id/variants` | Get all variants for a product |
-| GET | `/:id/images` | Get product images |
-| GET | `/variants/:variantId/images` | Get variant-specific images |
-| GET | `/:id/brands` | Get brands associated with product |
+| GET | `/category/:categorySlug` | Products by category slug |
+| GET | `/brand/:brandId` | Products by brand |
+| GET | `/type/:productType` | Products by type |
+| GET | `/school/:schoolId` | Products for a school |
+| GET | `/:id` | Product by ID |
+| GET | `/:id/complete` | Product with all details |
+| GET | `/:id/analytics` | Product analytics |
+| GET | `/:id/availability` | Stock availability |
+| GET | `/:id/options` | Product option attributes |
+| GET | `/:id/variants` | All variants |
+| GET | `/:id/images` | Product images |
+| GET | `/variants/:variantId/images` | Variant-specific images |
+| GET | `/:id/brands` | Associated brands |
 
 **Protected Routes (Auth Required):**
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/warehouse` | Get products for a warehouse (Retailer Dashboard). Requires `x-warehouse-id` header |
+| GET | `/warehouse` | Products for warehouse (requires `x-warehouse-id` header) |
 | GET | `/admin/search` | Admin product search (includes deleted/inactive) |
-| POST | `/` | Create product |
-| POST | `/comprehensive` | Create product with all related data atomically (via RPC) |
+| POST | `/` | Create product (with `paymentMethods` array) |
+| POST | `/comprehensive` | Create product atomically via RPC |
 | PUT | `/:id` | Update product |
-| PUT | `/:id/comprehensive` | Update product with all related data atomically |
-| DELETE | `/:id` | Soft delete product (`is_deleted = true`) |
+| PUT | `/:id/comprehensive` | Update product atomically |
+| DELETE | `/:id` | Soft delete (`is_deleted = true`) |
 | PATCH | `/:id/activate` | Re-activate product |
-| PUT | `/bulk-update` | Bulk update multiple products |
+| PUT | `/bulk-update` | Bulk update products |
 | **Options** | | |
-| POST | `/:id/options` | Add option attribute (e.g., "Size", "Color") |
-| POST | `/options/:attributeId/values` | Add option value (e.g., "XL", "Red") |
+| POST | `/:id/options` | Add option attribute |
+| POST | `/options/:attributeId/values` | Add option value |
 | PUT | `/options/:attributeId` | Update option attribute |
 | PUT | `/options/values/:valueId` | Update option value |
 | DELETE | `/options/:attributeId` | Delete option attribute |
@@ -358,15 +371,15 @@ All routes are mounted under **`/api/v1`**.
 | PATCH | `/variants/:variantId/stock` | Update variant stock |
 | PUT | `/variants/bulk-stock-update` | Bulk update stocks |
 | **Images** | | |
-| POST | `/:id/images` | Add image (file upload or URL) |
+| POST | `/:id/images` | Add image |
 | POST | `/:id/images/bulk` | Add multiple images |
 | PUT | `/images/:imageId` | Update image |
 | DELETE | `/images/:imageId` | Delete image |
 | PATCH | `/:id/images/:imageId/primary` | Set primary image |
-| POST | `/:id/variants/images/bulk` | Bulk upload variant images |
+| POST | `/:id/variants/images/bulk` | Bulk variant images |
 | **Brands** | | |
 | POST | `/:id/brands` | Associate brand |
-| DELETE | `/:id/brands/:brandId` | Remove brand association |
+| DELETE | `/:id/brands/:brandId` | Remove association |
 | **Retailer** | | |
 | POST | `/:id/retailer` | Add retailer details |
 | PUT | `/:id/retailer` | Update retailer details |
@@ -378,13 +391,11 @@ All routes are mounted under **`/api/v1`**.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/` | ❌ | Search/list categories (supports parentId, rootOnly) |
+| GET | `/` | ❌ | List categories (supports parentId, rootOnly, schoolCat) |
 | GET | `/:id` | ❌ | Get category by ID |
-| POST | `/` | ✅ | Create category (with image upload) |
-| PUT | `/:id` | ✅ | Update category (with image upload) |
+| POST | `/` | ✅ | Create category (with image) |
+| PUT | `/:id` | ✅ | Update category |
 | DELETE | `/:id` | ✅ | Delete category |
-
-Categories support **hierarchical structure** via `parentId` and `productAttributes` (JSONB — array of attribute objects defining what attributes products in this category should have).
 
 ---
 
@@ -392,7 +403,7 @@ Categories support **hierarchical structure** via `parentId` and `productAttribu
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/` | ❌ | Search/list brands |
+| GET | `/` | ❌ | List brands |
 | GET | `/:id` | ❌ | Get brand by ID |
 | POST | `/` | ✅ | Create brand |
 | PUT | `/:id` | ✅ | Update brand |
@@ -406,10 +417,10 @@ Categories support **hierarchical structure** via `parentId` and `productAttribu
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/` | Search schools (city, state, type, board filters) |
+| GET | `/` | Search schools (city, state, type, board) |
 | GET | `/stats` | School statistics |
 | GET | `/popular` | Popular schools |
-| GET | `/nearby` | Nearby schools (lat/lng/radius geolocation) |
+| GET | `/nearby` | Nearby schools (lat/lng/radius) |
 | POST | `/validate` | Validate school data |
 | GET | `/city/:city` | Schools by city |
 | GET | `/:id` | Get school by ID |
@@ -420,56 +431,57 @@ Categories support **hierarchical structure** via `parentId` and `productAttribu
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/` | Create school (with image upload) |
-| PUT | `/:id` | Update school (with image upload) |
-| DELETE | `/:id` | Deactivate school (soft delete) |
+| POST | `/` | Create school (with image) |
+| PUT | `/:id` | Update school |
+| DELETE | `/:id` | Soft delete school |
 | PATCH | `/:id/reactivate` | Reactivate school |
-| POST | `/bulk-import` | Bulk import from CSV |
+| POST | `/bulk-import` | Bulk import (CSV) |
 | POST | `/upload-image` | Upload school image |
-| POST | `/:schoolId/products/:productId` | Associate product with school (grade + mandatory) |
+| POST | `/:schoolId/products/:productId` | Associate product (grade + mandatory) |
 | PUT | `/:schoolId/products/:productId/:grade` | Update association |
 | DELETE | `/:schoolId/products/:productId` | Remove association |
-| POST | `/:id/partnerships` | Create school partnership |
+| POST | `/:id/partnerships` | Create partnership |
 
 ---
 
 ### 5.7 Order Routes — `/api/v1/orders`
 
-All order routes require authentication (`authenticateToken` applied globally).
+All routes require authentication.
 
 **Customer Endpoints:**
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/` | Place a new order |
+| POST | `/` | Place order |
 | POST | `/place` | Place order (alias) |
-| POST | `/calculate-summary` | Calculate order preview/summary for cart |
-| GET | `/my-orders` | Get current user's orders |
-| GET | `/:orderId` | Get order details |
-| GET | `/:orderId/track` | Track order status/location |
+| POST | `/calculate-summary` | Calculate order preview for cart |
+| GET | `/my-orders` | Current user's orders |
+| GET | `/:orderId` | Order details |
+| GET | `/:orderId/track` | Track order status |
 | PUT | `/:orderId/cancel` | Cancel order |
 | PUT | `/:orderId/items/:itemId/cancel` | Cancel specific item |
 | POST | `/:orderId/queries` | Create support ticket |
-| GET | `/:orderId/queries` | Get order support tickets |
+| GET | `/:orderId/queries` | Get support tickets |
 
 **Admin/Retailer Endpoints:**
 
 | Method | Path | Roles | Description |
 |---|---|---|---|
-| GET | `/admin/search` | admin, retailer | Search/filter all orders |
+| GET | `/warehouse/items/:itemId` | admin, retailer | Get single order item for warehouse |
+| GET | `/admin/search` | admin, retailer | Search/filter orders |
 | GET | `/admin/status/:status` | admin, retailer | Orders by status |
 | PUT | `/:orderId/status` | admin, retailer | Update order status |
 | PUT | `/:orderId/items/:itemId/status` | admin, retailer | Update item status |
 | PUT | `/:orderId/payment` | admin, system | Update payment status |
 | PUT | `/admin/bulk-update` | admin | Bulk update orders |
-| GET | `/admin/export` | admin | Export orders data |
-| GET | `/admin/statistics` | admin, retailer | Order statistics/analytics |
+| GET | `/admin/export` | admin | Export orders |
+| GET | `/admin/statistics` | admin, retailer | Order statistics |
 
 **Order Status Flow:** `initialized → processed → shipped → out_for_delivery → delivered`
-**Cancellation:** `cancelled`, `refunded`
+**Additional Statuses:** `cancelled`, `refunded`, `returned`
 **Payment Statuses:** `pending`, `paid`, `failed`, `refunded`
 
-Rate limiting: 20 order creations per 15min, 60 queries per minute.
+**Order-specific error codes:** `INSUFFICIENT_STOCK` (409), `INVALID_ADDRESS` (400), `PAYMENT_FAILED` (402)
 
 ---
 
@@ -480,84 +492,190 @@ Rate limiting: 20 order creations per 15min, 60 queries per minute.
 | POST | `/webhook` | ❌ | Razorpay webhook (signature verified internally) |
 | POST | `/create-order` | ✅ | Create Razorpay payment order |
 | POST | `/verify` | ✅ | Verify Razorpay payment signature |
+| POST | `/reconcile` | ✅ | Reconcile payment (if verify fails but money deducted) |
 | POST | `/failure` | ✅ | Log payment failure |
+
+#### Payment Flow with Deferred Notifications
+1. Customer places order → order created with `payment_status: 'pending'` → **no confirmation email yet**
+2. Razorpay payment → `POST /verify` or webhook → payment marked as `'paid'`
+3. Only after payment success → `_triggerDeferredNotifications(orderId)` sends:
+   - Order confirmation email to customer
+   - Order notification email to each retailer (their items only)
+   - SMS notifications (if configured)
+4. Ledger entries created for settlements (ORDER_REVENUE + PLATFORM_FEE per item)
 
 ---
 
 ### 5.9 Warehouse Routes — `/api/v1/warehouses`
 
-All routes require auth. Role-based restrictions are enforced in controllers.
-
 | Method | Path | Role | Description |
 |---|---|---|---|
 | POST | `/` | retailer, admin | Add warehouse |
-| POST | `/admin` | admin | Add warehouse for a retailer (body includes `retailerId`) |
-| GET | `/` | retailer, admin | Get my warehouses (by authenticated user ID) |
+| POST | `/admin` | admin | Add warehouse for retailer |
+| GET | `/` | retailer, admin | Get my warehouses |
 | GET | `/:id` | retailer, admin | Get warehouse by ID |
-| GET | `/retailer/:retailerId` | admin | Get warehouses for a specific retailer |
+| GET | `/retailer/:retailerId` | admin | Get warehouses for retailer |
 | PUT | `/:id` | retailer | Update own warehouse |
-| PUT | `/admin/:id` | admin | Update any warehouse (admin) |
+| PUT | `/admin/:id` | admin | Update any warehouse |
 | DELETE | `/:id` | retailer | Delete own warehouse |
-| DELETE | `/admin/:id` | admin | Delete any warehouse (admin) |
+| DELETE | `/admin/:id` | admin | Delete any warehouse |
 
 ---
 
-### 5.10 Retailer Routes — `/api/v1/retailer` (NEW)
-
-Routes for retailer profile management and onboarding.
+### 5.10 Retailer Routes — `/api/v1/retailer`
 
 | Method | Path | Auth | Role | Description |
 |---|---|---|---|---|
-| POST | `/data` | ✅ | retailer | Create/update retailer profile with signature upload (displayName, ownerName, gstin, pan, signature file) |
+| POST | `/data` | ✅ | retailer | Create/update profile (displayName, ownerName, gstin, pan, signature file) |
 | GET | `/data` | ✅ | Any | Get retailer profile |
-| GET | `/data/status` | ✅ | Any | Check if retailer profile is complete (returns missing fields list) |
-| GET | `/verification-status` | ✅ | Any | Check retailer verification/authorization status |
-
-#### Retailer Onboarding Flow
-1. Retailer registers via `/auth/send-retailer-otp` → `/auth/verify-retailer-otp`
-2. Account created as `is_active=false`, `deactivation_reason='unauthorized'`
-3. Retailer submits profile data via `POST /retailer/data` (displayName, ownerName, GSTIN, PAN, signature image)
-4. Admin authorizes via `PUT /auth/verify-retailer` → sets `is_active=true`, `deactivation_reason='authorized'`
+| GET | `/data/status` | ✅ | Any | Check profile completeness |
+| GET | `/verification-status` | ✅ | Any | Check authorization status |
 
 ---
 
-### 5.11 Retailer-School Routes — `/api/v1/retailer-schools` (NEW)
+### 5.11 Retailer Bank Account Routes — `/api/v1/retailer/bank-accounts`
 
-All routes require authentication. Manages the many-to-many relationship between retailers and schools.
+All routes require auth + retailer role.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/link` | Link a retailer to a school (body: `{schoolId, retailerId?, status?, productType?}`) |
-| GET | `/connected-schools` | Get all schools connected to authenticated retailer |
-| GET | `/connected-schools/:retailerId` | Get all schools connected to a specific retailer |
-| GET | `/connected-retailers/:schoolId` | Get all retailers connected to a school |
-| PATCH | `/status` | Update link status (body: `{retailerId?, schoolId, currentStatus, newStatus}`) |
-| PATCH | `/product-type` | Update product types for a link (body: `{retailerId?, schoolId, status, productType}`) |
-| DELETE | `/` | Remove a retailer-school link (body: `{retailerId?, schoolId, status}`) |
+| POST | `/verify` | Verify bank account via Razorpay penny drop |
+| GET | `/` | List all bank accounts (decrypted) |
+| POST | `/` | Add new bank account (AES-256 encrypted storage) |
+| PUT | `/:id` | Update bank account |
+| DELETE | `/:id` | Delete bank account |
+| PATCH | `/:id/set-primary` | Set as primary (unique constraint enforced) |
+
+#### Bank Account Security
+- Account numbers stored **AES-256-GCM encrypted** (`account_number_encrypted` column)
+- Masked version stored for display (`account_number_masked`: `XXXX XXXX 1234`)
+- Decryption only happens when returning data to the authenticated retailer
+- Razorpay penny drop creates Contact → Fund Account → FAV validation (₹1 test transfer)
+
+---
+
+### 5.12 Retailer Order Routes — `/api/v1/retailer/orders`
+
+All routes require auth + retailer/admin role. Rate limited: 60 req/min.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/stats` | Aggregated stats across all warehouses |
+| GET | `/warehouse/:warehouseId/stats` | Stats for specific warehouse |
+| GET | `/warehouse/:warehouseId/status/:status` | Orders by status for warehouse |
+| GET | `/warehouse/:warehouseId` | All orders for warehouse (with filters) |
+| PUT | `/:orderId/items/:itemId/status` | Update order item status |
+| PUT | `/:orderId/status` | Update order status |
+| GET | `/:orderId` | Order detail (filtered to retailer's items) |
+| GET | `/` | All orders across all warehouses |
+
+Orders are **bifurcated** — retailers only see items belonging to their warehouses, not the full order.
+
+---
+
+### 5.13 Retailer-School Routes — `/api/v1/retailer-schools`
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/link` | Link retailer to school |
+| GET | `/connected-schools` | Schools connected to authenticated retailer |
+| GET | `/connected-schools/:retailerId` | Schools for specific retailer |
+| GET | `/connected-retailers/:schoolId` | Retailers connected to school |
+| PATCH | `/status` | Update link status |
+| PATCH | `/product-type` | Update product types |
+| DELETE | `/` | Remove link |
 
 **Link Statuses:** `approved`, `pending`, `rejected`
 
-> Note: Status is part of the composite primary key `(retailer_id, school_id, status)`, so status updates require delete + re-insert.
-
 ---
 
-### 5.12 Pincode Routes — `/api/v1/pincodes`
+### 5.14 Settlement Routes — `/api/v1/settlements`
 
-| Method | Path | Auth | Description |
+All routes require authentication. Financial settlement management system.
+
+**Shared (Admin + Retailer):**
+
+| Method | Path | Roles | Description |
 |---|---|---|---|
-| GET | `/check/:pincode` | ❌ | Check delivery availability for a pincode |
+| GET | `/summary` | admin, retailer | Dashboard summary (requires `x-warehouse-id` header) |
+| GET | `/ledgers` | admin, retailer | Ledger history (paginated, filtered) |
+| GET | `/` | admin, retailer | Settlement/payout history |
 
----
-
-### 5.13 Image Routes — `/api/v1/images`
-
-All routes require authentication.
+**Admin Only:**
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/upload` | Upload image (file upload) |
-| DELETE | `/delete` | Delete image |
-| PUT | `/replace` | Replace existing image |
+| POST | `/adjustments` | Record manual credit/debit on ledger |
+| POST | `/execute` | Execute FIFO settlement payout |
+| GET | `/admin/retailers/:retailerId/summary` | Full financial summary for retailer |
+| GET | `/admin/retailers/:retailerId/ledgers/unsettled` | All unsettled ledger rows (FIFO order) |
+| GET | `/admin/retailers/:retailerId/history` | Full payout history |
+| POST | `/admin/execute` | Execute FIFO payout (flexible payment mode) |
+
+**Retailer Only:**
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/retailer/ledgers` | Dashboard ledgers (Tab 1 & 2) |
+| GET | `/retailer/history` | Payout history list (Tab 3) |
+| GET | `/retailer/history/:settlementId` | Settlement detail breakdown |
+
+#### Settlement Architecture (FIFO Partial Settlement)
+
+```
+Order Delivered → PaymentController._triggerDeferredNotifications()
+    → OrderService creates ledger entries:
+        1. ORDER_REVENUE (CREDIT) — retailer's share of the item price
+        2. PLATFORM_FEE (DEBIT) — Bukizz platform commission
+
+    → Ledger entry lifecycle:
+        ON_HOLD → PENDING → AVAILABLE → PARTIALLY_SETTLED → SETTLED
+
+Admin initiates payout:
+    → SettlementService.executeSettlement({ retailerId, amount, paymentMode })
+    → FIFO algorithm walks AVAILABLE + PARTIALLY_SETTLED entries oldest→newest
+    → Consumes amounts until payout is fulfilled
+    → Creates settlement record + settlement_ledger_items mapping
+    → Updates ledger entry statuses atomically via RPC
+```
+
+**Ledger Transaction Types:** `ORDER_REVENUE`, `PLATFORM_FEE`, `REFUND_CLAWBACK`, `MANUAL_ADJUSTMENT`
+**Ledger Entry Types:** `CREDIT`, `DEBIT`
+**Ledger Statuses:** `ON_HOLD`, `PENDING`, `AVAILABLE`, `PARTIALLY_SETTLED`, `SETTLED`
+**Settlement Statuses:** `COMPLETED`, `FAILED`
+**Payment Modes:** `MANUAL_BANK_TRANSFER`, `CASH`, `NEFT`, `UPI` (admin can use any)
+
+---
+
+### 5.15 Dashboard Route — `/api/v1/retailer/orders` (via DashboardController)
+
+The `DashboardController` provides a single aggregated overview endpoint for the retailer dashboard:
+
+| Metric | Source |
+|---|---|
+| Total Sales | `seller_ledgers` table — SUM of ORDER_REVENUE amounts |
+| Active Orders | Orders with items NOT in terminal state (delivered/cancelled) |
+| Low Stock Variants | Variant count with stock < 10 across retailer's warehouses |
+| School Counts | Approved + Pending school links |
+| Recent Orders | 5 most recent orders across all warehouses |
+
+---
+
+### 5.16 Pincode Routes — `/api/v1/pincodes`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/check/:pincode` | ❌ | Check delivery availability |
+
+---
+
+### 5.17 Image Routes — `/api/v1/images`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/upload` | ✅ | Upload image |
+| DELETE | `/delete` | ✅ | Delete image |
+| PUT | `/replace` | ✅ | Replace image |
 
 ---
 
@@ -566,14 +684,12 @@ All routes require authentication.
 ### 6.1 Custom Types (ENUMs)
 
 ```sql
-CREATE TYPE order_status AS ENUM ('initialized', 'processed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'refunded');
+CREATE TYPE order_status AS ENUM ('initialized', 'processed', 'shipped', 'out_for_delivery', 'delivered', 'cancelled', 'refunded', 'returned');
 CREATE TYPE payment_status AS ENUM ('pending', 'paid', 'failed', 'refunded');
 CREATE TYPE product_type AS ENUM ('bookset', 'uniform', 'stationary', 'general');
 CREATE TYPE auth_provider AS ENUM ('email', 'google');
 CREATE TYPE query_status AS ENUM ('open', 'pending', 'resolved', 'closed');
 ```
-
-> Note: The Joi schemas also accept `'school'` as a product type (used in app logic), but the DB ENUM only has 4 values.
 
 ### 6.2 Tables
 
@@ -595,13 +711,9 @@ CREATE TYPE query_status AS ENUM ('open', 'pending', 'resolved', 'closed');
 | is_active | BOOLEAN | Default TRUE. Retailers start as FALSE |
 | last_login_at | TIMESTAMPTZ | |
 | deactivated_at | TIMESTAMPTZ | |
-| deactivation_reason | TEXT | For retailers: `'unauthorized'` (pending) / `'authorized'` (verified) |
+| deactivation_reason | TEXT | For retailers: `'unauthorized'`/`'authorized'` |
 | metadata | JSONB | |
-| created_at | TIMESTAMPTZ | NOT NULL, Default NOW() |
-| updated_at | TIMESTAMPTZ | NOT NULL, Default NOW() (auto-updated via trigger) |
-| otp | VARCHAR(6) | (Added via migration — legacy, replaced by otp_verifications table) |
-| otp_created_at | TIMESTAMPTZ | (Added via migration — legacy) |
-| is_verified | BOOLEAN | Default FALSE (Added via migration — legacy) |
+| created_at / updated_at | TIMESTAMPTZ | Auto-updated via trigger |
 
 #### `user_auths`
 | Column | Type | Notes |
@@ -612,7 +724,6 @@ CREATE TYPE query_status AS ENUM ('open', 'pending', 'resolved', 'closed');
 | provider_user_id | VARCHAR(255) | NOT NULL |
 | password_hash | VARCHAR(512) | NULL for Google auth |
 | provider_data | JSONB | |
-| created_at | TIMESTAMPTZ | |
 | UNIQUE | (provider, provider_user_id) | |
 
 #### `refresh_tokens`
@@ -620,10 +731,9 @@ CREATE TYPE query_status AS ENUM ('open', 'pending', 'resolved', 'closed');
 |---|---|---|
 | id | UUID PK | |
 | user_id | UUID FK→users | ON DELETE CASCADE |
-| token_hash | VARCHAR(512) | SHA-256 hash of refresh token |
+| token_hash | VARCHAR(512) | SHA-256 hash |
 | device_info | VARCHAR(255) | |
-| expires_at | TIMESTAMPTZ | |
-| created_at | TIMESTAMPTZ | |
+| expires_at / created_at | TIMESTAMPTZ | |
 | revoked_at | TIMESTAMPTZ | NULL = active |
 
 #### `password_resets`
@@ -633,33 +743,32 @@ CREATE TYPE query_status AS ENUM ('open', 'pending', 'resolved', 'closed');
 | user_id | UUID FK→users | ON DELETE CASCADE |
 | token_hash | VARCHAR(512) | |
 | expires_at | TIMESTAMPTZ | 1 hour expiry |
-| created_at | TIMESTAMPTZ | |
 | used_at | TIMESTAMPTZ | NULL = unused |
 
-#### `otp_verifications` (NEW)
+#### `otp_verifications`
 | Column | Type | Notes |
 |---|---|---|
-| email | TEXT PK | Primary key — one OTP per email |
-| otp | TEXT | 6-digit OTP code |
-| created_at | TIMESTAMPTZ | Default NOW(). OTP expires after 10 minutes (app logic) |
-| metadata | JSONB | Stores `{fullName, passwordHash, phone?, role?}` for registration |
+| email | TEXT PK | One OTP per email |
+| otp | TEXT | 6-digit code |
+| created_at | TIMESTAMPTZ | 10 min expiry (app logic) |
+| metadata | JSONB | `{fullName, passwordHash, phone?, role?}` |
 
 #### `addresses`
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
 | user_id | UUID FK→users | ON DELETE CASCADE |
-| label | VARCHAR(50) | e.g., "Home", "Work" |
+| label | VARCHAR(50) | "Home", "Work" |
+| student_name | VARCHAR(255) | Student's name (added via migration) |
 | recipient_name | VARCHAR(255) | |
 | phone | VARCHAR(50) | |
-| line1, line2 | VARCHAR(255) | |
-| city, state | VARCHAR(100) | |
+| line1, line2, city, state | VARCHAR | |
 | postal_code | VARCHAR(30) | |
 | country | VARCHAR(100) | |
-| is_default | BOOLEAN | Default FALSE |
+| is_default | BOOLEAN | |
 | lat, lng | DOUBLE PRECISION | Geolocation |
-| is_active | BOOLEAN | Default TRUE |
-| created_at | TIMESTAMPTZ | |
+| landmark, neighborhood, district | VARCHAR(255) | |
+| is_active | BOOLEAN | |
 
 #### `schools`
 | Column | Type | Notes |
@@ -668,334 +777,287 @@ CREATE TYPE query_status AS ENUM ('open', 'pending', 'resolved', 'closed');
 | name | VARCHAR(255) | NOT NULL |
 | board | VARCHAR(100) | CBSE, ICSE, State Board, IB, IGCSE |
 | address | JSONB | `{line1, line2}` |
-| city | VARCHAR(100) | |
-| state | VARCHAR(100) | |
+| city, state | VARCHAR(100) | |
 | postal_code | VARCHAR(30) | |
 | contact | JSONB | `{phone, email, website}` |
-| is_active | BOOLEAN | Default TRUE |
-| created_at | TIMESTAMPTZ | |
+| is_active | BOOLEAN | |
 
-#### `retailers` (Legacy)
-| Column | Type | Notes |
-|---|---|---|
-| id | UUID PK | |
-| name | VARCHAR(255) | NOT NULL |
-| contact_email | VARCHAR(255) | |
-| contact_phone | VARCHAR(50) | |
-| address | JSONB | |
-| website | VARCHAR(255) | |
-| is_verified | BOOLEAN | Default FALSE |
-| metadata | JSONB | |
-| created_at | TIMESTAMPTZ | |
-
-> Note: The `retailers` table is the **legacy** retailer entity. Modern retailer data is stored in the `retailer_data` table keyed by `user_id` from the `users` table (where `role='retailer'`).
-
-#### `retailer_data` (NEW — used by RetailerRepository)
+#### `retailer_data`
 | Column | Type | Notes |
 |---|---|---|
 | retailer_id | UUID PK/FK→users | ON DELETE CASCADE |
-| display_name | TEXT | Business display name |
-| owner_name | TEXT | Owner's name |
-| gstin | TEXT | GST Identification Number |
-| pan | TEXT | PAN card number |
-| signature_url | TEXT | URL to uploaded signature image |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | |
+| display_name | TEXT | Business name |
+| owner_name | TEXT | |
+| gstin | TEXT | GST number |
+| pan | TEXT | PAN number |
+| signature_url | TEXT | Signature image URL |
 
-#### `retailer_schools` (NEW)
+#### `retailer_bank_accounts`
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| retailer_id | UUID FK→users | ON DELETE CASCADE |
+| account_holder_name | TEXT | NOT NULL |
+| account_number_encrypted | TEXT | AES-256-GCM encrypted |
+| account_number_masked | TEXT | `XXXX XXXX 1234` |
+| ifsc_code | VARCHAR(11) | NOT NULL |
+| bank_name | TEXT | NOT NULL |
+| branch_name | TEXT | |
+| account_type | VARCHAR(20) | `savings` or `current` |
+| is_primary | BOOLEAN | Unique partial index per retailer |
+| RLS | Enabled | Retailers can only access their own |
+
+#### `retailer_schools`
 | Column | Type | Notes |
 |---|---|---|
 | retailer_id | UUID FK→users | ON DELETE CASCADE |
 | school_id | UUID FK→schools | ON DELETE CASCADE |
-| status | VARCHAR(20) | `'approved'`, `'pending'`, `'rejected'`. CHECK constraint. |
-| product_type | JSONB | Default `'[]'::jsonb`. Array of product types the retailer sells for this school |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | |
-| **PRIMARY KEY** | (retailer_id, school_id, status) | Composite — allows same retailer+school with different statuses |
+| status | VARCHAR(20) | `approved`, `pending`, `rejected` |
+| product_type | JSONB | Array of product types |
+| warehouse_id | UUID FK→warehouse | ON DELETE SET NULL (added via migration) |
+| **PK** | (retailer_id, school_id, status) | Composite |
 
 #### `categories`
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| name | VARCHAR(255) | NOT NULL |
-| slug | VARCHAR(255) | NOT NULL UNIQUE |
+| name, slug | VARCHAR(255) | slug is UNIQUE |
 | description | TEXT | |
-| parent_id | UUID FK→categories | Self-referencing, ON DELETE SET NULL |
-| is_active | BOOLEAN | Default TRUE |
-| product_attributes | JSONB | Default `'{}'::jsonb`. Category-level product attribute definitions (Added via migration) |
-| created_at | TIMESTAMPTZ | |
+| parent_id | UUID FK→categories | Self-referencing |
+| product_attributes | JSONB | Category-level attribute definitions |
 
 #### `brands`
-| Column | Type | Notes |
-|---|---|---|
-| id | UUID PK | |
-| name | VARCHAR(255) | NOT NULL |
-| slug | VARCHAR(255) | NOT NULL UNIQUE |
-| description | TEXT | |
-| country | VARCHAR(100) | |
-| logo_url | TEXT | |
-| metadata | JSONB | |
-| is_active | BOOLEAN | Default TRUE |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | (auto-updated via trigger) |
+Standard entity: id, name, slug, description, country, logo_url, metadata, is_active.
 
 #### `products`
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| sku | VARCHAR(100) | UNIQUE |
+| sku | VARCHAR(100) UNIQUE | |
 | title | VARCHAR(255) | NOT NULL |
-| short_description | VARCHAR(512) | |
-| description | TEXT | |
 | product_type | product_type ENUM | Default `'general'` |
-| base_price | DECIMAL(12,2) | NOT NULL, Default 0 |
-| stock | INTEGER | Default 0, CHECK ≥ 0 |
-| min_order_quantity | INTEGER | Default 1 |
-| max_order_quantity | INTEGER | Default 1000 |
-| weight | DECIMAL(10,3) | |
-| dimensions | JSONB | |
+| base_price | DECIMAL(12,2) | NOT NULL |
+| stock | INTEGER | CHECK ≥ 0 |
+| delivery_charge | DECIMAL(10,2) | Default 0 (per-unit) |
+| highlight | JSONB | Default `'[]'::jsonb` |
 | image_url | TEXT | |
-| currency | CHAR(3) | Default `'INR'` |
-| retailer_id | UUID FK→retailers | ON DELETE SET NULL (legacy) |
-| is_active | BOOLEAN | Default TRUE |
-| is_deleted | BOOLEAN | Default FALSE (Added via migration — soft delete) |
-| highlight | JSONB | Default `'[]'::jsonb`. Array of highlight strings (Added as TEXT, migrated to JSONB) |
-| delivery_charge | DECIMAL(10,2) | Default 0. Per-unit delivery charge (Added via migration) |
+| retailer_id | UUID FK→retailers | Legacy |
+| is_active | BOOLEAN | |
+| is_deleted | BOOLEAN | Default FALSE (soft delete) |
 | metadata | JSONB | |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | (auto-updated via trigger) |
 
-#### `product_categories` (Junction)
-| Column | Type |
-|---|---|
-| product_id | UUID FK→products (CASCADE) |
-| category_id | UUID FK→categories (CASCADE) |
-| **PK** | (product_id, category_id) |
-
-#### `product_brands` (Junction)
-| Column | Type |
-|---|---|
-| product_id | UUID FK→products (CASCADE) |
-| brand_id | UUID FK→brands (CASCADE) |
-| **PK** | (product_id, brand_id) |
-
-#### `product_schools` (Junction)
+#### `product_payment_methods`
 | Column | Type | Notes |
 |---|---|---|
-| product_id | UUID FK→products (CASCADE) | |
-| school_id | UUID FK→schools (CASCADE) | |
-| grade | VARCHAR(50) | Pre-KG through 12th |
-| mandatory | BOOLEAN | Default FALSE |
-| **PK** | (product_id, school_id, grade) | |
+| product_id | UUID FK→products | |
+| payment_method | VARCHAR | `cod`, `upi`, `card`, `netbanking`, `wallet` |
+| **PK** | (product_id, payment_method) | |
 
-#### `product_option_attributes`
-| Column | Type | Notes |
-|---|---|---|
-| id | UUID PK | |
-| product_id | UUID FK→products (CASCADE) | |
-| name | VARCHAR(100) | e.g., "Size", "Color", "Binding" |
-| position | INTEGER | CHECK 1–3. UNIQUE per product |
-| is_required | BOOLEAN | Default TRUE |
-| created_at | TIMESTAMPTZ | |
+Controls which payment methods are available per product.
 
-#### `product_option_values`
-| Column | Type | Notes |
-|---|---|---|
-| id | UUID PK | |
-| attribute_id | UUID FK→product_option_attributes (CASCADE) | |
-| value | VARCHAR(255) | e.g., "XL", "Red", "Hardcover" |
-| sort_order | INTEGER | Default 0 |
-| price_modifier | DECIMAL(10,2) | Default 0.00, CHECK ≥ 0. Extra charge for this option (Added via migration) |
-| image_url | TEXT | Option value image — e.g., color swatch (Added via migration) |
-| created_at | TIMESTAMPTZ | |
+#### `product_option_attributes` / `product_option_values`
+- Attributes: name, position (1-3), is_required
+- Values: value, sort_order, **price_modifier** (DECIMAL, ≥ 0), **image_url** (TEXT)
 
 #### `product_variants`
+Standard: id, product_id, sku, price, compare_at_price, stock, weight, option_value_1/2/3, metadata.
+
+#### `variant_commissions`
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| product_id | UUID FK→products (CASCADE) | |
-| sku | VARCHAR(150) | UNIQUE |
-| price | DECIMAL(12,2) | |
-| compare_at_price | DECIMAL(12,2) | Strikethrough/original price |
-| stock | INTEGER | Default 0, CHECK ≥ 0 |
-| weight | DECIMAL(10,3) | |
-| option_value_1 | UUID FK→product_option_values | ON DELETE SET NULL |
-| option_value_2 | UUID FK→product_option_values | ON DELETE SET NULL |
-| option_value_3 | UUID FK→product_option_values | ON DELETE SET NULL |
-| metadata | JSONB | |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | (auto-updated via trigger) |
+| variant_id | UUID FK→product_variants | |
+| commission_type | VARCHAR | `percentage` or `amount` |
+| commission_value | DECIMAL | Commission amount/percentage |
+| effective_from | TIMESTAMPTZ | Default NOW() |
+| effective_to | TIMESTAMPTZ | NULL = currently active |
+
+Versioned commission tracking. Setting a new commission expires the previous one and creates a new row.
 
 #### `product_images`
-| Column | Type | Notes |
-|---|---|---|
-| id | UUID PK | |
-| product_id | UUID FK→products (CASCADE) | |
-| variant_id | UUID FK→product_variants (CASCADE) | Optional — variant-specific images |
-| url | TEXT | NOT NULL |
-| alt_text | VARCHAR(255) | |
-| sort_order | INTEGER | Default 0 |
-| is_primary | BOOLEAN | Default FALSE |
-| created_at | TIMESTAMPTZ | |
+Standard: id, product_id, variant_id (optional), url, alt_text, sort_order, is_primary.
 
 #### `orders`
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| order_number | VARCHAR(100) | NOT NULL UNIQUE |
-| user_id | UUID FK→users | ON DELETE SET NULL |
+| order_number | VARCHAR(100) UNIQUE | |
+| user_id | UUID FK→users | |
 | status | order_status ENUM | Default `'initialized'` |
-| total_amount | DECIMAL(12,2) | NOT NULL, Default 0 |
-| currency | CHAR(3) | Default `'INR'` |
-| shipping_address | JSONB | |
-| billing_address | JSONB | |
-| contact_phone | VARCHAR(50) | |
-| contact_email | VARCHAR(255) | |
-| payment_method | VARCHAR(100) | cod, upi, card, netbanking, wallet |
-| payment_status | VARCHAR(50) | |
-| warehouse_id | UUID FK→warehouse | ON DELETE SET NULL (Renamed from `retailer_id` via migration) |
+| total_amount | DECIMAL(12,2) | |
+| shipping_address / billing_address | JSONB | Includes `studentName` field |
+| payment_method / payment_status | VARCHAR | |
+| warehouse_id | UUID FK→warehouse | |
 | metadata | JSONB | |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | (auto-updated via trigger) |
 
 #### `order_items`
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| order_id | UUID FK→orders (CASCADE) | |
-| product_id | UUID FK→products | ON DELETE SET NULL |
-| variant_id | UUID FK→product_variants | ON DELETE SET NULL |
-| sku | VARCHAR(150) | Snapshot at time of order |
-| title | VARCHAR(255) | Snapshot at time of order |
-| quantity | INTEGER | NOT NULL, Default 1 |
-| unit_price | DECIMAL(12,2) | NOT NULL, Default 0 |
-| total_price | DECIMAL(12,2) | NOT NULL, Default 0 |
-| product_snapshot | JSONB | Full product data frozen at order time |
-| warehouse_id | UUID FK→warehouse | ON DELETE SET NULL (Renamed from `retailer_id` via migration) |
-| created_at | TIMESTAMPTZ | |
+| order_id | UUID FK→orders | CASCADE |
+| product_id | UUID FK→products | |
+| variant_id | UUID FK→product_variants | |
+| sku, title | VARCHAR | Snapshot at order time |
+| quantity, unit_price, total_price | Numeric | |
+| delivery_fee | DECIMAL(12,2) | Bifurcated delivery fee per item |
+| platform_fee | DECIMAL(12,2) | Bifurcated platform fee per item |
+| product_snapshot | JSONB | Full product data frozen |
+| warehouse_id | UUID FK→warehouse | |
 
-#### `order_events`
+#### `order_events` / `order_queries`
+Standard event tracking and support ticket tables.
+
+#### `seller_ledgers`
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| order_id | UUID FK→orders (CASCADE) | |
-| previous_status | order_status ENUM | |
-| new_status | order_status ENUM | NOT NULL |
-| changed_by | UUID FK→users | ON DELETE SET NULL |
-| note | TEXT | |
-| metadata | JSONB | |
-| created_at | TIMESTAMPTZ | |
+| retailer_id | UUID FK→users | |
+| warehouse_id | UUID FK→warehouse | |
+| order_id | UUID FK→orders | |
+| order_item_id | UUID FK→order_items | |
+| transaction_type | VARCHAR | `ORDER_REVENUE`, `PLATFORM_FEE`, `REFUND_CLAWBACK`, `MANUAL_ADJUSTMENT` |
+| entry_type | VARCHAR | `CREDIT` or `DEBIT` |
+| amount | DECIMAL | |
+| settled_amount | DECIMAL | How much has been paid out |
+| status | VARCHAR | `ON_HOLD`, `PENDING`, `AVAILABLE`, `PARTIALLY_SETTLED`, `SETTLED` |
+| trigger_date | TIMESTAMPTZ | When the entry became available (FIFO ordering) |
+| notes | TEXT | |
 
-#### `order_queries`
+#### `settlements`
 | Column | Type | Notes |
 |---|---|---|
 | id | UUID PK | |
-| order_id | UUID FK→orders (CASCADE) | |
-| user_id | UUID FK→users (CASCADE) | |
-| subject | VARCHAR(255) | NOT NULL |
-| message | TEXT | NOT NULL |
-| priority | VARCHAR(20) | Default `'normal'` |
-| status | query_status ENUM | Default `'open'` |
-| attachments | JSONB | |
-| metadata | JSONB | |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | (auto-updated via trigger) |
+| retailer_id | UUID FK→users | |
+| total_amount | DECIMAL | Payout amount |
+| payment_mode | VARCHAR | `MANUAL_BANK_TRANSFER`, `CASH`, `NEFT`, `UPI`, etc. |
+| reference_number | VARCHAR | Bank reference / UTR |
+| receipt_url | TEXT | Receipt file URL |
+| status | VARCHAR | `COMPLETED`, `FAILED` |
+| admin_id | UUID FK→users | Who initiated |
+
+#### `settlement_ledger_items`
+| Column | Type | Notes |
+|---|---|---|
+| settlement_id | UUID FK→settlements | |
+| ledger_id | UUID FK→seller_ledgers | |
+| amount_consumed | DECIMAL | How much of this ledger entry was consumed |
 
 ### 6.3 Database Functions (RPC)
 
 | Function | Purpose |
 |---|---|
-| `update_updated_at_column()` | Trigger function — auto-updates `updated_at` on row update |
-| `increment_variant_stock(variant_id, quantity)` | Atomically increment variant stock |
-| `decrement_variant_stock(variant_id, quantity)` | Atomically decrement variant stock (min 0) |
-| `create_comprehensive_product(payload JSONB)` | Atomic RPC for creating a product with all related data (categories, schools, brands, warehouses, options, values with image_url + price_modifier, variants with option name resolution, images) in a single transaction |
+| `update_updated_at_column()` | Trigger: auto-updates `updated_at` |
+| `increment_variant_stock(variant_id, quantity)` | Atomically increment stock |
+| `decrement_variant_stock(variant_id, quantity)` | Atomically decrement stock (min 0) |
+| `create_comprehensive_product(payload JSONB)` | Atomic product creation with all relations |
+| `execute_fifo_settlement(...)` | Atomic FIFO settlement: insert settlement, update ledger rows, create mappings |
+| `get_settlement_dashboard_summary(retailerId, warehouseId)` | Aggregated financial metrics for dashboard |
 
 ### 6.4 Migration Summary
 
 | Migration File | Changes |
 |---|---|
-| `add_is_deleted_to_products.sql` | Added `is_deleted BOOLEAN DEFAULT FALSE` to `products` |
-| `add_otp_columns_to_users.sql` | Added `otp`, `otp_created_at`, `is_verified` to `users` (legacy — now uses `otp_verifications` table) |
-| `create_otp_verifications_table.sql` | Created `otp_verifications` table (email PK, otp, metadata JSONB) |
-| `add_product_attributes_to_categories.sql` | Added `product_attributes JSONB` to `categories` |
-| `migration_add_delivery_charge.sql` | Added `delivery_charge DECIMAL(10,2) DEFAULT 0` to `products` |
-| `migration_add_highlight_to_products.sql` | Added `highlight TEXT` to `products` |
-| `migration_change_highlight_to_json.sql` | Changed `highlight` from `TEXT` to `JSONB DEFAULT '[]'::jsonb` |
-| `migration_add_image_to_option_values.sql` | Added `image_url TEXT` to `product_option_values` |
-| `migration_add_price_modifier.sql` | Added `price_modifier DECIMAL(10,2) DEFAULT 0.00 CHECK >= 0` to `product_option_values` |
-| `migration_create_retailer_schools.sql` | Created `retailer_schools` table with composite PK `(retailer_id, school_id, status)` |
-| `migration_fix_retailer_data_fkey.sql` | Fixed `retailer_data.retailer_id` FK to point to `public.users` instead of `auth.users` |
-| `migration_rename_retailer_to_warehouse_in_order_items.sql` | Renamed `retailer_id → warehouse_id` in both `orders` and `order_items` tables, updated FK to reference `warehouse` table |
-| `emergency_order_tables_migration.sql` | Created `order_events` and `order_queries` tables with indexes and triggers |
+| `add_is_deleted_to_products.sql` | `is_deleted BOOLEAN DEFAULT FALSE` on products |
+| `add_otp_columns_to_users.sql` | `otp`, `otp_created_at`, `is_verified` on users (legacy) |
+| `create_otp_verifications_table.sql` | `otp_verifications` table |
+| `add_product_attributes_to_categories.sql` | `product_attributes JSONB` on categories |
+| `migration_add_delivery_charge.sql` | `delivery_charge` on products |
+| `migration_add_highlight_to_products.sql` | `highlight TEXT` on products |
+| `migration_change_highlight_to_json.sql` | `highlight` TEXT → JSONB |
+| `migration_add_image_to_option_values.sql` | `image_url` on product_option_values |
+| `migration_add_price_modifier.sql` | `price_modifier` on product_option_values |
+| `migration_create_retailer_schools.sql` | `retailer_schools` table |
+| `migration_fix_retailer_data_fkey.sql` | Fix FK on retailer_data |
+| `migration_rename_retailer_to_warehouse_in_order_items.sql` | `retailer_id → warehouse_id` in orders + order_items |
+| `emergency_order_tables_migration.sql` | `order_events` + `order_queries` tables |
+| `migration_create_retailer_bank_accounts.sql` | `retailer_bank_accounts` table with RLS |
+| `migration_add_student_name_to_addresses.sql` | `student_name VARCHAR(255)` on addresses |
+| `migration_add_warehouse_to_retailer_schools.sql` | `warehouse_id` on retailer_schools |
+| `migration_add_item_fees.sql` | `delivery_fee` + `platform_fee` on order_items |
+| `migration_add_missing_order_statuses.sql` | Added `refunded` + `returned` to order_status enum |
 
 ---
 
 ## 7. Validation Schemas (Joi)
 
-Located in `src/models/schemas.js` (940 lines). Every entity has create, update, and query schemas:
+Located in `src/models/schemas.js` (~1045 lines):
 
-| Schema Group | Key Entities/Fields |
+| Schema Group | Key Fields/Notes |
 |---|---|
-| `userSchemas` | register, login (with `loginAs`), retailerLogin, retailerRegister, sendRetailerOtp, verifyRetailerOtp, verifyRetailer (retailerId + action: authorize/deauthorize), googleAuth, updateProfile, forgotPassword, resetPassword, refreshToken |
-| `brandSchemas` | name, slug, description, country, logoUrl, metadata |
-| `categorySchemas` | name, slug, description, parentId, productAttributes (JSONB) |
-| `productSchemas` | create, update, query, adminQuery (with `isDeleted` visibility), warehouseProductQuery (page, limit, search, categoryId, status). Fields: sku, title, description, productType (bookset/uniform/stationary/school/general), basePrice, currency (INR), city, categoryIds, brandIds, warehouseIds, metadata |
-| `productOptionSchemas` | Attribute: name, position (1-3), isRequired. Value: value, priceModifier, sortOrder, imageUrl |
-| `productVariantSchemas` | sku, price, compareAtPrice, stock, weight, optionValue1/2/3, metadata |
+| `userSchemas` | register, login (with `loginAs`), retailerLogin, retailerRegister, sendRetailerOtp, verifyRetailerOtp, verifyRetailer, googleAuth, updateProfile, forgotPassword, resetPassword, refreshToken |
+| `brandSchemas` | name, slug, description, country, logoUrl |
+| `categorySchemas` | name, slug, parentId, productAttributes (JSONB), `schoolCat` boolean filter |
+| `productSchemas` | create/update/query/adminQuery/warehouseProductQuery. Fields: sku, title, productType, basePrice, **paymentMethods** array, city, categoryIds, brandIds, warehouseIds |
+| `productOptionSchemas` | Attribute: name, position (1-3). Value: value, **priceModifier**, sortOrder, **imageUrl** |
+| `productVariantSchemas` | sku, price, compareAtPrice, stock, optionValue1/2/3 |
+| `variantCommissionSchemas` | setCommission (variantId, commissionType: percentage/amount, commissionValue), bulkSetCommissions |
 | `productImageSchemas` | url, altText, sortOrder, isPrimary, variantId |
-| `warehouseSchemas` | name, contactEmail/Phone, address (line1/2, city, state, postalCode, country), website, metadata |
-| `schoolSchemas` | name, image, type (public/private/charter/international/other), board, address (line1/2), city, state, country, postalCode, contact, phone, email, productAssociation (grade + mandatory), partnership |
-| `orderSchemas` | createOrder (items, shippingAddress, billingAddress, paymentMethod), calculateSummary, updateOrderStatus, cancelOrder, updatePaymentStatus, bulkUpdateOrders |
-| `orderEventSchemas` | orderId, previousStatus, newStatus, changedBy, note, location (lat/lng) |
+| `warehouseSchemas` | name, contactEmail/Phone, address, website |
+| `schoolSchemas` | name, type, board, address, city, state, productAssociation (grade + mandatory), partnership |
+| `orderSchemas` | createOrder (items, shippingAddress with **studentName**, paymentMethod), calculateSummary, updateOrderStatus (now includes `refunded`), cancelOrder, updatePaymentStatus, bulkUpdateOrders |
+| `orderEventSchemas` | orderId, statuses (includes `refunded`), location (lat/lng) |
 | `orderQuerySchemas` | Support tickets: subject, message, priority, category, attachments |
 | `reviewSchemas` | productId, rating (1-5), title, body, images |
-| `addressSchemas` | label, recipientName, phone, line1/2, city, state, postalCode, country, isDefault, lat/lng, landmark |
-| `headerSchemas` | warehouseHeaders: `x-warehouse-id` (UUID, required) |
-| `paramSchemas` | UUID validators for id, userId, productId, orderId, schoolId, warehouseId, categorySlug, categoryId, brandId, variantId, attributeId, valueId, imageId, productType, city, grade. Combined: idAndBrandId, idAndImageId |
+| `addressSchemas` | label, **studentName**, recipientName, phone, **alternatePhone**, line1/2, city, state, **landmark**, **neighborhood**, **district**, lat/lng |
+| `settlementSchemas` | ledgerQuery (status, transactionType, date range), manualAdjustment, settlementExecution (paymentMode, referenceNumber, receiptUrl), adminSettlementExecution |
+| `headerSchemas` | `x-warehouse-id` UUID |
+| `paramSchemas` | UUID validators for all entity IDs |
 
 ---
 
-## 8. Database Layer
+## 8. Notification System
 
-### Supabase Client (`src/db/index.js`)
+### Email Service (`emailService.js`)
 
-| Function | Purpose |
-|---|---|
-| `connectDB()` | Initialize Supabase client, test connection |
-| `getSupabase()` | Get singleton Supabase client (auto-init) |
-| `getDB()` | Alias used by DI container |
-| `createAuthenticatedClient(token)` | Create user-scoped client with JWT |
-| `createServiceClient()` | Create service-role client (bypasses RLS) |
-| `executeSupabaseQuery(table, op, options)` | Generic query helper (select/insert/update/delete) |
-| `executeSupabaseRPC(fn, params)` | Call Supabase RPC (stored procedures) |
+Uses **Nodemailer** with SMTP transport, reads **HTML templates** from `src/templates/`:
 
-Uses **service role key** (bypasses RLS) for server-side operations. Repositories call the Supabase client directly using the `supabase-js` SDK.
+| Email | Template | Trigger | Recipients |
+|---|---|---|---|
+| OTP | Inline HTML | `POST /auth/send-otp` | Customer/Retailer |
+| Order Confirmation | `order-confirmation-customer.html` | After payment success (deferred) | Customer |
+| Order Notification | `order-notification-retailer.html` | After payment success (deferred) | Each retailer (their items only) |
+| Delivery Confirmation | `order-delivery-customer.html` | Order status → `delivered` | Customer |
+| Forgot Password | `forgot-password.html` | `POST /auth/forgot-password` | User |
+| Email Verification | Inline HTML | `POST /users/verify-email` | User |
+
+### SMS Service (`smsService.js`)
+
+Uses **MSG91 Flow API** with template-based SMS:
+
+| SMS | Trigger | Variables |
+|---|---|---|
+| Order Confirmation → Customer | After order creation | order_number, student_name, amount, item_count |
+| Order Confirmation → Retailer | After order creation (per retailer) | order_number, student_name, items, amount |
+| Delivery Confirmation → Customer | Order status → `delivered` | order_number, student_name |
+
+**Graceful degradation:** SMS failures are logged but never block the order flow. If `MSG91_AUTH_KEY` is not set, SMS is mocked with console output.
 
 ---
 
-## 9. Configuration
+## 9. Commission & Financial System
 
-### Environment Variables
+### Variant Commission Tracking
 
-```
-PORT=3001
-NODE_ENV=development
-SUPABASE_URL=<supabase project url>
-SUPABASE_ANON_KEY=<anon key>
-SUPABASE_SERVICE_ROLE_KEY=<service role key>
-JWT_SECRET=<secret>
-JWT_EXPIRY=24h
-REFRESH_TOKEN_EXPIRY=7d
-BCRYPT_ROUNDS=12
-RATE_LIMIT_WINDOW_MS=900000
-RATE_LIMIT_MAX=100
-RAZORPAY_KEY_ID=<key>
-RAZORPAY_KEY_SECRET=<secret>
-```
+Each product variant can have an **active commission** that determines the platform's cut:
 
-### CORS Policy
-- Allowed: `localhost:3000`, `localhost:5173`, `bukizz.in`, `192.168.1.33:3000`
-- Auto-allows local network IPs (`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`) for mobile testing
+- **Commission Types:** `percentage` (e.g., 10% of variant price) or `amount` (e.g., ₹50 flat)
+- **Versioned:** Setting a new commission expires the old one (`effective_to` timestamp). History preserved.
+- **Per-product query:** Get active commissions for all variants of a product in one call
+
+### Product Payment Methods
+
+Products can have **restricted payment methods** (e.g., COD-only, no wallet):
+- Stored in `product_payment_methods` junction table
+- Validated during order creation — if a product restricts payment methods, the order's payment method must match
+- Default: all payment methods allowed if no restrictions set
+
+### Order Item Fee Bifurcation
+
+Each order item stores:
+- `delivery_fee` — proportionally split delivery charge
+- `platform_fee` — calculated from variant commission
+
+These feed into the **seller ledger** entries for accurate settlement tracking.
 
 ---
 
@@ -1011,69 +1073,26 @@ Role check: loginAs must match user.role
        ↓
 Retailer check: if retailer, verify is_active + deactivation_reason
        ↓
-Returns { accessToken (JWT), refreshToken, user (with role) }
+Returns { accessToken (JWT), refreshToken, user }
        ↓
-Client → Subsequent requests with Header: Authorization: Bearer <accessToken>
+Client → Header: Authorization: Bearer <accessToken>
        ↓
-authenticateToken middleware → authService.verifyToken(token)
+authenticateToken → authService.verifyToken(token)
        ↓
-req.user populated → { id, email, role, roles[], is_active, deactivation_reason, ... }
+req.user = { id, email, role, roles[], is_active, deactivation_reason }
        ↓
-requireRoles('admin', 'retailer') → Checks req.user.roles array
-```
-
-### OTP Registration Flow
-```
-Client → POST /api/v1/auth/send-otp { email, fullName, password }
-       ↓
-AuthService.sendOtp() → Generate 6-digit OTP → Store in otp_verifications → Send via email
-       ↓
-Client → POST /api/v1/auth/verify-otp { email, otp }
-       ↓
-AuthService.verifyOtp() → Validate OTP (10 min expiry) → Create user + user_auth → Generate tokens
-       ↓
-Returns { accessToken, refreshToken, user }
-```
-
-### Retailer Registration Flow
-```
-Client → POST /api/v1/auth/send-retailer-otp { email, fullName, password, phone }
-       ↓
-AuthService.sendRetailerOtp() → Store metadata with role='retailer' in otp_verifications
-       ↓
-Client → POST /api/v1/auth/verify-retailer-otp { email, otp }
-       ↓
-AuthService.verifyRetailerOtp() → Create user (is_active=false, role='retailer', deactivation_reason='unauthorized')
-       ↓
-Returns tokens (for onboarding access) + user
-       ↓
-Client → POST /api/v1/retailer/data { displayName, ownerName, gstin, pan, signature (file) }
-       ↓
-Admin → PUT /api/v1/auth/verify-retailer { retailerId, action: 'authorize' }
-       ↓
-User updated: is_active=true, deactivation_reason='authorized'
-```
-
-### Retailer Login Flow
-```
-Client → POST /api/v1/auth/login-retailer { email, password }
-       ↓
-AuthService.loginRetailer() → verify password, check role === 'retailer'
-       ↓
-Returns tokens (even if is_active=false — allows onboarding access)
-       ↓
-Token verification: verifyToken() allows inactive retailers through
+requireRoles('admin', 'retailer') → checks req.user.roles array
 ```
 
 ### Role System
-- **Roles available:** `customer`, `retailer`, `admin`, `system`
-- Login schema accepts `loginAs` parameter to specify role context
+- **Roles:** `customer`, `retailer`, `admin`, `system`
 - `requireRoles(...roles)` middleware enforces role-based access
-- `req.user.roles` array is populated from `user.role` field
+- `req.user.roles` array populated from `user.role` field
+- Inactive retailers can still authenticate (for onboarding access)
 
 ### Google OAuth Flow
 1. Client gets token from Google Sign-In via Supabase Auth
-2. `POST /api/v1/auth/google-login` with Supabase auth token
+2. `POST /api/v1/auth/google-login`
 3. Server verifies via `supabase.auth.getUser(token)`
 4. Creates or links user, sets `email_verified=true`
 5. Returns JWT tokens
@@ -1082,124 +1101,174 @@ Token verification: verifyToken() allows inactive retailers through
 
 ## 11. Error Handling
 
-Centralized via `errorHandler` middleware (must be last):
-
 ```javascript
 // Custom error class
 throw new AppError("Product not found", 404);
 
-// asyncHandler wrapper for async controller methods
+// asyncHandler wrapper
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-// Global handler catches:
-// - AppError (custom, with statusCode)
-// - CastError (bad IDs)
-// - Duplicate key (11000 / ER_DUP_ENTRY)
-// - ValidationError
-// - JWT errors (JsonWebTokenError, TokenExpiredError)
-// - Supabase errors
+// Global handler catches: AppError, CastError, DuplicateKey, ValidationError, JWT errors, Supabase errors
 
 // Response format:
 {
   "success": false,
   "error": "Error message",
-  "correlationId": "req-xxx-yyy",  // for tracing
-  "stack": "..."                    // dev only
+  "correlationId": "req-xxx-yyy",
+  "stack": "..."  // dev only
 }
 ```
 
 ---
 
-## 12. Key Business Entities
+## 12. Utilities
 
-| Entity | Key Concept |
-|---|---|
-| **Product** | Types: `bookset`, `uniform`, `stationary`, `school`, `general`. Has base price, delivery_charge, highlight (JSONB array), supports options (up to 3 attributes like Size/Color with price_modifier and image_url per value), variants (SKU + price + stock), images, brands, retailer info. Soft-deletable via `is_deleted`. |
-| **School** | Types: `public`, `private`, `charter`, `international`, `other`. Boards: `CBSE`, `ICSE`, `State Board`, `IB`, `IGCSE`, `Other`. Products associated per grade (`Pre-KG` to `12th`). |
-| **Order** | Multi-item, supports shipping + billing addresses, payment methods (cod, upi, card, netbanking, wallet). Full status lifecycle with event tracking. Items tracked per warehouse (`warehouse_id`). |
-| **Warehouse** | Retailer's warehouses with address and verification status. Products linked to warehouses via `products_warehouse` junction. Orders track fulfillment warehouse via `warehouse_id` (migrated from `retailer_id`). |
-| **Retailer** | Two data models: legacy `retailers` table, and modern `retailer_data` table (keyed by user_id). Onboarding requires GSTIN, PAN, signature. Verification managed via `users.is_active` + `users.deactivation_reason`. |
-| **Retailer-School Link** | Many-to-many via `retailer_schools` table. Composite PK (retailer_id, school_id, status). Tracks which retailers serve which schools and for what product types. |
-| **Category** | Hierarchical (parent-child), has `productAttributes` JSONB for defining what attributes products in this category should have. |
-| **Brand** | Simple entity with name, slug, country, logo. |
-| **OTP Verification** | Pre-registration OTP stored in `otp_verifications` table. 6-digit code with 10-min expiry. Metadata stores hashed password and user details for deferred user creation. |
+### Encryption (`utils/encryption.js`)
+- **AES-256-GCM** encryption for sensitive data (bank account numbers)
+- Format: `iv:ciphertext:authTag` (hex-encoded)
+- `encrypt(plaintext)` → encrypted string
+- `decrypt(encryptedText)` → plaintext
+- `maskAccountNumber("123456789012")` → `"XXXX XXXX 9012"`
+- Key from `ENCRYPTION_KEY` env var (64-char hex = 32 bytes)
 
----
+### Sitemap Generator (`utils/sitemapGenerator.js`)
+- Generates XML sitemap with static routes + dynamic products, schools, categories
+- Writes to `server/public/sitemap.xml`, `public/sitemap.xml`, `build/sitemap.xml`
+- Served at `GET /sitemap.xml`
 
-## 13. Logging
-
-- **Winston** logger with file and console transports
+### Logger (`utils/logger.js`)
+- **Winston** with file + console transports
 - Error logs: `logs/error.log` (5MB, 5 files rotation)
 - Combined logs: `logs/combined.log` (5MB, 5 files rotation)
-- Request correlation IDs via `x-correlation-id` header or auto-generated
-- Structured JSON logging in production, colorized simple format in development
+- Request correlation IDs via `x-correlation-id` header
 
 ---
 
-## 14. Comprehensive Product Creation (RPC)
+## 13. Cron Jobs
 
-The `create_comprehensive_product(payload JSONB)` stored procedure enables atomic creation of a product with all related data in a single database transaction.
+| Job | Schedule | Description |
+|---|---|---|
+| Sitemap Generation | Daily at midnight + on startup | Regenerates XML sitemap from DB |
 
-### Payload Structure
-```json
-{
-  "productData": {
-    "title": "...", "shortDescription": "...", "description": "...",
-    "highlight": ["..."], "basePrice": 100, "currency": "INR", "city": "...",
-    "sku": "...", "productType": "bookset", "metadata": {}
-  },
-  "productType": "bookset",
-  "brandData": { "brandId": "uuid" },
-  "warehouseData": { "warehouseId": "uuid" },
-  "retailerId": "uuid",
-  "categories": [{ "id": "uuid" }],
-  "schoolData": { "schoolId": "uuid", "grade": "10th", "mandatory": false },
-  "productOptions": [
-    {
-      "name": "Set Type", "position": 1, "isRequired": true,
-      "values": ["Bookset", "Notebooks"]
-    }
-  ],
-  "variants": [
-    {
-      "sku": "SKU-001", "price": 500, "compareAtPrice": 600,
-      "stock": 50, "weight": 1.5,
-      "option1": "Bookset", "option2": "Large", "option3": null,
-      "metadata": {}
-    }
-  ],
-  "images": [
-    { "url": "https://...", "altText": "...", "sortOrder": 0, "isPrimary": true }
-  ]
-}
+---
+
+## 14. Configuration
+
+### Environment Variables
+
+```
+PORT=3001
+NODE_ENV=development
+SUPABASE_URL=<supabase project url>
+SUPABASE_ANON_KEY=<anon key>
+SUPABASE_SERVICE_ROLE_KEY=<service role key>
+JWT_SECRET=<secret>
+JWT_EXPIRY=24h  (config default: 7d)
+REFRESH_TOKEN_EXPIRY=7d  (config default: 30d)
+BCRYPT_ROUNDS=12
+RATE_LIMIT_WINDOW_MS=900000
+RATE_LIMIT_MAX=100
+RAZORPAY_KEY_ID=<key>
+RAZORPAY_KEY_SECRET=<secret>
+ENCRYPTION_KEY=<64-char hex string>
+MSG91_AUTH_KEY=<key>
+MSG91_SENDER_ID=BUKIZZ
+MSG91_ORDER_CONFIRM_TEMPLATE_ID=<id>
+MSG91_DELIVERY_TEMPLATE_ID=<id>
+MSG91_RETAILER_TEMPLATE_ID=<id>
 ```
 
-Option values also support object format with image: `{ "value": "Red", "imageUrl": "https://..." }`
-
-### Processing Steps
-1. Generate SKU if not provided
-2. Link existing brand (by brandId)
-3. Link existing warehouse (by warehouseId)
-4. Insert product record (with highlight, city)
-5. Link brand via `product_brands`
-6. Link warehouse via `products_warehouse`
-7. Link categories via `product_categories`
-8. Link school via `product_schools`
-9. Create option attributes + values (with image_url, price_modifier)
-10. Create variants (resolves option value names to UUIDs via internal mapping — `option1` maps to productOptions[0])
-11. Create images
-12. Return `{ product_id, sku, status: 'success' }`
+### CORS Policy
+- Allowed origins: `localhost:3000`, `localhost:5173`, `localhost:5174`, `bukizz.in`, `www.bukizz.in`, `seller.bukizz.in`, `192.168.1.33:3000`
+- Auto-allows local network IPs (`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`) for mobile testing
+- No-origin requests allowed (mobile apps, curl)
 
 ---
 
-## 15. Docker Configuration
+## 16. Complete Request Flow Example
+
+### Order Placement → Settlement Visual Flow
+
+```mermaid
+sequenceDiagram
+    actor Customer
+    actor Retailer
+    actor Admin
+    participant Order API
+    participant Payment API
+    participant Razorpay
+    participant Settlement Service
+    participant Database
+
+    %% Order Placement
+    Customer->>Order API: POST /api/v1/orders/place
+    note right of Order API: Validates stock, calculates platform/delivery fees
+    Order API->>Database: Creates Order (status: initialized)
+    Order API->>Database: Reserves variant stock
+    Order API-->>Customer: Order Created
+
+    %% Payment Initialization
+    Customer->>Payment API: POST /payments/create-order
+    Payment API->>Razorpay: create()
+    Razorpay-->>Payment API: Razorpay Order ID
+    Payment API-->>Customer: Razorpay Checkout Payload
+
+    %% Payment Verification & Deferred Triggers
+    Customer->>Razorpay: Completes Payment UI
+    Razorpay->>Payment API: POST /payments/webhook
+    note right of Payment API: Verifies Signature
+    Payment API->>Database: Marks Payment 'paid' & Order 'processed'
+
+    %% Settlement Ledger Creation & Notifications
+    Payment API->>Settlement Service: triggerDeferredNotifications()
+    par Notifications
+        Settlement Service->>Customer: Email/SMS Order Confirmation
+        Settlement Service->>Retailer: Email/SMS Order Notification
+    and Financials
+        Settlement Service->>Database: Create Ledger: ORDER_REVENUE (CREDIT)
+        Settlement Service->>Database: Create Ledger: PLATFORM_FEE (DEBIT)
+        note right of Database: Ledger entries start as ON_HOLD
+    end
+
+    %% Order Fulfillment
+    Retailer->>Order API: Updates status to 'delivered'
+    Order API->>Settlement Service: triggerDeliveryNotifications()
+    Settlement Service->>Customer: Email/SMS Delivery Confirmed
+    note right of Database: Ledger entries move to AVAILABLE
+
+    %% Final Payout
+    Admin->>Settlement Service: POST /settlements/execute
+    note right of Settlement Service: FIFO algorithm processes oldest AVAILABLE ledgers
+    Settlement Service->>Database: Create Settlement Record
+    Settlement Service->>Database: Update ledgers to SETTLED
+    Database-->>Retailer: Can view via /retailer/history
+```
+
+---
+
+## 17. Key Architectural Decisions (ADRs)
+
+### 1. Database Operations via Supabase RPCs
+**Why:** Instead of application-level multi-query transactions (which are difficult with REST-based backends without direct connection pooling), we use PostgreSQL functions (RPCs) for complex atomic operations.
+**Examples:** `create_comprehensive_product` creates the product, options, variants, and linkages all at once. `execute_fifo_settlement` handles the multi-row lock computation for payments. This guarantees data consistency if the Node server crashes mid-operation.
+
+### 2. Soft Deletes (`is_deleted` flag)
+**Why:** E-commerce systems have heavy relational data. If a product is hard-deleted, all historical order items, past cart data, and ledger references would break. We use an `is_deleted = true` flag for `products` and `warehouses` to preserve referential integrity while hiding them from public queries.
+
+### 3. Bifurcated Order Views (Warehouse Scoping)
+**Why:** A single customer order may contain items fulfilled by multiple retailers (warehouses). The system splits visibility so that `Retailer A` only sees their specific line items inside the order, not items from `Retailer B`. This isolation is enforced at the repository level joining `order_items` -> `warehouse_id`.
+
+### 4. Immutable Ledger for Settlements
+**Why:** Financial data needs an audit trail. Instead of keeping a running "balance" column that gets overwritten, the system uses an append-only ledger (`seller_ledgers`). Every fee, revenue share, and manual adjustment is a distinct row. The payout algorithm processes them FIFO (First In, First Out). 
+
+---
+
+## 18. Docker Configuration
 
 ### Dockerfile
-- Node.js 18 Alpine base
-- Simple copy + install
-- Exposes PORT from env
+- Node.js 18 Alpine base, copy + install, exposes PORT
 
 ### docker-compose.yml
-- Service: `api` (the Node.js server)
+- Service: `api` (Node.js server)
 - Health check via `healthcheck.js`
-- Environment variables from `.env`
+- Environment from `.env`
