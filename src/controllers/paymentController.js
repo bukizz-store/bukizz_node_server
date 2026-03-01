@@ -5,6 +5,7 @@ import { logger } from "../utils/logger.js";
 import { getSupabase, createServiceClient } from "../db/index.js";
 import { OrderRepository } from "../repositories/orderRepository.js";
 import { AppError } from "../middleware/errorHandler.js";
+import { emailService } from "../services/emailService.js";
 
 // Initialize Razorpay instance
 const razorpay = new Razorpay({
@@ -13,10 +14,23 @@ const razorpay = new Razorpay({
 });
 
 export class PaymentController {
-    constructor() {
+    constructor(orderService = null) {
         this.supabase = getSupabase();
         this.serviceClient = createServiceClient();
         this.orderRepository = new OrderRepository(this.supabase);
+        this.orderService = orderService;
+    }
+
+    /**
+     * Helper: Trigger deferred order confirmation emails after payment success.
+     * Uses orderService if available, otherwise falls back to no-op with a warning.
+     */
+    async _triggerDeferredNotifications(orderId) {
+        if (this.orderService && typeof this.orderService.triggerOrderConfirmationNotifications === "function") {
+            await this.orderService.triggerOrderConfirmationNotifications(orderId);
+        } else {
+            logger.warn("PaymentController: orderService not available, cannot trigger deferred notifications", { orderId });
+        }
     }
 
     /**
@@ -261,6 +275,15 @@ export class PaymentController {
                 paymentId: razorpay_payment_id,
             });
 
+            // Send deferred order confirmation emails after successful payment
+            if (!wasCOD) {
+                this._triggerDeferredNotifications(orderId).catch(err => {
+                    logger.error("Failed to trigger deferred notifications after verifyPayment", {
+                        orderId, error: err.message,
+                    });
+                });
+            }
+
             res.status(200).json({
                 success: true,
                 message: "Payment verified successfully",
@@ -378,6 +401,13 @@ export class PaymentController {
                     .update({ status: "processed" })
                     .eq("order_id", orderId);
 
+                // Send deferred order confirmation emails after successful reconciliation
+                this._triggerDeferredNotifications(orderId).catch(err => {
+                    logger.error("Failed to trigger deferred notifications after reconcilePayment", {
+                        orderId, error: err.message,
+                    });
+                });
+
                 return res.status(200).json({
                     success: true,
                     message: "Payment reconciled and order marked as paid",
@@ -488,6 +518,15 @@ export class PaymentController {
                             .eq("gateway_order_id", payment.order_id);
 
                         if (txnError) throw new Error(`Transaction update failed: ${txnError.message}`);
+
+                        // Send deferred order confirmation emails after webhook payment capture
+                        if (!wasCODWebhook) {
+                            this._triggerDeferredNotifications(orderId).catch(err => {
+                                logger.error("Webhook: Failed to trigger deferred notifications", {
+                                    orderId, error: err.message,
+                                });
+                            });
+                        }
 
                         logger.info("Webhook: Successfully processed captured payment", { orderId, paymentId: payment.id, wasCOD: wasCODWebhook });
                     } catch (captureError) {

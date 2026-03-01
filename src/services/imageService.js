@@ -1,6 +1,7 @@
 import { getSupabase } from "../db/index.js";
 import { logger } from "../utils/logger.js";
 import { AppError } from "../middleware/errorHandler.js";
+import sharp from "sharp";
 
 /**
  * Image Service
@@ -84,24 +85,28 @@ export class ImageService {
       const timestamp = Date.now();
       const random = Math.random().toString(36).substring(2, 8);
 
-      // Extract extension and clean base name
-      const extMatch = file.originalname.match(/\.[^.]+$/);
-      const ext = extMatch ? extMatch[0].toLowerCase() : "";
+      // Extract extension and clean base name (force wepb)
       const baseName = file.originalname.replace(/\.[^.]+$/, "");
       const cleanName = baseName.replace(/[^a-zA-Z0-9.-]/g, "_");
 
       const finalBucket = bucketName || this.bucketName;
       const finalFolder = folderPath || this.uploadFolder;
-      const fileName = `${finalFolder}/${timestamp}-${random}-${cleanName}${ext}`;
+      const fileName = `${finalFolder}/${timestamp}-${random}-${cleanName}.webp`;
 
       // Ensure the bucket exists before uploading
       await this.ensureBucketExists(finalBucket);
 
+      // Process image with Sharp
+      const processedBuffer = await sharp(file.buffer)
+        .resize(1200, 1200, { fit: "inside", withoutEnlargement: true }) // Prevent giant uncompressed files
+        .webp({ quality: 80 })
+        .toBuffer();
+
       const { data, error } = await supabase.storage
         .from(finalBucket)
-        .upload(fileName, file.buffer, {
-          contentType: file.mimetype,
-          cacheControl: "3600",
+        .upload(fileName, processedBuffer, {
+          contentType: "image/webp",
+          cacheControl: "31536000",
         });
 
       if (error) {

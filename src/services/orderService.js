@@ -81,14 +81,24 @@ export class OrderService {
       });
 
       // Phase 3: Send notifications (non-blocking)
-      this._sendOrderNotifications(order, {
-        contactPhone,
-        contactEmail,
-        shippingAddress,
-        paymentMethod,
-      }).catch(err => {
-        logger.error("Non-blocking notification dispatch failed", { orderId: order.id, error: err.message });
-      });
+      // Only send confirmation emails immediately for COD orders.
+      // For online payments, emails are deferred until payment is confirmed.
+      if (paymentMethod === "cod") {
+        this._sendOrderNotifications(order, {
+          contactPhone,
+          contactEmail,
+          shippingAddress,
+          paymentMethod,
+        }).catch(err => {
+          logger.error("Non-blocking notification dispatch failed", { orderId: order.id, error: err.message });
+        });
+      } else {
+        logger.info("Skipping order notifications for online payment order (will send after payment confirmation)", {
+          orderId: order.id,
+          orderNumber: order.orderNumber,
+          paymentMethod,
+        });
+      }
 
       return order;
     } catch (error) {
@@ -1756,6 +1766,41 @@ export class OrderService {
   }
 
   /**
+   * Trigger order confirmation notifications (emails) for an order.
+   * Used after online payment is confirmed to send the emails that were deferred at order creation.
+   */
+  async triggerOrderConfirmationNotifications(orderId) {
+    try {
+      const order = await this.orderRepository.findById(orderId);
+      if (!order) {
+        logger.warn("triggerOrderConfirmationNotifications: Order not found", { orderId });
+        return;
+      }
+
+      const context = {
+        contactPhone: order.contactPhone,
+        contactEmail: order.contactEmail,
+        shippingAddress: order.shippingAddress,
+        paymentMethod: order.paymentMethod,
+      };
+
+      logger.info("Triggering deferred order confirmation notifications after payment", {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        paymentMethod: order.paymentMethod,
+      });
+
+      await this._sendOrderNotifications(order, context);
+    } catch (error) {
+      // Don't throw — email failure should not break payment flow
+      logger.error("Failed to trigger deferred order confirmation notifications", {
+        orderId,
+        error: error.message,
+      });
+    }
+  }
+
+  /**
    * Update payment status
    */
   async updatePaymentStatus(orderId, paymentStatus, paymentData = {}) {
@@ -1790,6 +1835,16 @@ export class OrderService {
           null,
           "Payment confirmed - auto-processed",
         );
+      }
+
+      // Send deferred order confirmation emails for non-COD orders after payment is confirmed
+      if (paymentStatus === "paid" && order.paymentMethod !== "cod") {
+        this.triggerOrderConfirmationNotifications(orderId).catch(err => {
+          logger.error("Failed to send deferred notifications after updatePaymentStatus", {
+            orderId,
+            error: err.message,
+          });
+        });
       }
 
       logger.info(
