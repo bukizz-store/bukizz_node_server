@@ -26,6 +26,8 @@ export class SchoolRepository {
         name,
         type,
         image,
+        cover_image,
+        coverImage,
         board,
         address,
         city,
@@ -44,6 +46,7 @@ export class SchoolRepository {
 
             type: type,
             image: image || null,
+            cover_image: cover_image || coverImage || null,
             board: board || null,
             address: JSON.stringify(address),
             city: city.trim(),
@@ -256,6 +259,12 @@ export class SchoolRepository {
 
       if (updateData.image !== undefined) {
         updates.image = updateData.image;
+      }
+
+      if (updateData.cover_image !== undefined) {
+        updates.cover_image = updateData.cover_image;
+      } else if (updateData.coverImage !== undefined) {
+        updates.cover_image = updateData.coverImage;
       }
 
       if (updateData.type !== undefined) {
@@ -1232,6 +1241,8 @@ export class SchoolRepository {
       id: row.id,
       name: row.name,
       type: row.type,
+      image: row.image,
+      coverImage: row.cover_image,
       board: row.board,
       address: safeJsonParse(row.address, null),
       city: row.city,

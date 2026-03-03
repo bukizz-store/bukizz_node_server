@@ -17,8 +17,33 @@ export class SchoolController {
   createSchool = asyncHandler(async (req, res) => {
     let schoolData = { ...req.body };
 
-    // Handle image upload if file is present
-    if (req.file) {
+    // Handle image uploads if files are present
+    if (req.files) {
+      if (req.files.image && req.files.image.length > 0) {
+        try {
+          const imageUrl = await this.schoolService.uploadImage(
+            req.files.image[0],
+            req.token
+          );
+          schoolData.image = imageUrl;
+        } catch (error) {
+          logger.error("Failed to upload image during school creation:", error);
+          throw new AppError("Failed to upload image", 500);
+        }
+      }
+      if (req.files.cover_image && req.files.cover_image.length > 0) {
+        try {
+          const coverImageUrl = await this.schoolService.uploadImage(
+            req.files.cover_image[0],
+            req.token
+          );
+          schoolData.cover_image = coverImageUrl;
+        } catch (error) {
+          logger.error("Failed to upload cover image during school creation:", error);
+          throw new AppError("Failed to upload cover image", 500);
+        }
+      }
+    } else if (req.file) { // Fallback just in case
       try {
         const imageUrl = await this.schoolService.uploadImage(
           req.file,
@@ -79,8 +104,33 @@ export class SchoolController {
     const { id } = req.params;
     let updateData = { ...req.body };
 
-    // Handle image upload if file is present
-    if (req.file) {
+    // Handle image uploads if files are present
+    if (req.files) {
+      if (req.files.image && req.files.image.length > 0) {
+        try {
+          const imageUrl = await this.schoolService.uploadImage(
+            req.files.image[0],
+            req.token
+          );
+          updateData.image = imageUrl;
+        } catch (error) {
+          logger.error("Failed to upload image during school update:", error);
+          throw new AppError("Failed to upload image", 500);
+        }
+      }
+      if (req.files.cover_image && req.files.cover_image.length > 0) {
+        try {
+          const coverImageUrl = await this.schoolService.uploadImage(
+            req.files.cover_image[0],
+            req.token
+          );
+          updateData.cover_image = coverImageUrl;
+        } catch (error) {
+          logger.error("Failed to upload cover image during school update:", error);
+          throw new AppError("Failed to upload cover image", 500);
+        }
+      }
+    } else if (req.file) { // Fallback
       try {
         const imageUrl = await this.schoolService.uploadImage(
           req.file,

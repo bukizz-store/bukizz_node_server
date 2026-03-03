@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { createClient } from "@supabase/supabase-js";
 import { logger } from "../utils/logger.js";
-import emailService from "./emailService.js";
+import { queueForgotPasswordEmail, queueOtpEmail } from "../queue/emailQueue.js";
 import OtpRepository from "../repositories/otpRepository.js";
 
 // Initialize Supabase client
@@ -709,8 +709,8 @@ export class AuthService {
         `Password reset requested for user ${userId}`
       );
 
-      // Send forgot password email
-      await emailService.sendForgotPasswordEmail(email, resetToken, firstName);
+      // Send forgot password email via queue (with retries)
+      await queueForgotPasswordEmail(email, resetToken, firstName);
 
       return {
         message: "If the email exists, a reset link has been sent",
@@ -920,8 +920,8 @@ export class AuthService {
       const otpRepository = new OtpRepository(this.supabase);
       await otpRepository.upsertOtp(email, otp, metadata);
 
-      // Send OTP via EmailService
-      await emailService.sendOtpEmail(email, otp);
+      // Send OTP via email queue (with retries)
+      await queueOtpEmail(email, otp);
 
       return { message: "OTP sent successfully" };
     } catch (error) {
@@ -1054,8 +1054,8 @@ export class AuthService {
       const otpRepository = new OtpRepository(this.supabase);
       await otpRepository.upsertOtp(email, otp, metadata);
 
-      // Send OTP via email
-      await emailService.sendOtpEmail(email, otp);
+      // Send OTP via email queue (with retries)
+      await queueOtpEmail(email, otp);
 
       return { message: "OTP sent successfully to " + email };
     } catch (error) {

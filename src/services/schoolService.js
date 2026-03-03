@@ -75,6 +75,14 @@ export class SchoolService {
         throw new AppError("Invalid image URL format", 400);
       }
 
+      // Validate cover image URL if provided
+      if (
+        schoolData.cover_image &&
+        !/^https?:\/\/.+/.test(schoolData.cover_image)
+      ) {
+        throw new AppError("Invalid cover image URL format", 400);
+      }
+
       // Check for duplicate school names in the same city
       const existingSchool = await this.schoolRepository.findByNameAndCity(
         schoolData.name.trim(),
@@ -258,6 +266,14 @@ export class SchoolService {
         !/^https?:\/\/.+/.test(updateData.image)
       ) {
         throw new AppError("Invalid image URL format", 400);
+      }
+
+      // Validate cover image URL if being updated
+      if (
+        updateData.cover_image &&
+        !/^https?:\/\/.+/.test(updateData.cover_image)
+      ) {
+        throw new AppError("Invalid cover image URL format", 400);
       }
 
       // Check for duplicate name if name or city is being updated

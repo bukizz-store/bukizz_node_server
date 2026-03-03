@@ -145,7 +145,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.post(
     "/",
     authenticateToken,
-    upload.single("image"),
+    upload.fields([{ name: "image", maxCount: 1 }, { name: "cover_image", maxCount: 1 }]),
     parseMultipartFields,
     validate(schoolSchemas.create),
     schoolController.createSchool
@@ -158,7 +158,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.put(
     "/:id",
     authenticateToken,
-    upload.single("image"),
+    upload.fields([{ name: "image", maxCount: 1 }, { name: "cover_image", maxCount: 1 }]),
     parseMultipartFields,
     validate(paramSchemas.id, "params"),
     validate(schoolSchemas.update),

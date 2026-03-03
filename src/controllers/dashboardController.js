@@ -122,7 +122,6 @@ export class DashboardController {
     const allItems = items || [];
 
     const activeStatusesForActiveOrders = new Set([
-      "initialized",
       "processed",
       "shipped",
       "out_for_delivery",
@@ -245,6 +244,7 @@ export class DashboardController {
           }
 
           return {
+            id: item.id,
             title: item.title,
             price: item.unitPrice,
             schoolName: item.schoolName, // Now provided by repository enrichment
@@ -254,7 +254,7 @@ export class DashboardController {
         });
 
         return {
-          id: order.items.id,
+          id: order.id,
           orderNumber: order.orderNumber,
           status: order.status,
           totalPrice: order.totalAmount || order.totalPrice, // Use totalAmount from Parent Order

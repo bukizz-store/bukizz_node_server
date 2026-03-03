@@ -108,7 +108,14 @@ export class CategoryController {
    * GET /api/categories
    */
   searchCategories = asyncHandler(async (req, res) => {
-    const result = await this.categoryService.searchCategories(req.query);
+    const filters = { ...req.query };
+
+    // Secretly map client=web to schoolCat=true to hide it from the frontend URL
+    if (filters.client === "web") {
+      filters.schoolCat = false;
+    }
+
+    const result = await this.categoryService.searchCategories(filters);
     console.log("result", result);
     res.json({
       success: true,
