@@ -206,6 +206,20 @@ export function settlementController({ settlementService }) {
       });
     }),
 
+    /**
+     * GET /admin/due-today
+     * Admin-only: all retailers with outstanding balances, oldest debt first.
+     * Reads from the `vw_admin_due_settlements` database view.
+     */
+    getAdminDueSettlements: asyncHandler(async (req, res) => {
+      const data = await settlementService.getAdminDueSettlements();
+
+      res.status(200).json({
+        success: true,
+        data,
+      });
+    }),
+
     // ── Retailer-only endpoints ───────────────────────────────────────────
 
     /**
