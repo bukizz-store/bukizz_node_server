@@ -1,7 +1,7 @@
 import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
 import authService from "./authService.js";
-import emailService from "./emailService.js";
+import { queueVerificationEmail } from "../queue/emailQueue.js";
 import { retailerService } from "./retailerService.js";
 import crypto from "crypto";
 
@@ -479,8 +479,8 @@ export class UserService {
       // Generate token
       const token = await authService.generateVerificationToken(userId);
 
-      // Send email
-      await emailService.sendVerificationEmail(
+      // Send verification email via queue (with retries)
+      await queueVerificationEmail(
         user.email,
         token,
         user.fullName.split(" ")[0],

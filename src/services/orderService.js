@@ -3,7 +3,14 @@ import { logger } from "../utils/logger.js";
 import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
 import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
 // import { smsService } from "./smsService.js";
-import { emailService } from "./emailService.js";
+import {
+  queueOrderConfirmationEmail,
+  queueRetailerOrderNotificationEmail,
+} from "../queue/emailQueue.js";
+import {
+  queueOrderDelivered,
+  queueOrderCancelled,
+} from "../queue/orderQueue.js";
 
 /**
  * Order Service
@@ -956,11 +963,13 @@ export class OrderService {
         metadata,
       });
 
-      // Handle special status updates
+      // Handle special status updates (offload to queue if available)
       if (status === "delivered") {
-        await this._handleOrderDelivered(orderId);
+        const job = await queueOrderDelivered(orderId);
+        if (!job) await this._handleOrderDelivered(orderId); // Inline fallback
       } else if (status === "cancelled") {
-        await this._handleOrderCancelled(orderId, changedBy, note);
+        const job = await queueOrderCancelled(orderId, changedBy, note);
+        if (!job) await this._handleOrderCancelled(orderId, changedBy, note); // Inline fallback
       }
 
       logger.info(
@@ -1918,8 +1927,8 @@ export class OrderService {
 
       // Email: Order confirmation to customer
       if (contactEmail) {
-        emailService.sendOrderConfirmationEmail(contactEmail, customerOrderData)
-          .catch(err => logger.error("Customer order email failed", { orderId: order.id, error: err.message }));
+        queueOrderConfirmationEmail(contactEmail, customerOrderData)
+          .catch(err => logger.error("Failed to queue customer order email", { orderId: order.id, error: err.message }));
       }
 
       // === RETAILER NOTIFICATIONS ===
@@ -1981,8 +1990,8 @@ export class OrderService {
           // Email: Order notification to retailer
           const retailerEmail = retailer.email || warehouseWithRetailer.contact_email;
           if (retailerEmail) {
-            emailService.sendRetailerOrderNotificationEmail(retailerEmail, retailerData)
-              .catch(err => logger.error("Retailer order email failed", { warehouseId, error: err.message }));
+            queueRetailerOrderNotificationEmail(retailerEmail, retailerData)
+              .catch(err => logger.error("Failed to queue retailer order email", { warehouseId, error: err.message }));
           }
 
           logger.info("Retailer notification dispatched", {
@@ -2064,11 +2073,12 @@ export class OrderService {
       }
       */
 
-      // Email: Delivery confirmation to customer
+      // Email: Delivery confirmation to customer via email queue
       const customerEmail = order.contactEmail;
       if (customerEmail) {
-        emailService.sendOrderDeliveryEmail(customerEmail, orderData)
-          .catch(err => logger.error("Delivery email failed", { orderId, error: err.message }));
+        const { queueOrderDeliveryEmail } = await import("../queue/emailQueue.js");
+        queueOrderDeliveryEmail(customerEmail, orderData)
+          .catch(err => logger.error("Delivery email queue failed", { orderId, error: err.message }));
       }
     } catch (error) {
       logger.error("Error sending delivery notifications", { orderId, error: error.message });

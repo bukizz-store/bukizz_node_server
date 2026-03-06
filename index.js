@@ -47,6 +47,10 @@ import { errorHandler } from "./src/middleware/errorHandler.js";
 import { logger } from "./src/utils/logger.js";
 import { config } from "./src/config/index.js";
 import { setupCronJobs } from "./src/jobs/cronJobs.js";
+import { startEmailWorker, stopEmailWorker } from "./src/workers/emailWorker.js";
+import { startWebhookWorker, stopWebhookWorker } from "./src/workers/webhookWorker.js";
+import { startOrderWorker, stopOrderWorker } from "./src/workers/orderWorker.js";
+import { closeRedisConnection, isRedisConfigured } from "./src/queue/connection.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -153,6 +157,16 @@ async function startServer() {
     // Start cron jobs
     setupCronJobs();
 
+    // Start BullMQ email worker only if Redis is configured
+    if (isRedisConfigured()) {
+      startEmailWorker();
+      startWebhookWorker();
+      startOrderWorker();
+      logger.info("📧 All queue workers started (Email + Webhook + Order)");
+    } else {
+      logger.info("📧 Queue workers skipped — no UPSTASH_REDIS_URL set.");
+    }
+
     // Basic auth routes (keeping existing for backward compatibility)
     const loginSchema = Joi.object({
       email: Joi.string().email().required(),
@@ -249,11 +263,19 @@ async function startServer() {
 // Handle graceful shutdown
 process.on("SIGINT", async () => {
   logger.info("Shutting down gracefully...");
+  await stopEmailWorker();
+  await stopWebhookWorker();
+  await stopOrderWorker();
+  await closeRedisConnection();
   process.exit(0);
 });
 
 process.on("SIGTERM", async () => {
   logger.info("Shutting down gracefully...");
+  await stopEmailWorker();
+  await stopWebhookWorker();
+  await stopOrderWorker();
+  await closeRedisConnection();
   process.exit(0);
 });
 

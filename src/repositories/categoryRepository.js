@@ -222,11 +222,16 @@ export class CategoryRepository {
         filters.schoolCat === undefined ||
         filters.schholCat === false
       ) {
-        categories = categories.filter((c) => c.name.toLowerCase() !== "school");
+        categories = categories.filter(
+          (c) =>
+            c.name.toLowerCase() !== "school" &&
+            c.name.toLowerCase() !== "bookset" &&
+            c.name.toLowerCase() !== "uniform",
+        );
       }
 
       if (error) throw error;
-      
+
       return {
         categories: (categories || []).map((c) => this.formatCategory(c)),
         pagination: {

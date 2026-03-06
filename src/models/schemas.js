@@ -404,6 +404,7 @@ export const schoolSchemas = {
   create: Joi.object({
     name: Joi.string().min(2).max(255).required(),
     image: Joi.string().uri().optional(),
+    cover_image: Joi.string().uri().optional(),
     type: Joi.string()
       .valid("public", "private", "charter", "international", "other")
       .required(),
@@ -428,6 +429,7 @@ export const schoolSchemas = {
   update: Joi.object({
     name: Joi.string().min(2).max(255).optional(),
     image: Joi.string().uri().optional(),
+    cover_image: Joi.string().uri().optional(),
     type: Joi.string()
       .valid("public", "private", "charter", "international", "other")
       .optional(),

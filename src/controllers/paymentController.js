@@ -5,7 +5,6 @@ import { logger } from "../utils/logger.js";
 import { getSupabase, createServiceClient } from "../db/index.js";
 import { OrderRepository } from "../repositories/orderRepository.js";
 import { AppError } from "../middleware/errorHandler.js";
-import { emailService } from "../services/emailService.js";
 
 // Initialize Razorpay instance
 const razorpay = new Razorpay({
@@ -221,6 +220,7 @@ export class PaymentController {
                 const existingMetadata = verifiedOrder?.metadata || {};
                 orderUpdatePayload.metadata = {
                     ...existingMetadata,
+                    status: "processed",
                     paid_online: true,
                     paid_online_at: new Date().toISOString(),
                     online_payment_id: razorpay_payment_id,
@@ -433,11 +433,13 @@ export class PaymentController {
     /**
     * Handle Razorpay Webhooks
     * POST /api/payments/webhook
+    *
+    * Lightweight: verifies signature → pushes to queue → returns 200.
+    * Heavy processing (DB updates, cancellations) happens in webhookWorker.js.
     */
     handleWebhook = asyncHandler(async (req, res) => {
         const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
-        // If no secret is set, we can't verify, so ignore or log warning
         if (!secret) {
             logger.warn("RAZORPAY_WEBHOOK_SECRET is not set. Webhooks cannot be verified.");
             return res.status(200).send("Webhook received but not verified");
@@ -446,178 +448,86 @@ export class PaymentController {
         const shasum = crypto.createHmac("sha256", secret);
         shasum.update(JSON.stringify(req.body));
         const digest = shasum.digest("hex");
-
         const signature = req.headers["x-razorpay-signature"];
 
-        if (digest === signature) {
-            const event = req.body.event;
-            const payload = req.body.payload;
-
-            logger.info("Razorpay Webhook Verified", { event });
-
-            if (event === "payment.captured") {
-                const payment = payload.payment.entity;
-                const orderId = payment.notes.orderId;
-
-                if (orderId) {
-                    try {
-                        // Fetch order to check if it was COD
-                        const webhookOrder = await this.orderRepository.findById(orderId);
-                        const wasCODWebhook = webhookOrder?.paymentMethod === 'cod';
-
-                        // Build update payload
-                        const webhookUpdatePayload = {
-                            payment_status: "paid",
-                            updated_at: new Date().toISOString(),
-                        };
-
-                        // Only set status to processed if not COD (COD is already processed)
-                        if (!wasCODWebhook) {
-                            webhookUpdatePayload.status = "processed";
-                        }
-
-                        // Add remark for COD orders paid online
-                        if (wasCODWebhook) {
-                            const existingMeta = webhookOrder?.metadata || {};
-                            webhookUpdatePayload.metadata = {
-                                ...existingMeta,
-                                paid_online: true,
-                                paid_online_at: new Date().toISOString(),
-                                online_payment_id: payment.id,
-                                remark: "COD order paid online by customer",
-                            };
-                        }
-
-                        const { error: orderError } = await this.serviceClient
-                            .from("orders")
-                            .update(webhookUpdatePayload)
-                            .eq("id", orderId);
-
-                        if (orderError) throw new Error(`Orders update failed: ${orderError.message}`);
-
-                        // Update order items only if not COD (COD items already processed)
-                        if (!wasCODWebhook) {
-                            const { error: itemsError } = await this.serviceClient
-                                .from("order_items")
-                                .update({
-                                    status: "processed",
-                                })
-                                .eq("order_id", orderId);
-
-                            if (itemsError) throw new Error(`Order items update failed: ${itemsError.message}`);
-                        }
-
-                        // Update transaction too
-                        const { error: txnError } = await this.serviceClient
-                            .from("transactions")
-                            .update({
-                                payment_id: payment.id,
-                                status: "completed",
-                                updated_at: new Date().toISOString(),
-                            })
-                            .eq("gateway_order_id", payment.order_id);
-
-                        if (txnError) throw new Error(`Transaction update failed: ${txnError.message}`);
-
-                        // Send deferred order confirmation emails after webhook payment capture
-                        if (!wasCODWebhook) {
-                            this._triggerDeferredNotifications(orderId).catch(err => {
-                                logger.error("Webhook: Failed to trigger deferred notifications", {
-                                    orderId, error: err.message,
-                                });
-                            });
-                        }
-
-                        logger.info("Webhook: Successfully processed captured payment", { orderId, paymentId: payment.id, wasCOD: wasCODWebhook });
-                    } catch (captureError) {
-                        logger.error("Webhook: Failed to process captured payment updates", {
-                            orderId,
-                            paymentId: payment.id,
-                            error: captureError.message
-                        });
-                        // Don't throw, let the webhook return 200 so Razorpay doesn't infinitely retry 
-                        // when our DB is the issue. The new /reconcile API will handle recovery.
-                    }
-                }
-            } else if (event === "payment.failed") {
-                const payment = payload.payment.entity;
-                const orderId = payment.notes.orderId;
-
-                if (orderId) {
-                    // 1. Update transaction as failed
-                    await this.serviceClient
-                        .from("transactions")
-                        .update({
-                            payment_id: payment.id,
-                            status: "failed",
-                            error_code: payment.error_code,
-                            error_description: payment.error_description,
-                            updated_at: new Date().toISOString(),
-                        })
-                        .eq("gateway_order_id", payment.order_id);
-
-                    // 2. Set payment_status to failed immediately (guaranteed)
-                    await this.serviceClient
-                        .from("orders")
-                        .update({ payment_status: "failed", updated_at: new Date().toISOString() })
-                        .eq("id", orderId);
-
-                    // 3. Cancel order + restock if still in initialized state (safety net)
-                    try {
-                        const { OrderService } = await import("../services/orderService.js");
-                        const { OrderRepository } = await import("../repositories/orderRepository.js");
-                        const { ProductRepository } = await import("../repositories/productRepository.js");
-                        const { UserRepository } = await import("../repositories/userRepository.js");
-                        const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
-                        const { WarehouseRepository } = await import("../repositories/warehouseRepository.js");
-
-                        const orderRepo = new OrderRepository(this.serviceClient);
-                        const orderService = new OrderService(
-                            orderRepo, new ProductRepository(), new UserRepository(this.serviceClient),
-                            new OrderEventRepository(), null, new WarehouseRepository()
-                        );
-
-                        const order = await orderRepo.findById(orderId);
-                        if (order && order.status === "initialized") {
-                            await orderService.cancelOrder(
-                                orderId, order.userId,
-                                `Webhook: Payment Failed - ${payment.error_description || payment.error_code || "Unknown"}`
-                            );
-                            logger.info("Webhook: Order auto-cancelled due to payment failure", { orderId });
-                        } else {
-                            logger.info("Webhook: Order not in initialized state, skipping cancel", {
-                                orderId, currentStatus: order?.status
-                            });
-                        }
-                    } catch (cancelError) {
-                        logger.error("Webhook: Failed to cancel order after payment failure", {
-                            orderId, error: cancelError.message
-                        });
-
-                        // Fallback: direct DB updates for status and items
-                        try {
-                            // await this.serviceClient.from("orders").update({
-                            //     status: "cancelled", updated_at: new Date().toISOString(),
-                            // }).eq("id", orderId).eq("status", "initialized");
-
-                            // await this.serviceClient.from("order_items").update({
-                            //     status: "cancelled",
-                            // }).eq("order_id", orderId).neq("status", "cancelled");
-
-                            // logger.info("Webhook fallback: Order and items directly cancelled", { orderId });
-                        } catch (fallbackError) {
-                            logger.error("Webhook fallback cancellation also failed", { orderId, error: fallbackError.message });
-                        }
-                    }
-                }
-            }
-
-            res.status(200).json({ status: "ok" });
-        } else {
+        if (digest !== signature) {
             logger.error("Invalid Webhook Signature");
-            res.status(400).json({ error: "Invalid signature" });
+            return res.status(400).json({ error: "Invalid signature" });
         }
+
+        // Signature verified — push to queue and return 200 immediately
+        const event = req.body.event;
+        const payload = req.body.payload;
+        logger.info("Razorpay Webhook Verified", { event });
+
+        // Try to queue the event for background processing
+        const { queueWebhookEvent } = await import("../queue/webhookQueue.js");
+        const job = await queueWebhookEvent(event, payload);
+
+        if (job) {
+            logger.info("Webhook event queued for background processing", { event, jobId: job.id });
+            return res.status(200).json({ status: "ok", queued: true });
+        }
+
+        // Fallback: Redis not available — process inline (old behavior)
+        logger.info("Webhook: Redis unavailable, processing inline", { event });
+        await this._processWebhookInline(event, payload);
+        res.status(200).json({ status: "ok" });
     });
+
+    /**
+     * Fallback: Process webhook inline when Redis is unavailable.
+     */
+    async _processWebhookInline(event, payload) {
+        if (event === "payment.captured") {
+            const payment = payload.payment.entity;
+            const orderId = payment.notes?.orderId;
+            if (!orderId) return;
+
+            try {
+                const webhookOrder = await this.orderRepository.findById(orderId);
+                const wasCOD = webhookOrder?.paymentMethod === 'cod';
+                const updatePayload = { payment_status: "paid", updated_at: new Date().toISOString() };
+                if (!wasCOD) updatePayload.status = "processed";
+                if (wasCOD) {
+                    updatePayload.metadata = { ...(webhookOrder?.metadata || {}), paid_online: true, paid_online_at: new Date().toISOString(), online_payment_id: payment.id, remark: "COD order paid online by customer" };
+                }
+
+                await this.serviceClient.from("orders").update(updatePayload).eq("id", orderId);
+                if (!wasCOD) await this.serviceClient.from("order_items").update({ status: "processed" }).eq("order_id", orderId);
+                await this.serviceClient.from("transactions").update({ payment_id: payment.id, status: "completed", updated_at: new Date().toISOString() }).eq("gateway_order_id", payment.order_id);
+                if (!wasCOD) this._triggerDeferredNotifications(orderId).catch(err => logger.error("Webhook inline: notification failed", { orderId, error: err.message }));
+                logger.info("Webhook inline: payment.captured processed", { orderId });
+            } catch (err) {
+                logger.error("Webhook inline: payment.captured failed", { orderId, error: err.message });
+            }
+        } else if (event === "payment.failed") {
+            const payment = payload.payment.entity;
+            const orderId = payment.notes?.orderId;
+            if (!orderId) return;
+
+            await this.serviceClient.from("transactions").update({ payment_id: payment.id, status: "failed", error_code: payment.error_code, error_description: payment.error_description, updated_at: new Date().toISOString() }).eq("gateway_order_id", payment.order_id);
+            await this.serviceClient.from("orders").update({ payment_status: "failed", updated_at: new Date().toISOString() }).eq("id", orderId);
+
+            try {
+                const { OrderService } = await import("../services/orderService.js");
+                const { OrderRepository } = await import("../repositories/orderRepository.js");
+                const { ProductRepository } = await import("../repositories/productRepository.js");
+                const { UserRepository } = await import("../repositories/userRepository.js");
+                const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
+                const { WarehouseRepository } = await import("../repositories/warehouseRepository.js");
+                const orderRepo = new OrderRepository(this.serviceClient);
+                const orderService = new OrderService(orderRepo, new ProductRepository(), new UserRepository(this.serviceClient), new OrderEventRepository(), null, new WarehouseRepository());
+                const order = await orderRepo.findById(orderId);
+                if (order && order.status === "initialized") {
+                    await orderService.cancelOrder(orderId, order.userId, `Webhook: Payment Failed - ${payment.error_description || payment.error_code || "Unknown"}`);
+                    logger.info("Webhook inline: Order auto-cancelled", { orderId });
+                }
+            } catch (cancelError) {
+                logger.error("Webhook inline: Failed to cancel order", { orderId, error: cancelError.message });
+            }
+        }
+    }
 
     /**
      * Handle Payment Failure (Explicit from Frontend)
