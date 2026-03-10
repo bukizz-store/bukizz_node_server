@@ -1,4 +1,5 @@
 import { AppError } from "../middleware/errorHandler.js";
+import { v4 as uuidv4 } from "uuid";
 import { logger } from "../utils/logger.js";
 import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
 import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
@@ -2290,6 +2291,86 @@ export class OrderService {
         `Skipping refund for Item ${item.id} - Order payment status is ${order.paymentStatus}`,
       );
     }
+  }
+
+  // ── Admin Order Query Methods ──────────────────────────────────────────
+
+  /**
+   * Get paginated list of all order queries for admin dashboard.
+   * @param {Object} filters - { page, limit, status, priority, search, sortBy, sortOrder }
+   * @returns {{ queries, pagination }}
+   */
+  async getAdminQueries(filters) {
+    return this.orderQueryRepository.adminFindAll(filters);
+  }
+
+  /**
+   * Get detailed view of a single order query for admin.
+   * Includes order details, customer details, and conversation thread.
+   * @param {string} queryId
+   * @returns {Object}
+   */
+  async getAdminQueryDetail(queryId) {
+    const detail = await this.orderQueryRepository.adminFindByIdDetailed(queryId);
+    if (!detail) {
+      throw new AppError("Order query not found", 404);
+    }
+    return detail;
+  }
+
+  /**
+   * Add an admin reply to a query's conversation thread.
+   * Auto-transitions status from "open" to "pending" on first admin reply.
+   * @param {string} queryId
+   * @param {{ message: string, attachments?: Array }} replyBody
+   * @param {{ id: string, fullName: string }} adminUser - from req.user
+   * @returns {Object} Updated query
+   */
+  async addAdminReply(queryId, replyBody, adminUser) {
+    // Verify query exists
+    const existing = await this.orderQueryRepository.findById(queryId);
+    if (!existing) {
+      throw new AppError("Order query not found", 404);
+    }
+
+    const replyData = {
+      id: uuidv4(),
+      sender: adminUser.fullName || adminUser.email || "Admin",
+      senderId: adminUser.id,
+      senderRole: "admin",
+      message: replyBody.message,
+      attachments: replyBody.attachments || [],
+      createdAt: new Date().toISOString(),
+    };
+
+    await this.orderQueryRepository.addReply(queryId, replyData);
+
+    // Auto-transition: if status is "open", move to "pending"
+    if (existing.status === "open") {
+      await this.orderQueryRepository.adminUpdateStatus(
+        queryId,
+        "pending",
+        "Auto-transitioned on first admin reply",
+      );
+    }
+
+    return this.orderQueryRepository.findById(queryId);
+  }
+
+  /**
+   * Update the status of an order query (admin action).
+   * @param {string} queryId
+   * @param {string} status - "open" | "pending" | "resolved"
+   * @param {string} [note]
+   * @returns {Object} Updated query
+   */
+  async updateAdminQueryStatus(queryId, status, note) {
+    const existing = await this.orderQueryRepository.findById(queryId);
+    if (!existing) {
+      throw new AppError("Order query not found", 404);
+    }
+
+    return this.orderQueryRepository.adminUpdateStatus(queryId, status, note);
   }
 }
 
