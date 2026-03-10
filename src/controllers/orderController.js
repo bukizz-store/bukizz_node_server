@@ -1045,6 +1045,91 @@ export class OrderController {
     });
   });
 
+  // ── Admin Order Query Handlers ──────────────────────────────────────────
+
+  /**
+   * List all order queries (admin view)
+   * GET /api/v1/orders/admin/queries
+   */
+  getAdminQueries = asyncHandler(async (req, res) => {
+    const result = await this.orderService.getAdminQueries(req.query);
+
+    res.json({
+      success: true,
+      data: result.queries,
+      pagination: result.pagination,
+      message: "Admin queries retrieved successfully",
+    });
+  });
+
+  /**
+   * Get detailed view of a specific order query (admin view)
+   * GET /api/v1/orders/admin/queries/:queryId
+   */
+  getAdminQueryDetail = asyncHandler(async (req, res) => {
+    const { queryId } = req.params;
+    const detail = await this.orderService.getAdminQueryDetail(queryId);
+
+    res.json({
+      success: true,
+      data: detail,
+      message: "Admin query detail retrieved successfully",
+    });
+  });
+
+  /**
+   * Add an admin reply to a query thread
+   * POST /api/v1/orders/admin/queries/:queryId/reply
+   */
+  addAdminReply = asyncHandler(async (req, res) => {
+    const { queryId } = req.params;
+    const adminUser = req.user;
+
+    const updatedQuery = await this.orderService.addAdminReply(
+      queryId,
+      req.body,
+      adminUser,
+    );
+
+    logger.info("Admin reply added to query", {
+      queryId,
+      adminId: adminUser.id,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: updatedQuery,
+      message: "Reply added successfully",
+    });
+  });
+
+  /**
+   * Update the status of an order query (admin action)
+   * PUT /api/v1/orders/admin/queries/:queryId/status
+   */
+  updateAdminQueryStatus = asyncHandler(async (req, res) => {
+    const { queryId } = req.params;
+    const { status, note } = req.body;
+
+    const updatedQuery = await this.orderService.updateAdminQueryStatus(
+      queryId,
+      status,
+      note,
+    );
+
+    logger.info("Admin query status updated", {
+      queryId,
+      newStatus: status,
+      adminId: req.user.id,
+    });
+
+    res.json({
+      success: true,
+      data: updatedQuery,
+      message: "Query status updated successfully",
+    });
+  });
+
   // Helper methods for business logic
   static _canCancelOrder(order) {
     const cancellableStatuses = ["initialized", "processed"];
