@@ -430,10 +430,14 @@ export class OrderRepository {
         "refunded",
       ];
 
-      // ── retailerId / warehouseId → pre-resolve matching order IDs ──────────
-      let warehouseIds = null;
+      const isUUID = (str) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
 
-      if (retailerId) {
+      // ── Resolve specific matching order IDs from Items and Orders ──────
+      let warehouseIds = null;
+      if (warehouseId) {
+        warehouseIds = [warehouseId];
+      } else if (retailerId) {
         const { data: retailerWarehouses } = await this.supabase
           .from("warehouses")
           .select("id")
@@ -443,69 +447,120 @@ export class OrderRepository {
         } else {
           return {
             orders: [],
-            pagination: {
-              page: parseInt(page),
-              limit: parseInt(limit),
-              total: 0,
-              totalPages: 0,
-              hasNext: false,
-              hasPrev: false,
-            },
+            pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
           };
         }
-      } else if (warehouseId) {
-        warehouseIds = [warehouseId];
       }
 
-      let filteredOrderIds = null;
-      if (warehouseIds) {
-        const { data: itemRows } = await this.supabase
-          .from("order_items")
-          .select("order_id")
-          .in("warehouse_id", warehouseIds);
-        const { data: orderRows } = await this.supabase
-          .from("orders")
-          .select("id")
-          .in("warehouse_id", warehouseIds);
-        const combined = [
+      let validOrderIdsByItemFilters = null;
+      let validOrderIdsBySearch = null;
+
+      // 1. Resolve order IDs based on item-level filters (warehouse and status)
+      // Because retailers manage items, the status and warehouse filters should apply to items
+      if (warehouseIds || (status && validOrderStatuses.includes(status))) {
+        let itemQuery = this.supabase.from("order_items").select("order_id");
+        let orderQuery = this.supabase.from("orders").select("id"); // Orders that directly hold the warehouse_id
+
+        if (warehouseIds) {
+          itemQuery = itemQuery.in("warehouse_id", warehouseIds);
+          orderQuery = orderQuery.in("warehouse_id", warehouseIds);
+        }
+        if (status && validOrderStatuses.includes(status)) {
+          itemQuery = itemQuery.eq("status", status);
+          orderQuery = orderQuery.eq("status", status); // Also filter orders table for fallback
+        }
+
+        const [{ data: itemRows }, { data: orderRows }] = await Promise.all([
+          itemQuery,
+          orderQuery,
+        ]);
+
+        validOrderIdsByItemFilters = [
           ...new Set([
             ...(itemRows || []).map((i) => i.order_id),
             ...(orderRows || []).map((o) => o.id),
           ]),
         ];
-        if (combined.length === 0) {
+
+        // If filtering by warehouse/status but no items/orders match, return empty
+        if (validOrderIdsByItemFilters.length === 0) {
           return {
             orders: [],
-            pagination: {
-              page: parseInt(page),
-              limit: parseInt(limit),
-              total: 0,
-              totalPages: 0,
-              hasNext: false,
-              hasPrev: false,
-            },
+            pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
           };
         }
-        filteredOrderIds = combined;
+      }
+
+      // 2. Resolve order IDs based on search term
+      if (effectiveSearchTerm) {
+        const searchOrderIds = new Set();
+        const searchPromises = [];
+
+        // Search orders table
+        const orderSearchQuery = this.supabase.from("orders").select("id").or(
+          `order_number.ilike.%${effectiveSearchTerm}%,contact_email.ilike.%${effectiveSearchTerm}%,contact_phone.ilike.%${effectiveSearchTerm}%`
+        );
+        searchPromises.push(orderSearchQuery);
+
+        // Search item dispatch id
+        searchPromises.push(
+          this.supabase.from("order_items").select("order_id").ilike("dispatch_id", `%${effectiveSearchTerm}%`)
+        );
+
+        // If UUID, search direct IDs
+        if (isUUID(effectiveSearchTerm)) {
+          searchPromises.push(this.supabase.from("orders").select("id").eq("id", effectiveSearchTerm));
+          searchPromises.push(this.supabase.from("order_items").select("order_id").eq("id", effectiveSearchTerm));
+          searchPromises.push(this.supabase.from("orders").select("id").eq("warehouse_id", effectiveSearchTerm));
+          searchPromises.push(this.supabase.from("order_items").select("order_id").eq("warehouse_id", effectiveSearchTerm));
+        }
+
+        const searchResults = await Promise.all(searchPromises);
+        
+        for (const { data } of searchResults) {
+          if (data) {
+            data.forEach(row => searchOrderIds.add(row.id || row.order_id));
+          }
+        }
+
+        validOrderIdsBySearch = Array.from(searchOrderIds);
+        
+        // If searching but no results, return empty
+        if (validOrderIdsBySearch.length === 0) {
+          return {
+            orders: [],
+            pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
+          };
+        }
+      }
+
+      // 3. Intersect valid order IDs if both search and filters were applied
+      let finalOrderIds = null;
+      if (validOrderIdsByItemFilters !== null && validOrderIdsBySearch !== null) {
+        finalOrderIds = validOrderIdsByItemFilters.filter(id => validOrderIdsBySearch.includes(id));
+      } else if (validOrderIdsByItemFilters !== null) {
+        finalOrderIds = validOrderIdsByItemFilters;
+      } else if (validOrderIdsBySearch !== null) {
+        finalOrderIds = validOrderIdsBySearch;
+      }
+
+      // If we had conditions but their intersection is empty
+      if ((validOrderIdsByItemFilters !== null || validOrderIdsBySearch !== null) && 
+          (!finalOrderIds || finalOrderIds.length === 0)) {
+        return {
+          orders: [],
+          pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
+        };
       }
 
       // ── Build main query ────────────────────────────────────────────────────
       let query = this.supabase.from("orders").select("*", { count: "exact" });
 
-      // Apply filters - validate status against enum values
-      if (status && validOrderStatuses.includes(status))
-        query = query.eq("status", status);
       if (userId) query = query.eq("user_id", userId);
       if (paymentStatus) query = query.eq("payment_status", paymentStatus);
       if (startDate) query = query.gte("created_at", startDate);
       if (endDate) query = query.lte("created_at", endDate);
-      if (filteredOrderIds) query = query.in("id", filteredOrderIds);
-
-      if (effectiveSearchTerm) {
-        query = query.or(
-          `order_number.ilike.%${effectiveSearchTerm}%,contact_email.ilike.%${effectiveSearchTerm}%,contact_phone.ilike.%${effectiveSearchTerm}%`,
-        );
-      }
+      if (finalOrderIds) query = query.in("id", finalOrderIds);
 
       // Apply sorting and pagination
       const ascending = sortOrder.toLowerCase() === "asc";
@@ -521,7 +576,13 @@ export class OrderRepository {
 
       // Batch fetch items for all orders to avoid N+1 problem
       const orderIds = (orders || []).map((o) => o.id);
-      const itemsMap = await this._getItemsForOrders(orderIds);
+      
+      const itemsFilters = {
+        warehouseIds,
+        status: (status && validOrderStatuses.includes(status)) ? status : null
+      };
+
+      const itemsMap = await this._getItemsForOrders(orderIds, itemsFilters);
 
       const formattedOrders = (orders || []).map((order) => {
         const formattedOrder = this._formatOrder(order);
@@ -706,15 +767,23 @@ export class OrderRepository {
   /**
    * Get items for multiple orders (Batch Fetch)
    */
-  async _getItemsForOrders(orderIds) {
+  async _getItemsForOrders(orderIds, filters = {}) {
     if (!orderIds || orderIds.length === 0) return {};
 
     try {
-      const { data: items, error } = await this.supabase
+      let query = this.supabase
         .from("order_items")
         .select("*")
-        .in("order_id", orderIds)
-        .order("created_at", { ascending: true });
+        .in("order_id", orderIds);
+
+      if (filters.warehouseIds && filters.warehouseIds.length > 0) {
+        query = query.in("warehouse_id", filters.warehouseIds);
+      }
+      if (filters.status) {
+        query = query.eq("status", filters.status);
+      }
+
+      const { data: items, error } = await query.order("created_at", { ascending: true });
 
       if (error) {
         logger.error("Error getting batch order items:", error);
