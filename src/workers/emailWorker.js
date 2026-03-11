@@ -78,6 +78,7 @@ export function startEmailWorker() {
         {
             connection: getRedisConnection(),
             concurrency: 3, // Process up to 3 emails simultaneously
+            drainDelay: 30000, // Poll every 30s when idle to reduce Upstash usage
         }
     );
 

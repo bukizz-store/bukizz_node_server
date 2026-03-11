@@ -51,6 +51,7 @@ export function startOrderWorker() {
         {
             connection: getRedisConnection(),
             concurrency: 2,
+            drainDelay: 30000, // Poll every 30s when idle to reduce Upstash usage
         }
     );
 

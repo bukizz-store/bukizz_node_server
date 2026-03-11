@@ -31,4 +31,39 @@ export class PincodeController {
             next(error);
         }
     }
+
+    static async bulkInsert(req, res, next) {
+        try {
+            const { pincodes } = req.body;
+
+            if (!Array.isArray(pincodes) || pincodes.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: "A non-empty array of pincodes is required",
+                });
+            }
+
+            const invalid = pincodes.filter(p => !/^\d{6}$/.test(String(p).trim()));
+            if (invalid.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: "All pincodes must be 6-digit numbers",
+                    invalidPincodes: invalid.slice(0, 10),
+                });
+            }
+
+            const supabase = getSupabase();
+            const pincodeRepository = new PincodeRepository(supabase);
+            const result = await pincodeRepository.bulkInsert(pincodes);
+
+            res.status(201).json({
+                success: true,
+                message: `Successfully processed ${result.total} pincodes`,
+                data: result,
+            });
+        } catch (error) {
+            logger.error("Bulk pincode insert failed", { error: error.message });
+            next(error);
+        }
+    }
 }

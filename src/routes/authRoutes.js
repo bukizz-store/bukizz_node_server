@@ -53,6 +53,7 @@ export default function authRoutes(dependencies = {}) {
     authController.resetPassword
   );
   router.post("/google-login", authController.googleLogin);
+  router.post("/apple-login", authController.appleLogin);
   router.post("/verify-token", authController.verifyToken);
   router.post("/send-otp", authController.sendOtp);
   router.post("/verify-otp", authController.verifyOtp);
