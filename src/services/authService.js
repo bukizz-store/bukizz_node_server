@@ -509,6 +509,134 @@ export class AuthService {
     }
   }
 
+  async appleLogin(token) {
+    try {
+      logger.info("Verifying Apple token with Supabase");
+      // Verify the token with Supabase Auth
+      const { data: { user: supabaseUser }, error: verifyError } = await this.supabase.auth.getUser(token);
+
+      if (verifyError || !supabaseUser) {
+        logger.error("Apple token verification failed:", verifyError);
+        throw new Error("Invalid Apple token");
+      }
+
+      let email = supabaseUser.email;
+      if (email) email = email.toLowerCase();
+      logger.info(`Apple token verified for email: ${email}`);
+      const fullName = supabaseUser.user_metadata?.full_name || supabaseUser.user_metadata?.name || (email ? email.split('@')[0] : 'Apple User');
+
+      // Check if user already exists in our users table
+      const { data: existingUser, error: checkError } = await this.supabase
+        .from("users")
+        .select("id, full_name, email, email_verified, phone, is_active, role")
+        .ilike("email", email)
+        .single();
+
+      let userId;
+      let user;
+
+      if (existingUser) {
+        logger.info(`Existing user found for email: ${email}`);
+        userId = existingUser.id;
+        user = existingUser;
+
+        // Update email_verified if it's not verified (since Apple verified it)
+        if (!existingUser.email_verified) {
+          logger.info(`Updating email verification status for user: ${userId}`);
+          await this.supabase
+            .from("users")
+            .update({ email_verified: true, updated_at: new Date().toISOString() })
+            .eq("id", userId);
+          user.email_verified = true;
+        }
+
+        // Ensure user_auth record exists for apple provider
+        const { data: existingAuth } = await this.supabase
+          .from("user_auths")
+          .select("id")
+          .eq("user_id", userId)
+          .eq("provider", "apple")
+          .single();
+
+        if (!existingAuth) {
+          logger.info(`Creating apple auth record for existing user: ${userId}`);
+          await this.supabase
+            .from("user_auths")
+            .insert({
+              id: uuidv4(),
+              user_id: userId,
+              provider: "apple",
+              provider_user_id: supabaseUser.id,
+              created_at: new Date().toISOString(),
+            });
+        }
+
+      } else {
+        logger.info(`Creating new user for email: ${email}`);
+        // Create new user
+        userId = uuidv4();
+
+        const { error: userError } = await this.supabase.from("users").insert({
+          id: userId,
+          full_name: fullName,
+          email: email,
+          email_verified: true, // Trusted from Apple
+          is_active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+        if (userError) {
+          logger.error("Failed to create new user:", userError);
+          throw userError;
+        }
+
+        // Create user_auth record
+        const { error: authError } = await this.supabase
+          .from("user_auths")
+          .insert({
+            id: uuidv4(),
+            user_id: userId,
+            provider: "apple",
+            provider_user_id: supabaseUser.id,
+            created_at: new Date().toISOString(),
+          });
+
+        if (authError) {
+          logger.error("Failed to create auth record for new user:", authError);
+          throw authError;
+        }
+
+        user = {
+          id: userId,
+          full_name: fullName,
+          email: email,
+          email_verified: true,
+          is_active: true
+        };
+        logger.info(`New user created successfully: ${userId}`);
+      }
+
+      if (!user.is_active) {
+        logger.warn(`Inactive user attempted login: ${email}`);
+        throw new Error("User account is inactive");
+      }
+
+      // Generate tokens
+      logger.info(`Generating tokens for user: ${userId}`);
+      const tokens = await this.generateTokens(userId);
+
+      return {
+        user,
+        ...tokens,
+      };
+
+    } catch (error) {
+      logger.error("Apple login service error:", error);
+      throw error;
+    }
+  }
+
   async generateTokens(userId, deviceInfo = null) {
     try {
       // Generate access token
