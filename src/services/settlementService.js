@@ -452,6 +452,23 @@ export class SettlementService {
   }
 
   /**
+   * Admin: Fetch all retailers with outstanding balances from the
+   * `vw_admin_due_settlements` view, ordered by oldest debt first.
+   *
+   * @returns {Promise<Array<Object>>}
+   *   Each row: { retailer_id, retailer_name, total_owed,
+   *               unsettled_ledgers_count, oldest_due_date }
+   */
+  async getAdminDueSettlements() {
+    try {
+      return await this.settlementRepository.getAdminDueSettlements();
+    } catch (error) {
+      logger.error("Error fetching admin due settlements:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Admin: Get full payout history for a retailer (newest first).
    *
    * @param {string} retailerId

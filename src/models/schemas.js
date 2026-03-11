@@ -783,6 +783,44 @@ export const orderQuerySchemas = {
       .default("createdAt"),
     sortOrder: Joi.string().valid("asc", "desc").default("desc"),
   }),
+
+  // ── Admin Order Query Schemas ──────────────────────────────────────────
+
+  adminListQuery: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(20),
+    status: Joi.string()
+      .valid("open", "pending", "resolved")
+      .optional(),
+    priority: Joi.string().valid("low", "normal", "high", "urgent").optional(),
+    search: Joi.string().max(255).optional(),
+    sortBy: Joi.string()
+      .valid("created_at", "updated_at", "priority", "status")
+      .default("created_at"),
+    sortOrder: Joi.string().valid("asc", "desc").default("desc"),
+  }),
+
+  adminReply: Joi.object({
+    message: Joi.string().min(1).max(2000).required(),
+    attachments: Joi.array()
+      .items(
+        Joi.object({
+          filename: Joi.string().required(),
+          url: Joi.string().uri().required(),
+          mimeType: Joi.string().optional(),
+          size: Joi.number().integer().min(1).optional(),
+        }),
+      )
+      .max(5)
+      .optional(),
+  }),
+
+  adminStatusUpdate: Joi.object({
+    status: Joi.string()
+      .valid("open", "pending", "resolved")
+      .required(),
+    note: Joi.string().max(1000).optional(),
+  }),
 };
 
 /**

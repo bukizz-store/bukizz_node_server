@@ -231,6 +231,40 @@ export const settlementRepository = {
    * @param {string} retailerId - UUID of the retailer.
    * @returns {Promise<Object|null>} Settlement with nested ledger items, or null.
    */
+  /**
+   * Admin: Fetch all outstanding retailer balances from the
+   * `vw_admin_due_settlements` database view.
+   * Ordered by oldest_due_date ascending so the most overdue retailers
+   * appear first.
+   *
+   * @returns {Promise<Array<Object>>}
+   *   Each row: { retailer_id, retailer_name, total_owed,
+   *               unsettled_ledgers_count, oldest_due_date }
+   */
+  async getAdminDueSettlements() {
+    try {
+      const supabase = getSupabase();
+
+      const { data, error } = await supabase
+        .from("vw_admin_due_settlements")
+        .select("*")
+        .order("oldest_due_date", { ascending: true }); // Prioritize oldest debts
+
+      if (error) {
+        logger.error("Error fetching admin due settlements view:", error);
+        throw error;
+      }
+
+      return data || [];
+    } catch (error) {
+      logger.error(
+        "settlementRepository.getAdminDueSettlements failed:",
+        error,
+      );
+      throw error;
+    }
+  },
+
   async getRetailerSettlementDetails(settlementId, retailerId) {
     try {
       const supabase = getSupabase();

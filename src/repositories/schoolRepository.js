@@ -275,14 +275,6 @@ export class SchoolRepository {
         updates.board = updateData.board;
       }
 
-      if (updateData.phone !== undefined) {
-        updates.phone = updateData.phone;
-      }
-
-      if (updateData.email !== undefined) {
-        updates.email = updateData.email;
-      }
-
       if (updateData.isActive !== undefined) {
         updates.is_active = updateData.isActive;
       }

@@ -96,6 +96,13 @@ export default function settlementRoutes(controller) {
     controller.executeAdminFifoPayout,
   );
 
+  // Endpoint 5: All retailers with outstanding balances (view-backed)
+  router.get(
+    "/admin/due-today",
+    requireRoles("admin"),
+    controller.getAdminDueSettlements,
+  );
+
   // ── Retailer Settlement Routes ─────────────────────────────────────────
 
   // Endpoint 1: Get Retailer Ledgers (Tab 1 & 2)

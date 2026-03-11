@@ -66,6 +66,71 @@ export default function orderRoutes(dependencies = {}) {
   // Get current user's orders with filtering
   router.get("/my-orders", orderQueryLimiter, OrderController.getUserOrders);
 
+  /**
+   * ADMIN ORDER QUERY / SUPPORT TICKET ENDPOINTS
+   * Base: /admin/queries (mounted at /api/v1/orders)
+   * NOTE: These MUST be defined BEFORE the /:orderId catch-all route.
+   */
+
+  // List all order queries (admin dashboard)
+  router.get(
+    "/admin/queries",
+    requireRoles("admin"),
+    validate(orderQuerySchemas.adminListQuery, "query"),
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.getAdminQueries(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // Get detailed view of a specific query
+  router.get(
+    "/admin/queries/:queryId",
+    requireRoles("admin"),
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.getAdminQueryDetail(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // Add admin reply to a query thread
+  router.post(
+    "/admin/queries/:queryId/reply",
+    requireRoles("admin"),
+    validate(orderQuerySchemas.adminReply),
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.addAdminReply(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // Update query status
+  router.put(
+    "/admin/queries/:queryId/status",
+    requireRoles("admin"),
+    validate(orderQuerySchemas.adminStatusUpdate),
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.updateAdminQueryStatus(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   // Get specific order details by ID
   router.get("/:orderId", orderQueryLimiter, OrderController.getOrderById);
 
