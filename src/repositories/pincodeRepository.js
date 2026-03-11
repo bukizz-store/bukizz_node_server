@@ -26,4 +26,50 @@ export class PincodeRepository {
             throw error;
         }
     }
+
+    async bulkInsert(pincodes) {
+        const uniquePincodes = [...new Set(pincodes.map(p => String(p).trim()))];
+
+        if (uniquePincodes.length === 0) {
+            return { inserted: 0, total: 0 };
+        }
+
+        const rows = uniquePincodes.map(pincode => ({
+            pincode,
+            is_active: true,
+        }));
+
+        const BATCH_SIZE = 500;
+        let totalInserted = 0;
+
+        for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+            const batch = rows.slice(i, i + BATCH_SIZE);
+
+            const { data, error } = await this.supabase
+                .from("allowed_pincodes")
+                .upsert(batch, { onConflict: "pincode", ignoreDuplicates: true })
+                .select("id");
+
+            if (error) {
+                logger.error("Bulk pincode insert failed", {
+                    batch: i / BATCH_SIZE + 1,
+                    error: error.message,
+                });
+                throw error;
+            }
+
+            totalInserted += data?.length || 0;
+        }
+
+        logger.info("Bulk pincode insert completed", {
+            requested: pincodes.length,
+            unique: uniquePincodes.length,
+            inserted: totalInserted,
+        });
+
+        return {
+            inserted: totalInserted,
+            total: uniquePincodes.length,
+        };
+    }
 }

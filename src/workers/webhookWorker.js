@@ -53,6 +53,7 @@ export function startWebhookWorker() {
         {
             connection: getRedisConnection(),
             concurrency: 2, // Process up to 2 webhook events simultaneously
+            drainDelay: 30000, // Poll every 30s when idle to reduce Upstash usage
         }
     );
 

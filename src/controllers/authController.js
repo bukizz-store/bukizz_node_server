@@ -184,6 +184,36 @@ export class AuthController {
     }
   }
 
+  async appleLogin(req, res) {
+    try {
+      const { token } = req.body;
+      logger.info("Apple login request received");
+
+      if (!token) {
+        logger.warn("Apple login failed: No token provided");
+        return res.status(400).json({
+          success: false,
+          message: "Token is required",
+        });
+      }
+
+      const result = await authService.appleLogin(token);
+      logger.info(`Apple login successful for user: ${result.user?.email}`);
+
+      res.status(200).json({
+        success: true,
+        message: "Apple login successful",
+        data: result,
+      });
+    } catch (error) {
+      logger.error("Apple login error:", error);
+      res.status(401).json({
+        success: false,
+        message: error.message || "Apple login failed",
+      });
+    }
+  }
+
   async refreshToken(req, res) {
     try {
       const { refreshToken } = req.body;

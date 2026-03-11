@@ -157,14 +157,17 @@ async function startServer() {
     // Start cron jobs
     setupCronJobs();
 
-    // Start BullMQ email worker only if Redis is configured
-    if (isRedisConfigured()) {
+    // Start BullMQ workers only in production with Redis configured
+    const isDev = process.env.NODE_ENV !== "production";
+    if (isRedisConfigured() && !isDev) {
       startEmailWorker();
       startWebhookWorker();
       startOrderWorker();
       logger.info("📧 All queue workers started (Email + Webhook + Order)");
     } else {
-      logger.info("📧 Queue workers skipped — no UPSTASH_REDIS_URL set.");
+      logger.info(
+        `📧 Queue workers skipped — ${isDev ? "development mode (direct fallback active)" : "no UPSTASH_REDIS_URL set"}.`
+      );
     }
 
     // Basic auth routes (keeping existing for backward compatibility)
