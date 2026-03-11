@@ -24,8 +24,8 @@ export function getWebhookQueue() {
         defaultJobOptions: {
             attempts: 5,                                     // Webhooks are critical — retry more
             backoff: { type: "exponential", delay: 3000 },   // 3s → 9s → 27s → 81s → 243s
-            removeOnComplete: { count: 500 },
-            removeOnFail: { count: 1000 },
+            removeOnComplete: { count: 100 },
+            removeOnFail: { count: 200 },
         },
     });
 

@@ -32,8 +32,8 @@ export function getEmailQueue() {
         defaultJobOptions: {
             attempts: 3,
             backoff: { type: "exponential", delay: 5000 },
-            removeOnComplete: { count: 200 },
-            removeOnFail: { count: 500 },
+            removeOnComplete: { count: 50 },
+            removeOnFail: { count: 100 },
         },
     });
 

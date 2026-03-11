@@ -28,12 +28,12 @@ export function isRedisConfigured() {
 export function getRedisConnection() {
     if (connection) return connection;
 
-    const redisUrl = process.env.UPSTASH_REDIS_URL || process.env.REDIS_URL;
-
+    const redisUrl = process.env.REDIS_URL || process.env.UPSTASH_REDIS_URL;
     if (redisUrl) {
         _isRedisConfigured = true;
 
-        // Upstash requires TLS — auto-enable if URL contains upstash.io
+        // Redis Cloud / Upstash may require TLS — auto-enable if URL starts with rediss://
+        // Upstash specifically also uses .upstash.io
         const isUpstash = redisUrl.includes("upstash.io");
         const needsTls = redisUrl.startsWith("rediss://") || isUpstash;
 
@@ -44,7 +44,7 @@ export function getRedisConnection() {
                 tls: { rejectUnauthorized: false },
             }),
         });
-        logger.info(`📡 [REDIS] Connected via URL${isUpstash ? " (Upstash, TLS enabled)" : ""}`);
+        logger.info(`📡 [REDIS] Connected via URL${needsTls ? " (TLS enabled)" : ""}`);
     } else {
         // No Redis URL configured — create a connection to localhost
         // but it will likely fail. The emailQueue fallback handles this.
