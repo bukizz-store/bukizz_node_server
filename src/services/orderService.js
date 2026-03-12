@@ -575,6 +575,7 @@ export class OrderService {
             image: imageUrl, // Keeping for backward compatibility
             weight: product.weight,
             dimensions: product.dimensions,
+            metadata: product.metadata || {},
             ...(item.variantId && {
               variantInfo: {
                 id: item.variantId,

@@ -425,6 +425,7 @@ export class RetailerOrderController {
                             totalPrice: item.totalPrice,
                             productSnapshot: {
                                 image_url: item.productSnapshot?.image_url || item.productSnapshot?.image || null,
+                                metadata: item.productSnapshot?.metadata || {},
                             },
                             status: item.status,
                             variant: item.variant ? {
