@@ -228,9 +228,70 @@ export class OrderQueryRepository {
       if (error) throw error;
 
       const total = count || 0;
+      let queriesList = data || [];
+
+      if (queriesList.length > 0) {
+        const orderIds = [...new Set(queriesList.map((q) => q.order_id).filter(Boolean))];
+        const userIds = [...new Set(queriesList.map((q) => q.user_id).filter(Boolean))];
+
+        let ordersMap = {};
+        if (orderIds.length > 0) {
+          const { data: ordersData } = await this.supabase
+            .from("orders")
+            .select("id, order_number")
+            .in("id", orderIds);
+
+          const { data: itemsData } = await this.supabase
+            .from("order_items")
+            .select("order_id, id, title, variant, dispatch_id")
+            .in("order_id", orderIds);
+
+          if (ordersData) {
+            ordersMap = ordersData.reduce((acc, order) => {
+              acc[order.id] = {
+                orderNumber: order.order_number,
+                items: itemsData?.filter((i) => i.order_id === order.id).map(i => ({
+                  title: i.title,
+                  variant: i.variant,
+                  dispatchId: i.dispatch_id
+                })) || [],
+              };
+              return acc;
+            }, {});
+          }
+        }
+
+        let usersMap = {};
+        if (userIds.length > 0) {
+          const { data: usersData } = await this.supabase
+            .from("users")
+            .select("id, full_name, email, phone")
+            .in("id", userIds);
+
+          if (usersData) {
+            usersMap = usersData.reduce((acc, user) => {
+              acc[user.id] = {
+                name: user.full_name,
+                email: user.email,
+                phone: user.phone,
+              };
+              return acc;
+            }, {});
+          }
+        }
+
+        queriesList = queriesList.map((q) => {
+          const formatted = this.formatQuery(q);
+          return {
+            ...formatted,
+            customer: usersMap[q.user_id] || null,
+            order: ordersMap[q.order_id] || null,
+          };
+        });
+      }
 
       return {
-        queries: (data || []).map((q) => this.formatQuery(q)),
+        queries: queriesList,
         pagination: {
           page,
           limit,
