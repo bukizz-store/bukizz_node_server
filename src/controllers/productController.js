@@ -331,10 +331,12 @@ export class ProductController {
    */
   activateProduct = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const { deliveryCharge } = req.body;
+    const { deliveryCharge, variantCommissions, paymentMethods } = req.body;
     const success = await this.productService.activateProduct(
       id,
       deliveryCharge,
+      variantCommissions,
+      paymentMethods,
     );
 
     logger.info("Product activated", { productId: id });
