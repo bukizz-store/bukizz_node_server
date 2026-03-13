@@ -238,23 +238,66 @@ export class OrderQueryRepository {
         if (orderIds.length > 0) {
           const { data: ordersData } = await this.supabase
             .from("orders")
-            .select("id, order_number")
+            .select("id, order_number, warehouse_id")
             .in("id", orderIds);
 
           const { data: itemsData } = await this.supabase
             .from("order_items")
-            .select("order_id, id, title, variant, dispatch_id")
+            .select("order_id, id, title, variant, dispatch_id, warehouse_id")
             .in("order_id", orderIds);
+
+          let warehousesMap = {};
+          let retailersMap = {};
+          
+          const itemWarehouseIds = (itemsData || []).map(i => i.warehouse_id).filter(Boolean);
+          const orderWarehouseIds = (ordersData || []).map(o => o.warehouse_id).filter(Boolean);
+          const warehouseIds = [...new Set([...itemWarehouseIds, ...orderWarehouseIds])];
+
+          if (warehouseIds.length > 0) {
+            const { data: warehousesData } = await this.supabase
+              .from("warehouses")
+              .select("id, name, retailer_id")
+              .in("id", warehouseIds);
+            
+            if (warehousesData) {
+              const retailerIds = [...new Set(warehousesData.map(w => w.retailer_id).filter(Boolean))];
+              if (retailerIds.length > 0) {
+                const { data: retailersData } = await this.supabase
+                  .from("users")
+                  .select("id, full_name")
+                  .in("id", retailerIds);
+                if (retailersData) {
+                  retailersMap = retailersData.reduce((acc, r) => {
+                    acc[r.id] = r.full_name;
+                    return acc;
+                  }, {});
+                }
+              }
+              
+              warehousesMap = warehousesData.reduce((acc, w) => {
+                acc[w.id] = {
+                  name: w.name,
+                  retailerName: retailersMap[w.retailer_id] || null
+                };
+                return acc;
+              }, {});
+            }
+          }
 
           if (ordersData) {
             ordersMap = ordersData.reduce((acc, order) => {
               acc[order.id] = {
                 orderNumber: order.order_number,
-                items: itemsData?.filter((i) => i.order_id === order.id).map(i => ({
-                  title: i.title,
-                  variant: i.variant,
-                  dispatchId: i.dispatch_id
-                })) || [],
+                items: itemsData?.filter((i) => i.order_id === order.id).map(i => {
+                  const resolvedWarehouseId = i.warehouse_id || order.warehouse_id;
+                  return {
+                    title: i.title,
+                    variant: i.variant,
+                    dispatchId: i.dispatch_id,
+                    warehouseName: warehousesMap[resolvedWarehouseId]?.name || null,
+                    retailerName: warehousesMap[resolvedWarehouseId]?.retailerName || null,
+                  };
+                }) || [],
               };
               return acc;
             }, {});
@@ -336,7 +379,7 @@ export class OrderQueryRepository {
       if (queryData.order_id) {
         const { data: orderData, error: orderError } = await this.supabase
           .from("orders")
-          .select("id, order_number, total_amount, currency, status, payment_method, payment_status, created_at")
+          .select("id, order_number, total_amount, currency, status, payment_method, payment_status, created_at, warehouse_id")
           .eq("id", queryData.order_id)
           .single();
 
@@ -344,9 +387,50 @@ export class OrderQueryRepository {
           // Fetch order items
           const { data: itemsData } = await this.supabase
             .from("order_items")
-            .select("id, title, sku, quantity, unit_price, total_price, status, product_snapshot")
+            .select("id, title, product_id, sku, quantity, unit_price, total_price, status, product_snapshot, warehouse_id")
             .eq("order_id", queryData.order_id)
             .order("created_at", { ascending: true });
+
+          // Fetch warehouses for these items (including fallback from order level)
+          const itemWarehouseIds = (itemsData || []).map(i => i.warehouse_id).filter(Boolean);
+          const orderWarehouseIds = orderData.warehouse_id ? [orderData.warehouse_id] : [];
+          const warehouseIds = [...new Set([...itemWarehouseIds, ...orderWarehouseIds])];
+          
+          let warehousesMap = {};
+          let retailersMap = {};
+
+          if (warehouseIds.length > 0) {
+            const { data: warehousesData } = await this.supabase
+              .from("warehouses")
+              .select("id, name, location, retailer_id")
+              .in("id", warehouseIds);
+            
+            if (warehousesData) {
+              const retailerIds = [...new Set(warehousesData.map(w => w.retailer_id).filter(Boolean))];
+              if (retailerIds.length > 0) {
+                const { data: retailersData } = await this.supabase
+                  .from("users")
+                  .select("id, full_name, email, phone, role")
+                  .in("id", retailerIds);
+                if (retailersData) {
+                  retailersMap = retailersData.reduce((acc, r) => {
+                    acc[r.id] = { id: r.id, name: r.full_name, email: r.email, phone: r.phone };
+                    return acc;
+                  }, {});
+                }
+              }
+
+              warehousesMap = warehousesData.reduce((acc, w) => {
+                acc[w.id] = {
+                  id: w.id,
+                  name: w.name,
+                  location: w.location,
+                  retailer: retailersMap[w.retailer_id] || null
+                };
+                return acc;
+              }, {});
+            }
+          }
 
           orderDetails = {
             id: orderData.id,
@@ -357,16 +441,21 @@ export class OrderQueryRepository {
             paymentMethod: orderData.payment_method,
             paymentStatus: orderData.payment_status,
             createdAt: orderData.created_at,
-            items: (itemsData || []).map((item) => ({
-              id: item.id,
-              title: item.title,
-              sku: item.sku,
-              quantity: item.quantity,
-              unitPrice: parseFloat(item.unit_price || 0),
-              totalPrice: parseFloat(item.total_price || 0),
-              status: item.status,
-              image: item.product_snapshot?.image_url || item.product_snapshot?.image || null,
-            })),
+            items: (itemsData || []).map((item) => {
+              const resolvedWarehouseId = item.warehouse_id || orderData.warehouse_id;
+              return {
+                id: item.id,
+                productId: item.product_id,
+                title: item.title,
+                sku: item.sku,
+                quantity: item.quantity,
+                unitPrice: parseFloat(item.unit_price || 0),
+                totalPrice: parseFloat(item.total_price || 0),
+                status: item.status,
+                image: item.product_snapshot?.image_url || item.product_snapshot?.image || null,
+                warehouse: warehousesMap[resolvedWarehouseId] || null,
+              };
+            }),
           };
         }
       }
