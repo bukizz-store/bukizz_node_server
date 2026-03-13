@@ -328,6 +328,14 @@ export class ProductService {
         product.paymentMethods = [];
       }
 
+      // Fetch variant commissions
+      try {
+        product.variantCommissions = await this.variantCommissionRepository.getCommissionsByProduct(productId);
+      } catch (vcErr) {
+        logger.warn("Error fetching variant commissions:", vcErr);
+        product.variantCommissions = [];
+      }
+
       return product;
     } catch (error) {
       logger.error("Error getting product:", error);
@@ -566,6 +574,14 @@ export class ProductService {
         result.paymentMethods = await this.productPaymentMethodRepository.getPaymentMethods(productId);
       } catch (pmErr) {
         logger.error("Failed to fetch payment methods", pmErr);
+      }
+
+      // Fetch variant commissions
+      try {
+        result.variantCommissions = await this.variantCommissionRepository.getCommissionsByProduct(productId);
+      } catch (vcErr) {
+        logger.error("Failed to fetch variant commissions", vcErr);
+        result.variantCommissions = [];
       }
 
       return result;
@@ -1119,6 +1135,23 @@ export class ProductService {
         }
       }
 
+      // Step 10: Handle Variant Commissions updates
+      if (data.variantCommissions && Array.isArray(data.variantCommissions) && data.variantCommissions.length > 0) {
+        try {
+          await this.variantCommissionRepository.bulkSetCommissions(
+            data.variantCommissions.map(vc => ({
+              variantId: vc.variantId,
+              commissionType: vc.commissionType,
+              commissionValue: Number(vc.commissionValue),
+            }))
+          );
+          logger.info("Variant commissions updated in comprehensive operation", { productId, count: data.variantCommissions.length });
+        } catch (vcError) {
+          logger.error("Error handling variant commissions in comprehensive product update:", vcError);
+          result.errors.push(`Variant commissions operation failed: ${vcError.message}`);
+        }
+      }
+
       // If there were any non-critical errors, include them in the response
       if (result.errors.length > 0) {
         logger.warn("Comprehensive product update had some errors", {
@@ -1163,14 +1196,43 @@ export class ProductService {
   /**
    * Activate product
    */
-  async activateProduct(productId, deliveryCharge) {
+  async activateProduct(productId, deliveryCharge, variantCommissions, paymentMethods) {
     try {
       const existingProduct = await this.productRepository.findById(productId);
       if (!existingProduct) {
         throw new AppError("Product not found", 404);
       }
 
-      return await this.productRepository.activate(productId, deliveryCharge);
+      // 1. Activate product with delivery charge
+      await this.productRepository.activate(productId, deliveryCharge);
+
+      // 2. Set variant commissions if provided
+      if (variantCommissions && Array.isArray(variantCommissions) && variantCommissions.length > 0) {
+        try {
+          await this.variantCommissionRepository.bulkSetCommissions(
+            variantCommissions.map(vc => ({
+              variantId: vc.variantId,
+              commissionType: vc.commissionType,
+              commissionValue: Number(vc.commissionValue),
+            }))
+          );
+          logger.info("Variant commissions set during activation", { productId, count: variantCommissions.length });
+        } catch (vcError) {
+          logger.error("Error setting variant commissions during activation:", vcError);
+        }
+      }
+
+      // 3. Set payment methods if provided
+      if (paymentMethods && Array.isArray(paymentMethods) && paymentMethods.length > 0) {
+        try {
+          await this.productPaymentMethodRepository.setPaymentMethods(productId, paymentMethods);
+          logger.info("Payment methods set during activation", { productId, methods: paymentMethods });
+        } catch (pmError) {
+          logger.error("Error setting payment methods during activation:", pmError);
+        }
+      }
+
+      return true;
     } catch (error) {
       logger.error("Error activating product:", error);
       throw error;
