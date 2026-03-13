@@ -156,9 +156,9 @@ export class SchoolRepository {
 
       // Apply search filter (escape special characters)
       if (search && search.trim()) {
-        const searchTerm = search.trim().replace(/[%_]/g, "\\$&");
+        const searchTerm = search.trim().replace(/[%_]/g, "\\$&").replace(/"/g, '""');
         query = query.or(
-          `name.ilike.%${searchTerm}%,city.ilike.%${searchTerm}%,state.ilike.%${searchTerm}%`,
+          `name.ilike."%${searchTerm}%",city.ilike."%${searchTerm}%",state.ilike."%${searchTerm}%"`,
         );
       }
 
@@ -463,6 +463,7 @@ export class SchoolRepository {
         `,
         )
         .eq("school_id", schoolId)
+        .neq("products.product_type", "addon")
         .eq("products.is_active", true);
 
       if (error) throw error;
@@ -746,10 +747,10 @@ export class SchoolRepository {
 
       // search on product title/description (use ilike)
       if (search && String(search).trim()) {
-        const term = String(search).trim().replace(/[%_]/g, "\\$&");
+        const term = String(search).trim().replace(/[%_]/g, "\\$&").replace(/"/g, '""');
         // Supabase .or(...) syntax takes comma-separated conditions
         baseQuery = baseQuery.or(
-          `products.title.ilike.%${term}%,products.description.ilike.%${term}%`,
+          `products.title.ilike."%${term}%",products.description.ilike."%${term}%"`,
         );
       }
 

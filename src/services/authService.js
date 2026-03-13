@@ -6,6 +6,8 @@ import { createClient } from "@supabase/supabase-js";
 import { logger } from "../utils/logger.js";
 import { queueForgotPasswordEmail, queueOtpEmail } from "../queue/emailQueue.js";
 import OtpRepository from "../repositories/otpRepository.js";
+import { imageService } from "./imageService.js";
+import { emailService } from "./emailService.js";
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -19,6 +21,62 @@ export class AuthService {
     this.jwtSecret = process.env.JWT_SECRET || "your-secret-key";
     this.jwtExpiry = process.env.JWT_EXPIRY || "24h";
     this.refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRY || "7d";
+  }
+
+  normalizePhone(phone) {
+    return String(phone || "").replace(/\D/g, "");
+  }
+
+  async _uploadDeliveryPartnerFiles(files = {}, userId) {
+    const bucket = "delivery-partner-docs";
+    const baseFolder = `delivery-partners/${userId}`;
+
+    const uploadField = async (fieldName, folderName) => {
+      const file = files?.[fieldName]?.[0];
+      if (!file) return null;
+
+      if (!file.mimetype?.startsWith("image/")) {
+        throw new Error(`Invalid file type for ${fieldName}. Only images are allowed.`);
+      }
+
+      const result = await imageService.uploadImage(
+        file,
+        bucket,
+        `${baseFolder}/${folderName}`,
+      );
+      return result.url;
+    };
+
+    const profilePhotoUrl =
+      (await uploadField("profilePhoto", "profile")) ||
+      (await uploadField("profile_photo", "profile"));
+
+    const aadhaarFrontPhotoUrl =
+      (await uploadField("aadhaarFrontPhoto", "documents")) ||
+      (await uploadField("aadhaarPhoto", "documents")) ||
+      (await uploadField("aadhaar_front_photo", "documents"));
+
+    const aadhaarBackPhotoUrl =
+      (await uploadField("aadhaarBackPhoto", "documents")) ||
+      (await uploadField("aadhaar_back_photo", "documents"));
+
+    const panPhotoUrl =
+      (await uploadField("panPhoto", "documents")) ||
+      (await uploadField("pan_photo", "documents"));
+
+    const drivingLicensePhotoUrl =
+      (await uploadField("drivingLicensePhoto", "documents")) ||
+      (await uploadField("dlPhoto", "documents")) ||
+      (await uploadField("driving_license_photo", "documents")) ||
+      (await uploadField("dl_photo", "documents"));
+
+    return {
+      profilePhotoUrl,
+      aadhaarFrontPhotoUrl,
+      aadhaarBackPhotoUrl,
+      panPhotoUrl,
+      drivingLicensePhotoUrl,
+    };
   }
 
   async register(userData) {
@@ -945,7 +1003,11 @@ export class AuthService {
       const user = users[0];
 
       // Block truly deactivated non-retailer users
-      if (!user.is_active && user.role !== "retailer") {
+      if (
+        !user.is_active &&
+        user.role !== "retailer" &&
+        user.role !== "delivery_partner"
+      ) {
         throw new Error("User account is inactive");
       }
 
@@ -1272,6 +1334,354 @@ export class AuthService {
       };
     } catch (error) {
       logger.error("Verify retailer OTP error:", error);
+      throw error;
+    }
+  }
+
+  async registerDeliveryPartner(payload, files = {}) {
+    let {
+      fullName,
+      name,
+      phone,
+      email,
+      profilePhotoUrl,
+      profile_photo_url,
+      vehicleDetails,
+      vehicle_details,
+      documents,
+      docs,
+    } = payload;
+
+    fullName = fullName || name;
+    profilePhotoUrl = profilePhotoUrl || profile_photo_url;
+    vehicleDetails = vehicleDetails || vehicle_details;
+    documents = documents || docs;
+
+    if (email) email = email.toLowerCase();
+    phone = this.normalizePhone(phone);
+
+    try {
+      if (!fullName || !phone || !email || !vehicleDetails || !documents) {
+        throw new Error("Full name, phone, email, vehicleDetails, and documents are required");
+      }
+
+      const aadhaarNumber = documents.aadhaarNumber || documents.aadharNumber;
+      const drivingLicenseNumber =
+        documents.drivingLicenseNumber || documents.dlNumber;
+
+      if ((!aadhaarNumber && !documents.panNumber) || !drivingLicenseNumber) {
+        throw new Error(
+          "Aadhaar or PAN number, and driving license number are required",
+        );
+      }
+
+      const { data: existingByEmail } = await this.supabase
+        .from("users")
+        .select("id")
+        .ilike("email", email)
+        .limit(1);
+
+      if (existingByEmail && existingByEmail.length > 0) {
+        throw new Error("User already exists with this email");
+      }
+
+      const { data: existingByPhone } = await this.supabase
+        .from("users")
+        .select("id")
+        .eq("phone", phone)
+        .limit(1);
+
+      if (existingByPhone && existingByPhone.length > 0) {
+        throw new Error("User already exists with this phone number");
+      }
+
+      const userId = uuidv4();
+      const uploadedUrls = await this._uploadDeliveryPartnerFiles(files, userId);
+
+      const finalProfilePhotoUrl =
+        uploadedUrls.profilePhotoUrl || profilePhotoUrl || null;
+      const finalAadhaarFrontPhotoUrl =
+        uploadedUrls.aadhaarFrontPhotoUrl ||
+        documents.aadhaarPhotoUrl ||
+        documents.aadhaarFrontPhotoUrl ||
+        null;
+      const finalAadhaarBackPhotoUrl =
+        uploadedUrls.aadhaarBackPhotoUrl ||
+        documents.aadhaarBackPhotoUrl ||
+        null;
+      const finalPanPhotoUrl =
+        uploadedUrls.panPhotoUrl || documents.panPhotoUrl || null;
+      const finalDrivingLicensePhotoUrl =
+        uploadedUrls.drivingLicensePhotoUrl ||
+        documents.drivingLicensePhotoUrl ||
+        documents.dlPhotoUrl ||
+        null;
+
+      // Validate required photos based on provided data
+      if (!finalProfilePhotoUrl) throw new Error("Profile photo is required");
+      if (!finalDrivingLicensePhotoUrl)
+        throw new Error("Driving license photo is required");
+
+      if (aadhaarNumber) {
+        if (!finalAadhaarFrontPhotoUrl || !finalAadhaarBackPhotoUrl) {
+          throw new Error("Both Aadhaar front and back photos are required");
+        }
+      } else if (documents.panNumber) {
+        if (!finalPanPhotoUrl) throw new Error("PAN card photo is required");
+      }
+
+      const { error: userError } = await this.supabase.from("users").insert({
+        id: userId,
+        full_name: fullName,
+        phone,
+        email,
+        role: "delivery_partner",
+        is_active: false,
+        email_verified: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (userError) throw userError;
+
+      const deliveryPartnerData = {
+        aadhaarNumber: aadhaarNumber || null,
+        panNumber: documents.panNumber || null,
+        drivingLicenseNumber,
+        aadhaarPhotoUrl: finalAadhaarFrontPhotoUrl || null,
+        aadhaarBackPhotoUrl: finalAadhaarBackPhotoUrl || null,
+        panPhotoUrl: finalPanPhotoUrl || null,
+        drivingLicensePhotoUrl: finalDrivingLicensePhotoUrl,
+      };
+
+      const { error: dpError } = await this.supabase
+        .from("delivery_partner_data")
+        .insert({
+          user_id: userId,
+          profile_photo_url: finalProfilePhotoUrl,
+          vehicle_details: {
+            type: vehicleDetails.type,
+            registrationNumber:
+              vehicleDetails.registrationNumber ||
+              vehicleDetails.registration_number,
+          },
+          documents: deliveryPartnerData,
+          kyc_status: "pending",
+          is_cod_eligible: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+
+      if (dpError) throw dpError;
+
+      return {
+        success: true,
+        message: "Application submitted for Admin review.",
+      };
+    } catch (error) {
+      logger.error("Delivery partner registration error:", error);
+      throw error;
+    }
+  }
+
+  async approveDeliveryPartner(deliveryPartnerId, isCodEligible = false) {
+    try {
+      if (!deliveryPartnerId) {
+        throw new Error("Delivery partner ID is required");
+      }
+
+      const { data: user, error: userError } = await this.supabase
+        .from("users")
+        .select("id, full_name, email, phone, role, is_active")
+        .eq("id", deliveryPartnerId)
+        .single();
+
+      if (userError || !user) {
+        throw new Error("Delivery partner not found");
+      }
+
+      if (user.role !== "delivery_partner") {
+        throw new Error("User is not a delivery partner");
+      }
+
+      const { data: partnerData, error: partnerDataError } = await this.supabase
+        .from("delivery_partner_data")
+        .select("user_id, kyc_status")
+        .eq("user_id", deliveryPartnerId)
+        .single();
+
+      if (partnerDataError || !partnerData) {
+        throw new Error("Delivery partner profile data not found");
+      }
+
+      const { error: dpUpdateError } = await this.supabase
+        .from("delivery_partner_data")
+        .update({
+          kyc_status: "verified",
+          is_cod_eligible: !!isCodEligible,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", deliveryPartnerId);
+
+      if (dpUpdateError) throw dpUpdateError;
+
+      const { error: userUpdateError } = await this.supabase
+        .from("users")
+        .update({
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", deliveryPartnerId);
+
+      if (userUpdateError) throw userUpdateError;
+
+      const pin = crypto.randomInt(1000, 10000).toString();
+      const pinHash = await bcrypt.hash(pin, 12);
+
+      const { data: existingPinAuthRows } = await this.supabase
+        .from("user_auths")
+        .select("id")
+        .eq("user_id", deliveryPartnerId)
+        .eq("provider", "dp_pin")
+        .limit(1);
+
+      const existingPinAuth = existingPinAuthRows?.[0] || null;
+
+      if (existingPinAuth?.id) {
+        const { error: updatePinError } = await this.supabase
+          .from("user_auths")
+          .update({
+            provider_user_id: this.normalizePhone(user.phone),
+            password_hash: pinHash,
+          })
+          .eq("id", existingPinAuth.id);
+
+        if (updatePinError) throw updatePinError;
+      } else {
+        const { error: createPinError } = await this.supabase
+          .from("user_auths")
+          .insert({
+            id: uuidv4(),
+            user_id: deliveryPartnerId,
+            provider: "dp_pin",
+            provider_user_id: this.normalizePhone(user.phone),
+            password_hash: pinHash,
+            created_at: new Date().toISOString(),
+          });
+
+        if (createPinError) throw createPinError;
+      }
+
+      if (!user.email) {
+        throw new Error("Delivery partner email is missing. Cannot send PIN email.");
+      }
+
+      const emailResult = await emailService.sendDeliveryPartnerWelcomeEmail(
+        user.email,
+        user.full_name,
+        user.phone,
+        pin,
+      );
+
+      const pinSent = !emailResult?.error;
+
+      return {
+        message: "Delivery partner approved successfully.",
+        data: {
+          userId: deliveryPartnerId,
+          kycStatus: "verified",
+          isCodEligible: !!isCodEligible,
+          pinSent: pinSent,
+          emailError: emailResult?.error || null,
+        },
+      };
+    } catch (error) {
+      logger.error("Approve delivery partner error:", error);
+      throw error;
+    }
+  }
+
+  async loginDeliveryPartner(phone, pin) {
+    try {
+      const normalizedPhone = this.normalizePhone(phone);
+
+      if (!normalizedPhone || !pin) {
+        throw new Error("Phone and PIN are required");
+      }
+
+      if (!/^\d{4}$/.test(String(pin))) {
+        throw new Error("PIN must be a 4-digit number");
+      }
+
+      const { data: user, error: userError } = await this.supabase
+        .from("users")
+        .select("id, full_name, email, phone, is_active, role")
+        .eq("phone", normalizedPhone)
+        .eq("role", "delivery_partner")
+        .single();
+
+      if (userError || !user) {
+        throw new Error("Invalid credentials");
+      }
+
+      const { data: pinAuthRows, error: pinAuthError } = await this.supabase
+        .from("user_auths")
+        .select("password_hash")
+        .eq("user_id", user.id)
+        .eq("provider", "dp_pin")
+        .limit(1);
+
+      if (pinAuthError || !pinAuthRows || pinAuthRows.length === 0) {
+        throw new Error("Your account is pending admin approval.");
+      }
+
+      const pinHash = pinAuthRows[0]?.password_hash;
+      const validPin = await bcrypt.compare(String(pin), pinHash || "");
+
+      if (!validPin) {
+        throw new Error("Invalid credentials");
+      }
+
+      const { data: dpData, error: dpError } = await this.supabase
+        .from("delivery_partner_data")
+        .select("kyc_status, is_cod_eligible")
+        .eq("user_id", user.id)
+        .single();
+
+      if (dpError || !dpData) {
+        throw new Error("Delivery partner profile not found");
+      }
+
+      if (dpData.kyc_status === "pending") {
+        const tokens = await this.generateTokens(user.id);
+        return {
+          user,
+          ...tokens,
+          redirect: "kyc_pending_screen",
+          kycStatus: "pending",
+          isCodEligible: !!dpData.is_cod_eligible,
+        };
+      }
+
+      if (dpData.kyc_status !== "verified") {
+        throw new Error("Your KYC is not verified yet. Please contact support.");
+      }
+
+      if (!user.is_active) {
+        throw new Error("Your account is inactive. Please contact admin.");
+      }
+
+      const tokens = await this.generateTokens(user.id);
+
+      return {
+        user,
+        ...tokens,
+        redirect: "home_screen",
+        kycStatus: "verified",
+        isCodEligible: !!dpData.is_cod_eligible,
+      };
+    } catch (error) {
+      logger.error("Delivery partner login error:", error);
       throw error;
     }
   }

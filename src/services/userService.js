@@ -165,6 +165,28 @@ export class UserService {
   }
 
   /**
+   * Get pending delivery partners
+   */
+  async getPendingDeliveryPartners(queryParams) {
+    try {
+      // Validate pagination
+      const page = Math.max(1, parseInt(queryParams.page) || 1);
+      const limit = Math.min(
+        100,
+        Math.max(1, parseInt(queryParams.limit) || 20),
+      );
+
+      return await this.userRepository.getPendingDeliveryPartners({
+        page,
+        limit,
+      });
+    } catch (error) {
+      logger.error("Error getting pending delivery partners:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Get user addresses with enhanced details
    */
   async getAddresses(userId) {
@@ -580,7 +602,7 @@ export class UserService {
     try {
       // Validate filters
       if (filters.role) {
-        const validRoles = ["customer", "retailer", "admin"];
+        const validRoles = ["customer", "retailer", "admin", "delivery_partner"];
         if (!validRoles.includes(filters.role)) {
           throw new AppError(
             `Invalid role filter. Must be one of: ${validRoles.join(", ")}`,
@@ -611,7 +633,7 @@ export class UserService {
    */
   async updateUserRole(userId, newRole, adminUserId) {
     try {
-      const validRoles = ["customer", "retailer", "admin"];
+      const validRoles = ["customer", "retailer", "admin", "delivery_partner"];
       if (!validRoles.includes(newRole)) {
         throw new AppError(
           `Invalid role. Must be one of: ${validRoles.join(", ")}`,
@@ -679,7 +701,7 @@ export class UserService {
 
       // Validate role if changed
       if (updateData.role) {
-        const validRoles = ["customer", "retailer", "admin"];
+        const validRoles = ["customer", "retailer", "admin", "delivery_partner"];
         if (!validRoles.includes(updateData.role)) {
           throw new AppError(
             `Invalid role. Must be one of: ${validRoles.join(", ")}`,

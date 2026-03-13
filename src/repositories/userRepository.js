@@ -662,6 +662,45 @@ export class UserRepository {
   }
 
   /**
+   * Get pending delivery partners
+   */
+  async getPendingDeliveryPartners(pagination) {
+    try {
+      const page = pagination.page || 1;
+      const limit = pagination.limit || 20;
+      const offset = (page - 1) * limit;
+
+      const { data, error, count } = await this.supabase
+        .from("delivery_partner_data")
+        .select(
+          "*, user:users(id, full_name, email, phone, role, is_active, created_at)",
+          { count: "exact" },
+        )
+        .eq("kyc_status", "pending")
+        .range(offset, offset + limit - 1)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      return {
+        partners: (data || []).map((dbRow) => ({
+          ...dbRow,
+          user: dbRow.user ? this.formatUser(dbRow.user) : null,
+        })),
+        pagination: {
+          page,
+          limit,
+          total: count || 0,
+          totalPages: Math.ceil((count || 0) / limit),
+        },
+      };
+    } catch (error) {
+      logger.error("Error getting pending delivery partners:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Search users
    */
   async search(filters) {
@@ -684,8 +723,9 @@ export class UserRepository {
       }
 
       if (filters.search) {
+        const safeSearch = filters.search.replace(/"/g, '""');
         query = query.or(
-          `full_name.ilike.%${filters.search}%,email.ilike.%${filters.search}%`,
+          `full_name.ilike."%${safeSearch}%",email.ilike."%${safeSearch}%"`,
         );
       }
 

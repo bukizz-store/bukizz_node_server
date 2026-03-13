@@ -367,7 +367,122 @@ export class WarehouseRepository {
         }
     }
     /**
-     * Get Map of Product ID to Warehouse ID
+     * Get warehouses with shipped orders, grouping by warehouse and including retailer info
+     */
+    async getWarehousesWithShippedOrders(token) {
+        try {
+            const supabase = this.getClient(token);
+
+            // 1. Get all order items with status 'shipped'
+            // We count items instead of unique orders to match the bifurcated logic of the retailer portal
+            const { data: shippedItems, error: itemsError } = await supabase
+                .from("order_items")
+                .select("id, warehouse_id")
+                .eq("status", "shipped");
+
+            if (itemsError) throw itemsError;
+
+            if (!shippedItems || shippedItems.length === 0) {
+                return [];
+            }
+
+            // Group by warehouse_id and count items
+            const warehouseCounts = {};
+            shippedItems.forEach(item => {
+                if (item.warehouse_id) {
+                    warehouseCounts[item.warehouse_id] = (warehouseCounts[item.warehouse_id] || 0) + 1;
+                }
+            });
+
+            const warehouseIds = Object.keys(warehouseCounts);
+
+            if (warehouseIds.length === 0) return [];
+
+            // 2. Get warehouse details for these warehouseIds
+            const { data: warehouses, error: warehouseError } = await supabase
+                .from("warehouse")
+                .select("*")
+                .in("id", warehouseIds);
+            
+            if (warehouseError) throw warehouseError;
+
+            if (!warehouses || warehouses.length === 0) return [];
+
+            // 3. Resolve addresses and retailer info
+            const addressIds = warehouses
+                .map(w => w.address)
+                .filter(addr => addr && typeof addr === 'string');
+
+            let addressMap = {};
+            if (addressIds.length > 0) {
+                const { data: addresses, error: addrError } = await supabase
+                    .from("addresses")
+                    .select("*")
+                    .in("id", addressIds);
+                
+                if (!addrError && addresses) {
+                    addresses.forEach(addr => {
+                        addressMap[addr.id] = addr;
+                    });
+                }
+            }
+
+            // Get retailers
+            const { data: retailerLinks, error: linkError } = await supabase
+                .from("retailer_warehouse")
+                .select("warehouse_id, retailer_id")
+                .in("warehouse_id", warehouseIds);
+            
+            let retailerMap = {};
+            if (!linkError && retailerLinks && retailerLinks.length > 0) {
+                const retailerIds = retailerLinks.map(l => l.retailer_id);
+                // Uniquify retailer IDs
+                const uniqueRetailerIds = [...new Set(retailerIds)];
+                
+                const { data: retailers, error: userError } = await supabase
+                    .from("users")
+                    .select("id, full_name")
+                    .in("id", uniqueRetailerIds);
+                
+                if (!userError && retailers) {
+                    const userMap = {};
+                    retailers.forEach(r => userMap[r.id] = r.full_name);
+                    retailerLinks.forEach(l => {
+                        retailerMap[l.warehouse_id] = userMap[l.retailer_id];
+                    });
+                }
+            }
+
+            // Format response
+            const result = warehouses.map(w => {
+                const address = (w.address && typeof w.address === 'string') 
+                    ? addressMap[w.address] 
+                    : w.address || {};
+                
+                let location = "";
+                if (address.line1) {
+                    location = [address.line1, address.line2, address.city, address.state, address.postal_code || address.postalCode]
+                        .filter(Boolean)
+                        .join(", ");
+                }
+
+                return {
+                    warehouseId: w.id,
+                    retailerName: retailerMap[w.id] || "Unknown Retailer",
+                    warehouseName: w.name,
+                    location: location || "Address not available",
+                    shippedOrdersCount: warehouseCounts[w.id] || 0
+                };
+            });
+
+            return result;
+        } catch (error) {
+            logger.error("Error getting warehouses with shipped orders:", error);
+            throw error;
+        }
+    }
+
+    /**
      * Used for order routing and splitting
      */
     async getWarehouseIdsByProductIds(productIds) {

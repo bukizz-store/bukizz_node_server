@@ -261,6 +261,47 @@ class EmailService {
     }
   }
 
+  async sendDeliveryPartnerWelcomeEmail(email, fullName, phone, pin) {
+    try {
+      const response = await fetch("https://services.theerrors.in/api/services/email/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.OTP_EMAIL_API_KEY
+        },
+        body: JSON.stringify({
+          templateName: "delivery-partner-welcome",
+          to: email,
+          data: {
+            fullName: fullName || "Partner",
+            phone: phone,
+            pin: pin
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`External API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+      }
+
+      const result = await response.json();
+      logger.info(`📧 Delivery partner welcome email sent to ${email} via theerrors service: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      logger.error("📧 Error sending delivery partner welcome email via theerrors service:", error);
+      
+      // Keep the PIN logging fallback since it's very useful for troubleshooting
+      console.log("\nCRITICAL: DELIVERY PARTNER WELCOME EMAIL FAILED");
+      console.log(`Target: ${email} (${fullName})`);
+      console.log(`PIN: ${pin}`);
+      console.log(`REASON: ${error.message}`);
+      console.log("==============================================\n");
+
+      return { error: error.message, pin };
+    }
+  }
+
 
   async sendForgotPasswordEmail(email, resetToken, firstName) {
     const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/reset-password?token=${resetToken}`;

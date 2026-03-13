@@ -148,6 +148,9 @@ export class ProductRepository {
             option_value_3_ref:product_option_values!option_value_3(
               id, value, price_modifier, attribute_id, image_url,
               product_option_attributes!inner(id, name, position)
+            ),
+            variant_addons!variant_addons_parent_variant_id_fkey(
+              id, addon_product_id, addon_variant_id, discount_amount, is_active, is_mandatory
             )
           ),
           product_images(
@@ -228,6 +231,7 @@ export class ProductRepository {
                   v.option_value_3_ref.product_option_attributes?.position,
               }
               : null,
+            available_addons: v.variant_addons || [],
           };
         });
         delete product.product_variants; // Clean up
@@ -318,7 +322,10 @@ export class ProductRepository {
             metadata, created_at, updated_at,
             option_value_1_ref:product_option_values!option_value_1(id, value, price_modifier, image_url, product_option_attributes(id, name, position)),
             option_value_2_ref:product_option_values!option_value_2(id, value, price_modifier, image_url, product_option_attributes(id, name, position)),
-            option_value_3_ref:product_option_values!option_value_3(id, value, price_modifier, image_url, product_option_attributes(id, name, position))
+            option_value_3_ref:product_option_values!option_value_3(id, value, price_modifier, image_url, product_option_attributes(id, name, position)),
+            variant_addons!variant_addons_parent_variant_id_fkey(
+              id, addon_product_id, addon_variant_id, discount_amount, is_active, is_mandatory
+            )
           )
         )
       `,
@@ -336,12 +343,18 @@ export class ProductRepository {
       }
 
       if (filters.productType) {
-        query = query.eq("products.product_type", filters.productType);
+        if (filters.productType !== "all") {
+          query = query.eq("products.product_type", filters.productType);
+        }
+      } else {
+        query = query.neq("products.product_type", "addon");
       }
 
       if (filters.search) {
+        // Escape quotes to prevent syntax errors, and wrap in double quotes for spaces
+        const safeSearch = filters.search.replace(/"/g, '""');
         query = query.or(
-          `title.ilike.%${filters.search}%,products.description.ilike.%${filters.search}%`,
+          `title.ilike."%${safeSearch}%",description.ilike."%${safeSearch}%"`,
           { foreignTable: "products" },
         );
       }
@@ -574,13 +587,18 @@ export class ProductRepository {
       }
 
       if (filters.search) {
+        const safeSearch = filters.search.replace(/"/g, '""');
         query = query.or(
-          `title.ilike.%${filters.search}%,description.ilike.%${filters.search}%`,
+          `title.ilike."%${safeSearch}%",description.ilike."%${safeSearch}%"`,
         );
       }
 
       if (filters.productType) {
-        query = query.eq("product_type", filters.productType);
+        if (filters.productType !== "all") {
+          query = query.eq("product_type", filters.productType);
+        }
+      } else {
+        query = query.neq("product_type", "addon");
       }
 
       if (filters.warehouseId) {
@@ -965,7 +983,11 @@ export class ProductRepository {
       }
 
       if (filters.productType) {
-        query = query.eq("products.product_type", filters.productType);
+        if (filters.productType !== "all") {
+          query = query.eq("products.product_type", filters.productType);
+        }
+      } else {
+        query = query.neq("products.product_type", "addon");
       }
 
       query = query
@@ -1121,7 +1143,11 @@ export class ProductRepository {
       }
 
       if (filters.productType) {
-        query = query.eq("product_type", filters.productType);
+        if (filters.productType !== "all") {
+          query = query.eq("product_type", filters.productType);
+        }
+      } else {
+        query = query.neq("product_type", "addon");
       }
 
       if (filters.warehouseId) {
@@ -1226,6 +1252,7 @@ export class ProductRepository {
                 }
                 : null,
             },
+            available_addons: v.variant_addons || [],
             metadata: v.metadata || {},
             createdAt: v.created_at,
             updatedAt: v.updated_at,

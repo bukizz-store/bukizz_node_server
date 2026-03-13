@@ -1,5 +1,6 @@
 import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
+import { getSupabase } from "../db/index.js";
 import ProductRepository from "../repositories/productRepository.js";
 import BrandRepository from "../repositories/brandRepository.js";
 import ProductOptionRepository from "../repositories/productOptionRepository.js";
@@ -176,6 +177,7 @@ export class ProductService {
       "stationary",
       "school",
       "general",
+      "addon"
     ];
     if (!validTypes.includes(productData.productType)) {
       throw new AppError(
@@ -2128,6 +2130,54 @@ export class ProductService {
       return analytics;
     } catch (error) {
       logger.error("Error getting product analytics:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Add an add-on to a specific variant
+   */
+  async addVariantAddon(variantId, data) {
+    try {
+      const dbData = {
+        parent_variant_id: variantId,
+        addon_product_id: data.addonProductId,
+        addon_variant_id: data.addonVariantId || null,
+        discount_amount: data.discountAmount || 0.00,
+        is_active: true,
+        is_mandatory: data.isMandatory || false
+      };
+      
+      const supabase = getSupabase();
+      const { data: addon, error } = await supabase
+        .from('variant_addons')
+        .insert([dbData])
+        .select()
+        .single();
+        
+      if (error) throw new AppError(error.message, 400);
+      return addon;
+    } catch (error) {
+      logger.error("Error adding variant addon:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove a variant add-on
+   */
+  async removeVariantAddon(addonId) {
+    try {
+      const supabase = getSupabase();
+      const { error } = await supabase
+        .from('variant_addons')
+        .delete()
+        .eq('id', addonId);
+        
+      if (error) throw new AppError(error.message, 400);
+      return true;
+    } catch (error) {
+      logger.error("Error removing variant addon:", error);
       throw error;
     }
   }

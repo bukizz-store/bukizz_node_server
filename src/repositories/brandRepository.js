@@ -88,8 +88,9 @@ export class BrandRepository {
         .eq("is_active", true);
 
       if (filters.search) {
+        const safeSearch = filters.search.replace(/"/g, '""');
         query = query.or(
-          `name.ilike.%${filters.search}%,description.ilike.%${filters.search}%`
+          `name.ilike."%${safeSearch}%",description.ilike."%${safeSearch}%"`
         );
       }
 

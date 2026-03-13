@@ -1204,7 +1204,7 @@ export class OrderRepository {
 
       if (searchTerm) {
         query = query.or(
-          `order_number.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_email.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_phone.ilike."%${searchTerm.replace(/"/g, '""')}%"`,
+          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`,
         );
       }
 
@@ -1371,7 +1371,7 @@ export class OrderRepository {
 
       if (searchTerm) {
         query = query.or(
-          `order_number.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_email.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_phone.ilike."%${searchTerm.replace(/"/g, '""')}%"`,
+          `order_number.ilike.%${searchTerm}%,contact_email.ilike.%${searchTerm}%,contact_phone.ilike.%${searchTerm}%`,
         );
       }
 

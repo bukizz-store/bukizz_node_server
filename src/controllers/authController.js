@@ -423,6 +423,92 @@ export class AuthController {
       });
     }
   }
+
+  async registerDeliveryPartner(req, res) {
+    try {
+      const result = await authService.registerDeliveryPartner(req.body, req.files);
+
+      res.status(201).json({
+        success: true,
+        message: "Application submitted for Admin review.",
+        data: result,
+      });
+    } catch (error) {
+      logger.error("Delivery partner registration error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Delivery partner registration failed",
+      });
+    }
+  }
+
+  async approveDeliveryPartner(req, res) {
+    try {
+      const { id } = req.params;
+      const { isCodEligible } = req.body;
+
+      const result = await authService.approveDeliveryPartner(id, isCodEligible);
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.data,
+      });
+    } catch (error) {
+      logger.error("Approve delivery partner error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Delivery partner approval failed",
+      });
+    }
+  }
+
+  async getPendingDeliveryPartnersList(req, res) {
+    try {
+      const { createDependencies } = await import("../config/dependencies.js");
+      const { userService } = createDependencies();
+
+      const result = await userService.getPendingDeliveryPartners(req.query);
+
+      res.status(200).json({
+        success: true,
+        data: result,
+        message: "Pending delivery partners retrieved successfully",
+      });
+    } catch (error) {
+      logger.error("Get pending delivery partners error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Failed to fetch pending delivery partners",
+      });
+    }
+  }
+
+  async loginDeliveryPartner(req, res) {
+    try {
+      const { phone, pin } = req.body;
+
+      const result = await authService.loginDeliveryPartner(phone, pin);
+
+      res.status(200).json({
+        success: true,
+        message: "Delivery partner login successful",
+        data: result,
+      });
+    } catch (error) {
+      logger.error("Delivery partner login error:", error);
+      const statusCode =
+        error.message?.includes("Invalid credentials") ||
+        error.message?.includes("pending")
+          ? 401
+          : 403;
+
+      res.status(statusCode).json({
+        success: false,
+        message: error.message || "Delivery partner login failed",
+      });
+    }
+  }
 }
 
 const authController = new AuthController();

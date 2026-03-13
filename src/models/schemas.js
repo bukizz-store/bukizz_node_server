@@ -26,8 +26,73 @@ export const userSchemas = {
     email: emailSchema,
     password: passwordSchema,
     loginAs: Joi.string()
-      .valid("customer", "retailer", "admin")
+      .valid("customer", "retailer", "admin", "delivery_partner")
       .default("customer"),
+  }),
+
+  deliveryPartnerRegister: Joi.object({
+    fullName: Joi.string().min(2).max(255).optional(),
+    name: Joi.string().min(2).max(255).optional(),
+    phone: Joi.string()
+      .pattern(/^\+?[\d\s\-\(\)]{10,}$/)
+      .required(),
+    email: emailSchema,
+    profilePhotoUrl: Joi.string().uri().optional(),
+    profile_photo_url: Joi.string().uri().optional(),
+    vehicleDetails: Joi.object({
+      type: Joi.string().min(2).max(100).required(),
+      registrationNumber: Joi.string().min(3).max(100).required(),
+    }).optional(),
+    vehicle_details: Joi.object({
+      type: Joi.string().min(2).max(100).required(),
+      registrationNumber: Joi.string().min(3).max(100).required(),
+    }).optional(),
+    documents: Joi.object({
+      aadhaarNumber: Joi.string().min(4).max(40).optional(),
+      aadharNumber: Joi.string().min(4).max(40).optional(),
+      panNumber: Joi.string().min(4).max(20).optional(),
+      drivingLicenseNumber: Joi.string().min(4).max(40).optional(),
+      dlNumber: Joi.string().min(4).max(40).optional(),
+      aadhaarPhotoUrl: Joi.string().uri().optional(),
+      aadhaarBackPhotoUrl: Joi.string().uri().optional(),
+      aadharPhotoUrl: Joi.string().uri().optional(),
+      panPhotoUrl: Joi.string().uri().optional(),
+      drivingLicensePhotoUrl: Joi.string().uri().optional(),
+      dlPhotoUrl: Joi.string().uri().optional(),
+    })
+      .or("aadhaarNumber", "aadharNumber", "panNumber")
+      .or("drivingLicenseNumber", "dlNumber")
+      .optional(),
+    docs: Joi.object({
+      aadhaarNumber: Joi.string().min(4).max(40).optional(),
+      aadharNumber: Joi.string().min(4).max(40).optional(),
+      panNumber: Joi.string().min(4).max(20).optional(),
+      drivingLicenseNumber: Joi.string().min(4).max(40).optional(),
+      dlNumber: Joi.string().min(4).max(40).optional(),
+      aadhaarPhotoUrl: Joi.string().uri().optional(),
+      aadhaarBackPhotoUrl: Joi.string().uri().optional(),
+      aadharPhotoUrl: Joi.string().uri().optional(),
+      panPhotoUrl: Joi.string().uri().optional(),
+      drivingLicensePhotoUrl: Joi.string().uri().optional(),
+      dlPhotoUrl: Joi.string().uri().optional(),
+    })
+      .or("aadhaarNumber", "aadharNumber", "panNumber")
+      .or("drivingLicenseNumber", "dlNumber")
+      .optional(),
+  })
+    .or("fullName", "name")
+    .or("vehicleDetails", "vehicle_details")
+    .or("documents", "docs"),
+
+  deliveryPartnerLogin: Joi.object({
+    phone: Joi.string()
+      .pattern(/^\+?[\d\s\-\(\)]{10,}$/)
+      .required(),
+    pin: Joi.string().pattern(/^\d{4}$/).required(),
+  }),
+
+  deliveryPartnerApprove: Joi.object({
+    isCodEligible: Joi.boolean().required(),
   }),
 
   retailerLogin: Joi.object({
