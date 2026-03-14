@@ -444,6 +444,22 @@ export class SchoolController {
   });
 
   /**
+   * Bulk update school sort orders
+   * PUT /api/schools/sort-order
+   */
+  updateSortOrders = asyncHandler(async (req, res) => {
+    const { orders } = req.body;
+
+    const result = await this.schoolService.updateSortOrders(orders);
+
+    res.json({
+      success: true,
+      data: result,
+      message: "School sort orders updated successfully",
+    });
+  });
+
+  /**
    * Validate school data
    * POST /api/schools/validate
    */

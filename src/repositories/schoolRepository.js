@@ -1268,6 +1268,39 @@ export class SchoolRepository {
       deactivationReason: row.deactivation_reason,
     };
   }
+
+  /**
+   * Bulk update sort orders for schools
+   * @param {Array<{id: string, sortOrder: number}>} updates - Array of updates
+   * @returns {Promise<boolean>} Success status
+   */
+  async updateSortOrders(updates) {
+    try {
+      if (!updates || updates.length === 0) return true;
+
+      // Using Promise.all for a small number of records (usually acceptable for sort ordering in a single city)
+      const promises = updates.map(update => 
+        this.supabase
+          .from("schools")
+          .update({ sort_order: update.sortOrder })
+          .eq("id", update.id)
+      );
+
+      const results = await Promise.all(promises);
+      
+      const errors = results.filter(r => r.error).map(r => r.error);
+      if (errors.length > 0) {
+        logger.error(`Failed to update ${errors.length} school sort orders`);
+        throw errors[0];
+      }
+
+      return true;
+    } catch (error) {
+      logger.error("Error bulk updating school sort orders:", error);
+      throw error;
+    }
+  }
+
   /**
    * Upload school image to Supabase Storage
    * @param {Object} file - File object (from multer)
