@@ -292,6 +292,16 @@ export default function productRoutes(dependencies = {}) {
   );
 
   /**
+   * Create a comprehensive addon product with all related data atomically
+   * POST /api/v1/products/addon/comprehensive
+   */
+  router.post(
+    "/addon/comprehensive",
+    authenticateToken,
+    productController.createComprehensiveAddonProduct,
+  );
+
+  /**
    * Update product
    * PUT /api/v1/products/:id
    */
@@ -630,6 +640,26 @@ export default function productRoutes(dependencies = {}) {
   );
 
   // ============ COMPREHENSIVE DATA ROUTES (Protected) ============
+  
+  /**
+   * Add a variant add-on
+   * POST /api/v1/products/:id/variants/:variantId/addons
+   */
+  router.post(
+    "/:id/variants/:variantId/addons",
+    authenticateToken,
+    productController.addVariantAddon
+  );
+
+  /**
+   * Remove a variant add-on
+   * DELETE /api/v1/products/:id/variants/:variantId/addons/:addonId
+   */
+  router.delete(
+    "/:id/variants/:variantId/addons/:addonId",
+    authenticateToken,
+    productController.removeVariantAddon
+  );
 
   return router;
 }

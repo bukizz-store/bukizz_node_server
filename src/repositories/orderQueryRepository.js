@@ -209,9 +209,9 @@ export class OrderQueryRepository {
 
       // Search: match ticket-id fragment against id, or order_id
       if (filters.search) {
-        const term = filters.search.replace(/^#TK-/i, "").trim();
+        const term = filters.search.replace(/^#TK-/i, "").trim().replace(/"/g, '""');
         query = query.or(
-          `id.ilike.%${term}%,order_id.ilike.%${term}%`,
+          `id.ilike."%${term}%",order_id.ilike."%${term}%"`,
         );
       }
 

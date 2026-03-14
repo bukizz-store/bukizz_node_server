@@ -13,6 +13,7 @@ const path = require("path");
  */
 async function createApp() {
   const app = express();
+  app.set("trust proxy", true);
 
   try {
     // Initialize database connection

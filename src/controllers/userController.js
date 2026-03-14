@@ -455,6 +455,20 @@ export class UserController {
   });
 
   /**
+   * Get pending delivery partners list (admin only)
+   * GET /api/users/admin/delivery/pending
+   */
+  getPendingDeliveryPartnersList = asyncHandler(async (req, res) => {
+    const result = await this.userService.getPendingDeliveryPartners(req.query);
+
+    res.json({
+      success: true,
+      data: result,
+      message: "Pending delivery partners retrieved successfully",
+    });
+  });
+
+  /**
    * Export users data (admin functionality)
    * GET /api/users/export
    */

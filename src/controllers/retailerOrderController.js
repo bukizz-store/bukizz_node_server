@@ -397,6 +397,8 @@ export class RetailerOrderController {
                     status: order.status,
                     totalAmount: order.totalAmount,
                     currency: order.currency || "INR",
+                    paymentMethod: order.paymentMethod,
+                    paymentStatus: order.paymentStatus,
                     shippingAddress: {
                         studentName: order.shippingAddress?.studentName || null,
                         recipientName: order.shippingAddress?.recipientName || null,
@@ -404,8 +406,10 @@ export class RetailerOrderController {
                         line2: order.shippingAddress?.line2,
                         city: order.shippingAddress?.city,
                         state: order.shippingAddress?.state,
-                        postalCode:order.shippingAddress?.postalCode
+                        postalCode:order.shippingAddress?.postalCode,
+                        phone: order.shippingAddress?.phone
                     },
+                    contactPhone: order.contactPhone,
                     createdAt: order.createdAt,
                     items: [
                         {

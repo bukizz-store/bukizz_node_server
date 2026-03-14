@@ -24,8 +24,8 @@ export function getOrderQueue() {
         defaultJobOptions: {
             attempts: 4,
             backoff: { type: "exponential", delay: 3000 },
-            removeOnComplete: { count: 300 },
-            removeOnFail: { count: 500 },
+            removeOnComplete: { count: 50 },
+            removeOnFail: { count: 100 },
         },
     });
 

@@ -552,7 +552,9 @@ export class OrderService {
 
         // Build validated item with complete information
         const validatedItem = {
+          clientId: item.id || null, // Temporary ID from frontend to link add-ons
           productId: item.productId,
+          parentClientId: item.parentItemId || null, // Will map to generated UUID later
           variantId: item.variantId || null,
           quantity: item.quantity,
           unitPrice: parseFloat(currentPrice),

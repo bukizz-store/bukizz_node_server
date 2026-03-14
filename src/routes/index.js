@@ -14,6 +14,10 @@ import retailerSchoolRoutes from "./retailerSchoolRoutes.js";
 import retailerOrderRoutes from "./retailerOrderRoutes.js";
 import retailerBankAccountRoutes from "./retailerBankAccountRoutes.js";
 import settlementRoutes from "./settlementRoutes.js";
+import deliveryAuthRoutes from "./deliveryAuthRoutes.js";
+import adminDeliveryRoutes from "./adminDeliveryRoutes.js";
+import deliveryRoutes from "./deliveryRoutes.js";
+import bannerRoutes from "./bannerRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
@@ -56,6 +60,9 @@ export function setupRoutes(app, dependencies = {}) {
         retailerOrders: `${apiV1}/retailer/orders`,
         retailerBankAccounts: `${apiV1}/retailer/bank-accounts`,
         settlements: `${apiV1}/settlements`,
+        deliveryAuth: `${apiV1}/delivery/auth`,
+        adminDelivery: `${apiV1}/admin/delivery`,
+        banners: `${apiV1}/banners`,
       },
     });
   });
@@ -75,11 +82,15 @@ export function setupRoutes(app, dependencies = {}) {
   app.use(`${apiV1}/retailer/bank-accounts`, retailerBankAccountRoutes);
   app.use(`${apiV1}/retailer-schools`, retailerSchoolRoutes);
   app.use(`${apiV1}/retailer/orders`, retailerOrderRoutes);
+  app.use(`${apiV1}/delivery/auth`, deliveryAuthRoutes(dependencies));
+  app.use(`${apiV1}/delivery`, deliveryRoutes(dependencies));
+  app.use(`${apiV1}/admin/delivery`, adminDeliveryRoutes(dependencies));
   app.use(`${apiV1}/images`, imageRoutes);
   app.use(
     `${apiV1}/settlements`,
     settlementRoutes(dependencies.settlementController),
   );
+  app.use(`${apiV1}/banners`, bannerRoutes(dependencies));
 
   // Handle 404 for all other routes
   app.use("*", notFoundHandler);

@@ -84,6 +84,7 @@ export function errorHandler(err, req, res, next) {
 
   const errorResponse = {
     success: false,
+    message: message,
     error: message,
     ...(req.correlationId && { correlationId: req.correlationId }),
   };
@@ -111,6 +112,7 @@ export function notFoundHandler(req, res) {
 
   res.status(404).json({
     success: false,
+    message: message,
     error: message,
     correlationId: req.correlationId,
   });

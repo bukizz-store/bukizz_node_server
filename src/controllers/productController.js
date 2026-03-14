@@ -79,6 +79,57 @@ export class ProductController {
   });
 
   /**
+   * Create a comprehensive addon product
+   * POST /api/products/addon/comprehensive
+   */
+  createComprehensiveAddonProduct = asyncHandler(async (req, res) => {
+    const {
+      productData,
+      images = [],
+      brandData = null,
+      warehouseData = null,
+      variants = [],
+      categories = [],
+      productOptions = [],
+      schoolData = null,
+    } = req.body;
+
+    if (!productData) {
+      return res.status(400).json({
+        success: false,
+        message: "Product data is required",
+      });
+    }
+
+    productData.productType = "addon";
+
+    const result = await this.productService.createComprehensiveProduct({
+      productData,
+      images,
+      brandData,
+      warehouseData,
+      variants,
+      categories,
+      productOptions,
+      schoolData,
+      productType: "addon",
+      retailerId: req.user?.role === "retailer" ? req.user.id : null,
+    });
+
+    logger.info("Comprehensive addon product created", {
+      productId: result.id,
+      imagesCount: result.images?.length || 0,
+      variantsCount: result.variants?.length || 0,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result,
+      message: "Addon Product created successfully with all related data",
+    });
+  });
+
+  /**
    * Get product by ID
    * GET /api/products/:id
    */
@@ -1233,6 +1284,43 @@ export class ProductController {
       success: true,
       data: { analytics },
       message: "Product analytics retrieved successfully",
+    });
+  });
+
+  /**
+   * Add a variant add-on
+   * POST /api/products/:id/variants/:variantId/addons
+   */
+  addVariantAddon = asyncHandler(async (req, res) => {
+    const { variantId } = req.params;
+    const { addon_variant_id, addon_product_id, discountAmount, isMandatory } = req.body;
+
+    const result = await this.productService.addVariantAddon(variantId, {
+      addonVariantId: addon_variant_id || req.body.addonVariantId,
+      addonProductId: addon_product_id || req.body.addonProductId,
+      discountAmount,
+      isMandatory
+    });
+
+    res.status(201).json({
+      success: true,
+      data: result,
+      message: "Variant addon assigned successfully"
+    });
+  });
+
+  /**
+   * Remove a variant add-on
+   * DELETE /api/products/:id/variants/:variantId/addons/:addonId
+   */
+  removeVariantAddon = asyncHandler(async (req, res) => {
+    const { addonId } = req.params;
+    
+    await this.productService.removeVariantAddon(addonId);
+
+    res.json({
+      success: true,
+      message: "Variant addon removed successfully"
     });
   });
 }

@@ -180,8 +180,9 @@ export class CategoryRepository {
         query = query.eq("is_active", filters.isActive);
       }
       if (filters.search) {
+        const safeSearch = filters.search.replace(/"/g, '""');
         query = query.or(
-          `name.ilike.%${filters.search}%,description.ilike.%${filters.search}%`,
+          `name.ilike."%${safeSearch}%",description.ilike."%${safeSearch}%"`
         );
       }
 
