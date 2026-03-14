@@ -471,6 +471,8 @@ export class WarehouseRepository {
                     retailerName: retailerMap[w.id] || "Unknown Retailer",
                     warehouseName: w.name,
                     location: location || "Address not available",
+                    lat: address.lat ? parseFloat(address.lat) : null,
+                    lng: address.lng ? parseFloat(address.lng) : null,
                     shippedOrdersCount: warehouseCounts[w.id] || 0
                 };
             });

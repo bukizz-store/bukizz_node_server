@@ -17,6 +17,7 @@ import settlementRoutes from "./settlementRoutes.js";
 import deliveryAuthRoutes from "./deliveryAuthRoutes.js";
 import adminDeliveryRoutes from "./adminDeliveryRoutes.js";
 import deliveryRoutes from "./deliveryRoutes.js";
+import bannerRoutes from "./bannerRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
@@ -61,6 +62,7 @@ export function setupRoutes(app, dependencies = {}) {
         settlements: `${apiV1}/settlements`,
         deliveryAuth: `${apiV1}/delivery/auth`,
         adminDelivery: `${apiV1}/admin/delivery`,
+        banners: `${apiV1}/banners`,
       },
     });
   });
@@ -88,6 +90,7 @@ export function setupRoutes(app, dependencies = {}) {
     `${apiV1}/settlements`,
     settlementRoutes(dependencies.settlementController),
   );
+  app.use(`${apiV1}/banners`, bannerRoutes(dependencies));
 
   // Handle 404 for all other routes
   app.use("*", notFoundHandler);

@@ -9,6 +9,7 @@ import { logger } from "../utils/logger.js";
 export class OrderRepository {
   constructor(supabase) {
     this.supabase = supabase || getSupabase();
+    this.LOCK_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes soft-lock
   }
 
   /**
@@ -93,7 +94,7 @@ export class OrderRepository {
       const orderItems = items.map((item) => {
         const itemId = item.clientId && idMap.has(item.clientId) ? idMap.get(item.clientId) : uuidv4();
         const parentId = item.parentClientId && idMap.has(item.parentClientId) ? idMap.get(item.parentClientId) : null;
-        
+
         return {
           id: itemId,
           order_id: orderId,
@@ -531,7 +532,7 @@ export class OrderRepository {
         }
 
         const searchResults = await Promise.all(searchPromises);
-        
+
         for (const { data } of searchResults) {
           if (data) {
             data.forEach(row => searchOrderIds.add(row.id || row.order_id));
@@ -539,7 +540,7 @@ export class OrderRepository {
         }
 
         validOrderIdsBySearch = Array.from(searchOrderIds);
-        
+
         // If searching but no results, return empty
         if (validOrderIdsBySearch.length === 0) {
           return {
@@ -560,8 +561,8 @@ export class OrderRepository {
       }
 
       // If we had conditions but their intersection is empty
-      if ((validOrderIdsByItemFilters !== null || validOrderIdsBySearch !== null) && 
-          (!finalOrderIds || finalOrderIds.length === 0)) {
+      if ((validOrderIdsByItemFilters !== null || validOrderIdsBySearch !== null) &&
+        (!finalOrderIds || finalOrderIds.length === 0)) {
         return {
           orders: [],
           pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
@@ -591,7 +592,7 @@ export class OrderRepository {
 
       // Batch fetch items for all orders to avoid N+1 problem
       const orderIds = (orders || []).map((o) => o.id);
-      
+
       const itemsFilters = {
         warehouseIds,
         status: (status && validOrderStatuses.includes(status)) ? status : null
@@ -805,7 +806,7 @@ export class OrderRepository {
         return {};
       }
 
-      const allFormatted = (items || []).map(this._formatOrderItem);
+      const allFormatted = (items || []).map(this._formatOrderItem.bind(this));
       console.log("allFormatted", allFormatted);
       const enrichedWithVariants =
         await this._enrichItemsWithVariantData(allFormatted);
@@ -843,7 +844,7 @@ export class OrderRepository {
         return [];
       }
 
-      const formatted = (items || []).map(this._formatOrderItem);
+      const formatted = (items || []).map(this._formatOrderItem.bind(this));
       const enrichedWithVariants =
         await this._enrichItemsWithVariantData(formatted);
       return await this._enrichItemsWithSchoolData(enrichedWithVariants);
@@ -1419,6 +1420,115 @@ export class OrderRepository {
   }
 
   /**
+   * Get available items for a warehouse for delivery partners
+   * Handles soft-locking logic (45 mins)
+   */
+  async getAvailableWarehouseItems(warehouseId, partnerId, filters = {}) {
+    try {
+      const { status = "shipped", limit = 100 } = filters;
+      const fortyFiveMinsAgo = new Date(Date.now() - 45 * 60 * 1000).toISOString();
+
+      let query = this.supabase
+        .from("order_items")
+        .select(`
+          *,
+          orders!inner(
+            id,
+            order_number,
+            shipping_address,
+            contact_phone,
+            contact_email,
+            payment_method,
+            total_amount
+          )
+        `)
+        .eq("warehouse_id", warehouseId)
+        .eq("status", status)
+        .or(`locked_at.is.null,locked_at.lt.${fortyFiveMinsAgo},locked_by.eq.${partnerId}`)
+        .order("created_at", { ascending: true })
+        .limit(limit);
+
+      const { data: items, error } = await query;
+
+      if (error) {
+        throw new Error(`Failed to fetch available items: ${error.message}`);
+      }
+
+      return (items || []).map((item) => {
+        const formatted = this._formatOrderItem(item);
+        formatted.orderInfo = {
+          id: item.orders.id,
+          orderNumber: item.orders.order_number,
+          shippingAddress: item.orders.shipping_address,
+          contactPhone: item.orders.contact_phone,
+          contactEmail: item.orders.contact_email,
+          paymentMethod: item.orders.payment_method,
+          orderTotalAmount: item.orders.total_amount,
+        };
+        return formatted;
+      });
+    } catch (error) {
+      logger.error("Error getting available warehouse items:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Claim items for a delivery partner (Soft Lock)
+   */
+  async claimItems(itemIds, partnerId) {
+    try {
+      if (!itemIds || itemIds.length === 0) return [];
+      const now = new Date().toISOString();
+      const fortyFiveMinsAgo = new Date(Date.now() - this.LOCK_TIMEOUT_MS).toISOString();
+
+      const { data, error } = await this.supabase
+        .from("order_items")
+        .update({
+          locked_by: partnerId,
+          locked_at: now
+        })
+        .in("id", itemIds)
+        .eq("status", "shipped")
+        .or(`locked_at.is.null,locked_at.lt.${fortyFiveMinsAgo},locked_by.eq.${partnerId}`)
+        .select();
+
+      if (error) {
+        throw new Error(`Failed to claim items: ${error.message}`);
+      }
+
+      return data.map(this._formatOrderItem.bind(this));
+    } catch (error) {
+      logger.error("Error claiming items:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Count currently valid (non-expired) locks for a partner
+   */
+  async countValidLocks(partnerId) {
+    try {
+      const lockThreshold = new Date(Date.now() - this.LOCK_TIMEOUT_MS).toISOString();
+
+      const { count, error } = await this.supabase
+        .from("order_items")
+        .select("*", { count: "exact", head: true })
+        .eq("locked_by", partnerId)
+        .gte("locked_at", lockThreshold);
+
+      if (error) {
+        throw new Error(`Failed to count valid locks: ${error.message}`);
+      }
+
+      return count || 0;
+    } catch (error) {
+      logger.error("Error counting valid locks:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Get order statistics for a specific warehouse
    */
   async getWarehouseOrderStats(warehouseId, filters = {}) {
@@ -1574,7 +1684,7 @@ export class OrderRepository {
         return {};
       }
 
-      const allFormatted = (items || []).map(this._formatOrderItem);
+      const allFormatted = (items || []).map(this._formatOrderItem.bind(this));
       const enrichedWithVariants =
         await this._enrichItemsWithVariantData(allFormatted);
       const enriched =
@@ -1618,7 +1728,7 @@ export class OrderRepository {
         return {};
       }
 
-      const allFormatted = (items || []).map(this._formatOrderItem);
+      const allFormatted = (items || []).map(this._formatOrderItem.bind(this));
       const enrichedWithVariants =
         await this._enrichItemsWithVariantData(allFormatted);
       const enriched =
@@ -1669,6 +1779,8 @@ export class OrderRepository {
    * Format order item object for response
    */
   _formatOrderItem(row) {
+    const isLockExpired = row.locked_at ? (new Date() - new Date(row.locked_at)) > this.LOCK_TIMEOUT_MS : true;
+
     return {
       id: row.id,
       _orderId: row.order_id, // Internal: used for batch grouping
@@ -1687,6 +1799,8 @@ export class OrderRepository {
       warehouseId: row.warehouse_id,
       status: row.status || "initialized", // Default for backward compatibility
       dispatchId: row.dispatch_id || null,
+      lockedBy: isLockExpired ? null : (row.locked_by || null),
+      lockedAt: isLockExpired ? null : (row.locked_at || null),
       createdAt: row.created_at,
     };
   }

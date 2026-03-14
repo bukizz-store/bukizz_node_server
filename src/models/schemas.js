@@ -54,13 +54,12 @@ export const userSchemas = {
       drivingLicenseNumber: Joi.string().min(4).max(40).optional(),
       dlNumber: Joi.string().min(4).max(40).optional(),
       aadhaarPhotoUrl: Joi.string().uri().optional(),
-      aadhaarBackPhotoUrl: Joi.string().uri().optional(),
       aadharPhotoUrl: Joi.string().uri().optional(),
       panPhotoUrl: Joi.string().uri().optional(),
       drivingLicensePhotoUrl: Joi.string().uri().optional(),
       dlPhotoUrl: Joi.string().uri().optional(),
     })
-      .or("aadhaarNumber", "aadharNumber", "panNumber")
+      .or("aadhaarNumber", "aadharNumber")
       .or("drivingLicenseNumber", "dlNumber")
       .optional(),
     docs: Joi.object({
@@ -70,13 +69,12 @@ export const userSchemas = {
       drivingLicenseNumber: Joi.string().min(4).max(40).optional(),
       dlNumber: Joi.string().min(4).max(40).optional(),
       aadhaarPhotoUrl: Joi.string().uri().optional(),
-      aadhaarBackPhotoUrl: Joi.string().uri().optional(),
       aadharPhotoUrl: Joi.string().uri().optional(),
       panPhotoUrl: Joi.string().uri().optional(),
       drivingLicensePhotoUrl: Joi.string().uri().optional(),
       dlPhotoUrl: Joi.string().uri().optional(),
     })
-      .or("aadhaarNumber", "aadharNumber", "panNumber")
+      .or("aadhaarNumber", "aadharNumber")
       .or("drivingLicenseNumber", "dlNumber")
       .optional(),
   })
@@ -1147,3 +1145,39 @@ export const settlementSchemas = {
     receiptUrl: Joi.string().uri().optional(),
   }),
 };
+
+/**
+ * Banner validation schemas
+ */
+export const bannerSchemas = {
+  create: Joi.object({
+    cities: Joi.array().items(Joi.string()).required(),
+    pages: Joi.array().items(Joi.string()).required(),
+    desktopImageUrl: Joi.string().uri().required(),
+    mobileImageUrl: Joi.string().uri().required(),
+    altText: Joi.string().max(255).allow(null, "").optional(),
+    redirectUrl: Joi.string().uri().allow(null, "").optional(),
+    sortOrder: Joi.number().integer().default(0),
+    isActive: Joi.boolean().default(true),
+  }),
+
+  update: Joi.object({
+    cities: Joi.array().items(Joi.string()).optional(),
+    pages: Joi.array().items(Joi.string()).optional(),
+    desktopImageUrl: Joi.string().uri().optional(),
+    mobileImageUrl: Joi.string().uri().optional(),
+    altText: Joi.string().max(255).allow(null, "").optional(),
+    redirectUrl: Joi.string().uri().allow(null, "").optional(),
+    sortOrder: Joi.number().integer().optional(),
+    isActive: Joi.boolean().optional(),
+  }),
+
+  query: Joi.object({
+    city: Joi.string().optional(),
+    page: Joi.string().optional(),
+    isActive: Joi.boolean().optional(),
+    sortBy: Joi.string().valid("createdAt", "sortOrder").default("sortOrder"),
+    sortOrder: Joi.string().valid("asc", "desc").default("asc"),
+  }),
+};
+

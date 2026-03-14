@@ -34,6 +34,8 @@ export class SchoolRepository {
         state,
         postalCode,
         contact,
+        cityCode,
+        sortOrder,
       } = schoolData;
       const schoolId = uuidv4();
 
@@ -55,6 +57,8 @@ export class SchoolRepository {
             postal_code: postalCode,
             contact: JSON.stringify(contact || {}),
             is_active: true,
+            city_code: cityCode || null,
+            sort_order: sortOrder || 0,
             created_at: new Date().toISOString(),
           },
         ])
@@ -188,9 +192,10 @@ export class SchoolRepository {
         "city",
         "state",
         "type",
+        "sort_order",
       ].includes(sortBy)
         ? sortBy
-        : "name";
+        : "sort_order";
       const validSortOrder = sortOrder.toLowerCase() === "desc";
 
       query = query.order(validSortBy, { ascending: !validSortOrder });
@@ -279,6 +284,14 @@ export class SchoolRepository {
         updates.is_active = updateData.isActive;
       }
 
+      if (updateData.cityCode !== undefined) {
+        updates.city_code = updateData.cityCode;
+      }
+
+      if (updateData.sortOrder !== undefined) {
+        updates.sort_order = updateData.sortOrder;
+      }
+
       if (Object.keys(updates).length === 0) {
         return this.findById(schoolId);
       }
@@ -311,6 +324,7 @@ export class SchoolRepository {
         .select("*")
         .ilike("city", city)
         .eq("is_active", true)
+        .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
 
       if (error) throw error;
@@ -1246,6 +1260,8 @@ export class SchoolRepository {
       phone: row.phone,
       email: row.email,
       isActive: Boolean(row.is_active),
+      cityCode: row.city_code,
+      sortOrder: row.sort_order,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       deactivatedAt: row.deactivated_at,

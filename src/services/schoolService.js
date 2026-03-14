@@ -193,12 +193,13 @@ export class SchoolService {
         "established_year",
         "created_at",
         "student_count",
+        "sort_order",
       ];
       if (
         cleanFilters.sortBy &&
         !validSortFields.includes(cleanFilters.sortBy)
       ) {
-        cleanFilters.sortBy = "name";
+        cleanFilters.sortBy = "sort_order";
       }
 
       if (

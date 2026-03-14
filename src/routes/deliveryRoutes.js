@@ -18,5 +18,19 @@ export default function deliveryRoutes(dependencies = {}) {
     deliveryController.getShippedWarehouses
   );
 
+  // Route to get list of shipped items for a specific warehouse
+  router.get(
+    "/warehouses/:warehouseId/orders",
+    authenticateToken,
+    deliveryController.getWarehouseOrders
+  );
+
+  // Route to claim items (soft lock)
+  router.post(
+    "/warehouses/:warehouseId/claim",
+    authenticateToken,
+    deliveryController.claimItems
+  );
+
   return router;
 }
