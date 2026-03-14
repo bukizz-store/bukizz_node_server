@@ -152,6 +152,17 @@ export default function schoolRoutes(dependencies = {}) {
   );
 
   /**
+   * Bulk update school sort orders
+   * PUT /api/v1/schools/sort-order
+   */
+  router.put(
+    "/sort-order",
+    authenticateToken,
+    validate(schoolSchemas.updateSortOrders),
+    schoolController.updateSortOrders
+  );
+
+  /**
    * Update school
    * PUT /api/v1/schools/:id
    */
