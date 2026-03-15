@@ -1644,7 +1644,7 @@ export class AuthService {
 
       const { data: dpData, error: dpError } = await this.supabase
         .from("delivery_partner_data")
-        .select("kyc_status, is_cod_eligible")
+        .select("kyc_status, is_cod_eligible, profile_photo_url")
         .eq("user_id", user.id)
         .single();
 
@@ -1655,7 +1655,7 @@ export class AuthService {
       if (dpData.kyc_status === "pending") {
         const tokens = await this.generateTokens(user.id);
         return {
-          user,
+          user: { ...user, profilePhotoUrl: dpData.profile_photo_url || null },
           ...tokens,
           redirect: "kyc_pending_screen",
           kycStatus: "pending",
@@ -1674,7 +1674,7 @@ export class AuthService {
       const tokens = await this.generateTokens(user.id);
 
       return {
-        user,
+        user: { ...user, profilePhotoUrl: dpData.profile_photo_url || null },
         ...tokens,
         redirect: "home_screen",
         kycStatus: "verified",

@@ -692,14 +692,19 @@ export class ProductRepository {
       }
 
       // Apply school filter if provided
+      let schoolGradeMap = null;
       if (filters.schoolId) {
-        const { data: schoolProductIds } = await supabase
+        const { data: schoolProducts } = await supabase
           .from("product_schools")
-          .select("product_id")
+          .select("product_id, grade")
           .eq("school_id", filters.schoolId);
 
-        if (schoolProductIds && schoolProductIds.length > 0) {
-          const ids = schoolProductIds.map((p) => p.product_id);
+        if (schoolProducts && schoolProducts.length > 0) {
+          const ids = schoolProducts.map((p) => p.product_id);
+          schoolGradeMap = {};
+          schoolProducts.forEach((p) => {
+            schoolGradeMap[p.product_id] = p.grade;
+          });
           query = query.in("id", ids);
         } else {
           return {
@@ -732,9 +737,13 @@ export class ProductRepository {
       if (error) throw error;
 
       return {
-        products: (products || []).map((product) =>
-          this.formatProduct(product),
-        ),
+        products: (products || []).map((product) => {
+          const formatted = this.formatProduct(product);
+          if (schoolGradeMap && formatted.id in schoolGradeMap) {
+            formatted.schoolInfo = { grade: schoolGradeMap[formatted.id] };
+          }
+          return formatted;
+        }),
         pagination: {
           page,
           limit,

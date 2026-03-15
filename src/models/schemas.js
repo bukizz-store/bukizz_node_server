@@ -1181,3 +1181,37 @@ export const bannerSchemas = {
   }),
 };
 
+/**
+ * Delivery incentive validation schemas
+ */
+export const deliveryIncentiveSchemas = {
+  walletBalance: Joi.object({
+    page: Joi.number().integer().min(1).optional(),
+    limit: Joi.number().integer().min(1).max(100).optional(),
+  }),
+
+  markDelivered: Joi.object({
+    paymentCollected: Joi.boolean().optional(),
+  }),
+};
+
+/**
+ * Delivery partner bank details validation schema
+ */
+export const dpBankDetailsSchema = Joi.object({
+  accountName: Joi.string().trim().min(2).max(120).required(),
+  accountNumber: Joi.string()
+    .pattern(/^\d{9,18}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "Account number must be 9–18 digits",
+    }),
+  ifsc: Joi.string()
+    .uppercase()
+    .pattern(/^[A-Z]{4}0[A-Z0-9]{6}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "Invalid IFSC code format (e.g. SBIN0001234)",
+    }),
+});
+

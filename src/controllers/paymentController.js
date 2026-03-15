@@ -526,6 +526,24 @@ export class PaymentController {
             } catch (cancelError) {
                 logger.error("Webhook inline: Failed to cancel order", { orderId, error: cancelError.message });
             }
+        } else if (event === "payment_link.paid") {
+            const paymentLink = payload.payment_link?.entity;
+            const orderId = paymentLink?.notes?.orderId;
+            if (!orderId) return;
+
+            try {
+                const order = await this.orderRepository.findById(orderId);
+                if (order && order.paymentStatus !== "paid") {
+                    await this.serviceClient.from("orders").update({
+                        payment_status: "paid",
+                        updated_at: new Date().toISOString(),
+                        metadata: { ...(order.metadata || {}), paid_online: true, paid_online_at: new Date().toISOString(), payment_link_id: paymentLink.id, remark: "COD order paid via payment link (QR)" },
+                    }).eq("id", orderId);
+                    logger.info("Webhook inline: payment_link.paid processed", { orderId });
+                }
+            } catch (err) {
+                logger.error("Webhook inline: payment_link.paid failed", { orderId, error: err.message });
+            }
         }
     }
 

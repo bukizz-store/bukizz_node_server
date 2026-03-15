@@ -1505,6 +1505,160 @@ export class OrderRepository {
   }
 
   /**
+   * Confirm pickup: verify the partner holds a valid lock on the item, then
+   * transition status from shipped → out_for_delivery.
+   * Returns the updated formatted item or throws.
+   */
+  async confirmPickupItem(itemId, orderId, partnerId) {
+    try {
+      // Verify the item belongs to the order, is shipped, and locked by this partner
+      const { data: item, error: fetchError } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .eq("id", itemId)
+        .eq("order_id", orderId)
+        .eq("status", "shipped")
+        .eq("locked_by", partnerId)
+        .single();
+
+      if (fetchError || !item) {
+        throw new Error(
+          "Item not found, not shipped, or not locked by you."
+        );
+      }
+
+      // Check lock hasn't expired
+      const lockAge = new Date() - new Date(item.locked_at);
+      if (lockAge > this.LOCK_TIMEOUT_MS) {
+        throw new Error("Your lock on this item has expired. Please re-claim it.");
+      }
+
+      // Update status to out_for_delivery
+      const { data: updated, error: updateError } = await this.supabase
+        .from("order_items")
+        .update({ status: "out_for_delivery" })
+        .eq("id", itemId)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw new Error(`Failed to update item status: ${updateError.message}`);
+      }
+
+      return this._formatOrderItem(updated);
+    } catch (error) {
+      logger.error("Error confirming pickup item:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Mark an out_for_delivery item as delivered.
+   * Validates: item exists, status is out_for_delivery, locked_by = partnerId.
+   * Clears lock fields after delivery.
+   */
+  async markItemDelivered(itemId, partnerId, options = {}) {
+    const { markPaymentPaid = false } = options;
+    try {
+      const { data: item, error: fetchError } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .eq("id", itemId)
+        .eq("status", "out_for_delivery")
+        .eq("locked_by", partnerId)
+        .single();
+
+      if (fetchError || !item) {
+        throw new Error(
+          "Item not found, not out for delivery, or not assigned to you."
+        );
+      }
+
+      const { data: updated, error: updateError } = await this.supabase
+        .from("order_items")
+        .update({
+          status: "delivered",
+          locked_by: null,
+          locked_at: null,
+        })
+        .eq("id", itemId)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw new Error(`Failed to mark item as delivered: ${updateError.message}`);
+      }
+
+      // If cash collected at doorstep, mark order payment as paid
+      if (markPaymentPaid && item.order_id) {
+        const { error: payError } = await this.supabase
+          .from("orders")
+          .update({
+            payment_status: "paid",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", item.order_id);
+
+        if (payError) {
+          logger.error("Failed to update payment status for COD order:", payError);
+        }
+      }
+
+      return { formatted: this._formatOrderItem(updated), orderId: item.order_id };
+    } catch (error) {
+      logger.error("Error marking item as delivered:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get all out_for_delivery items assigned to a delivery partner.
+   * Returns items with full order info (address, contact, payment).
+   */
+  async getActiveDeliveries(partnerId) {
+    try {
+      const { data: items, error } = await this.supabase
+        .from("order_items")
+        .select(`
+          *,
+          orders!inner(
+            id,
+            order_number,
+            shipping_address,
+            contact_phone,
+            contact_email,
+            payment_method,
+            total_amount
+          )
+        `)
+        .eq("status", "out_for_delivery")
+        .eq("locked_by", partnerId)
+        .order("locked_at", { ascending: true });
+
+      if (error) {
+        throw new Error(`Failed to fetch active deliveries: ${error.message}`);
+      }
+
+      return (items || []).map((item) => {
+        const formatted = this._formatOrderItem(item);
+        formatted.orderInfo = {
+          id: item.orders.id,
+          orderNumber: item.orders.order_number,
+          shippingAddress: item.orders.shipping_address,
+          contactPhone: item.orders.contact_phone,
+          contactEmail: item.orders.contact_email,
+          paymentMethod: item.orders.payment_method,
+          orderTotalAmount: item.orders.total_amount,
+        };
+        return formatted;
+      });
+    } catch (error) {
+      logger.error("Error fetching active deliveries:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Count currently valid (non-expired) locks for a partner
    */
   async countValidLocks(partnerId) {

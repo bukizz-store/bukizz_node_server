@@ -19,6 +19,12 @@ import { ledgerRepository } from "../repositories/ledgerRepository.js";
 import { settlementRepository } from "../repositories/settlementRepository.js";
 import { SettlementService } from "../services/settlementService.js";
 import { settlementController } from "../controllers/settlementController.js";
+import { dpLedgerRepository } from "../repositories/dpLedgerRepository.js";
+import { deliveryRepository } from "../repositories/deliveryRepository.js";
+import deliveryIncentiveService from "../services/deliveryIncentiveService.js";
+import deliveryBankService from "../services/deliveryBankService.js";
+import { verifyBankAccount } from "../services/razorpayVerificationService.js";
+import { DeliveryController } from "../controllers/deliveryController.js";
 import { getDB } from "../db/index.js";
 
 /**
@@ -71,6 +77,24 @@ export function createDependencies(overrides = {}) {
     overrides.settlementService ||
     new SettlementService(ledgerRepository, settlementRepository);
 
+  // Delivery Incentive
+  const dpLedgerRepo = overrides.dpLedgerRepository || dpLedgerRepository;
+  const deliveryIncentiveSvc =
+    overrides.deliveryIncentiveService ||
+    deliveryIncentiveService({
+      dpLedgerRepository: dpLedgerRepo,
+      orderRepository,
+    });
+
+  // Delivery Bank
+  const deliveryRepo = overrides.deliveryRepository || deliveryRepository;
+  const deliveryBankSvc =
+    overrides.deliveryBankService ||
+    deliveryBankService({
+      deliveryRepository: deliveryRepo,
+      verifyBankAccountFn: verifyBankAccount,
+    });
+
   // Controllers (Request Handling Layer)
   const userController =
     overrides.userController || new UserController(userService);
@@ -85,6 +109,12 @@ export function createDependencies(overrides = {}) {
   const settlementCtrl =
     overrides.settlementController ||
     settlementController({ settlementService });
+  const deliveryCtrl =
+    overrides.deliveryController ||
+    new DeliveryController({
+      deliveryIncentiveService: deliveryIncentiveSvc,
+      deliveryBankService: deliveryBankSvc,
+    });
 
   return {
     // Database
@@ -99,6 +129,8 @@ export function createDependencies(overrides = {}) {
     orderQueryRepository,
     ledgerRepository,
     settlementRepository,
+    dpLedgerRepository: dpLedgerRepo,
+    deliveryRepository: deliveryRepo,
 
     // Services
     userService,
@@ -107,6 +139,8 @@ export function createDependencies(overrides = {}) {
     schoolService,
     orderService,
     settlementService,
+    deliveryIncentiveService: deliveryIncentiveSvc,
+    deliveryBankService: deliveryBankSvc,
 
     // Controllers
     userController,
@@ -115,5 +149,6 @@ export function createDependencies(overrides = {}) {
     schoolController,
     orderController,
     settlementController: settlementCtrl,
+    deliveryController: deliveryCtrl,
   };
 }

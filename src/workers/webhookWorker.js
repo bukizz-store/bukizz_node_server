@@ -44,6 +44,11 @@ export function startWebhookWorker() {
                     await handlePaymentFailed(payload, serviceClient, orderRepository);
                     break;
 
+                case "payment_link.paid":
+                    // Payment Link payments also fire this event — extract from payment_link.entity
+                    await handlePaymentLinkPaid(payload, serviceClient, orderRepository);
+                    break;
+
                 default:
                     logger.warn(`🪝 [WEBHOOK WORKER] Unhandled event: ${event}`, { jobId: job.id });
             }
@@ -261,5 +266,61 @@ async function handlePaymentFailed(payload, serviceClient, orderRepository) {
 
     logger.info("🪝 payment.failed: Processed", {
         orderId, paymentId: payment.id,
+    });
+}
+
+/**
+ * Handle payment_link.paid — safety net for Payment Link QR payments.
+ * The payment.captured event usually handles this, but this ensures
+ * payment_status is updated even if the standard flow misses it.
+ */
+async function handlePaymentLinkPaid(payload, serviceClient, orderRepository) {
+    const paymentLink = payload.payment_link?.entity;
+    if (!paymentLink) {
+        logger.warn("🪝 payment_link.paid: No payment_link entity in payload, skipping");
+        return;
+    }
+
+    const orderId = paymentLink.notes?.orderId;
+    if (!orderId) {
+        logger.warn("🪝 payment_link.paid: No orderId in notes, skipping");
+        return;
+    }
+
+    // Check if already marked paid (payment.captured may have handled it)
+    const order = await orderRepository.findById(orderId);
+    if (!order) {
+        logger.warn("🪝 payment_link.paid: Order not found", { orderId });
+        return;
+    }
+
+    if (order.paymentStatus === "paid") {
+        logger.info("🪝 payment_link.paid: Order already paid, skipping", { orderId });
+        return;
+    }
+
+    // Mark as paid
+    const { error: orderError } = await serviceClient
+        .from("orders")
+        .update({
+            payment_status: "paid",
+            updated_at: new Date().toISOString(),
+            metadata: {
+                ...(order.metadata || {}),
+                paid_online: true,
+                paid_online_at: new Date().toISOString(),
+                payment_link_id: paymentLink.id,
+                remark: "COD order paid via payment link (QR)",
+            },
+        })
+        .eq("id", orderId);
+
+    if (orderError) {
+        throw new Error(`payment_link.paid: Orders update failed: ${orderError.message}`);
+    }
+
+    logger.info("🪝 payment_link.paid: Successfully marked as paid", {
+        orderId,
+        paymentLinkId: paymentLink.id,
     });
 }

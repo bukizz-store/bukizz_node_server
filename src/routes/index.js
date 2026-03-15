@@ -62,6 +62,7 @@ export function setupRoutes(app, dependencies = {}) {
         settlements: `${apiV1}/settlements`,
         deliveryAuth: `${apiV1}/delivery/auth`,
         adminDelivery: `${apiV1}/admin/delivery`,
+        deliveryBankDetails: `${apiV1}/delivery/bank-details`,
         banners: `${apiV1}/banners`,
       },
     });

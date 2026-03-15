@@ -40,7 +40,13 @@ import { UserRepository } from "./src/repositories/userRepository.js";
 import { ledgerRepository } from "./src/repositories/ledgerRepository.js";
 import { settlementRepository } from "./src/repositories/settlementRepository.js";
 import { SettlementService } from "./src/services/settlementService.js";
+import { dpLedgerRepository } from "./src/repositories/dpLedgerRepository.js";
+import deliveryIncentiveService from "./src/services/deliveryIncentiveService.js";
+import { DeliveryController } from "./src/controllers/deliveryController.js";
 import { settlementController } from "./src/controllers/settlementController.js";
+import { deliveryRepository } from "./src/repositories/deliveryRepository.js";
+import deliveryBankService from "./src/services/deliveryBankService.js";
+import { verifyBankAccount } from "./src/services/razorpayVerificationService.js";
 
 // Import middleware and utilities
 import { errorHandler } from "./src/middleware/errorHandler.js";
@@ -122,6 +128,19 @@ async function startServer() {
     );
     const settlementCtrl = settlementController({ settlementService });
 
+    // Initialize delivery incentive layer
+    const deliveryIncentiveSvc = deliveryIncentiveService({
+      dpLedgerRepository,
+    });
+    const deliveryBankSvc = deliveryBankService({
+      deliveryRepository,
+      verifyBankAccountFn: verifyBankAccount,
+    });
+    const deliveryCtrl = new DeliveryController({
+      deliveryIncentiveService: deliveryIncentiveSvc,
+      deliveryBankService: deliveryBankSvc,
+    });
+
     // Dependency injection container
     const dependencies = {
       supabase,
@@ -131,6 +150,7 @@ async function startServer() {
       schoolController,
       orderController,
       settlementController: settlementCtrl,
+      deliveryController: deliveryCtrl,
       authService,
       userService,
       productService,
