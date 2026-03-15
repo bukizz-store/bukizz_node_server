@@ -718,6 +718,26 @@ export class SchoolService {
       throw error;
     }
   }
+
+  /**
+   * Bulk update school sort orders
+   */
+  async updateSortOrders(orders) {
+    try {
+      if (!Array.isArray(orders) || orders.length === 0) {
+        throw new AppError("Orders array is required", 400);
+      }
+
+      await this.schoolRepository.updateSortOrders(orders);
+      
+      logger.info(`Bulk updated sort orders for ${orders.length} schools`);
+      return { message: "Sort orders updated successfully" };
+    } catch (error) {
+      logger.error("Error updating sort orders:", error);
+      throw error;
+    }
+  }
+
   /**
    * Upload school image
    */

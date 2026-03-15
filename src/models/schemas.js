@@ -569,6 +569,18 @@ export const schoolSchemas = {
     description: Joi.string().optional(),
     metadata: Joi.object().optional(),
   }),
+
+  updateSortOrders: Joi.object({
+    orders: Joi.array()
+      .items(
+        Joi.object({
+          id: uuidSchema,
+          sortOrder: Joi.number().integer().required(),
+        })
+      )
+      .min(1)
+      .required(),
+  }),
 };
 
 /**
