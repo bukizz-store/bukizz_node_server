@@ -69,11 +69,22 @@ export class SchoolController {
 
   /**
    * Get school by ID with enhanced details
-   * GET /api/schools/:id
+   * GET /api/v1/schools/:id
    */
   getSchool = asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const school = await this.schoolService.getSchool(id);
+    const { includeInactive } = req.query;
+
+    const options = {};
+    if (includeInactive === "true") {
+      options.includeInactive = true;
+      if (req.user) {
+        options.retailerId = req.user.id;
+        options.isAdmin = req.user.role === "admin" || req.tokenData?.role === "admin";
+      }
+    }
+
+    const school = await this.schoolService.getSchool(id, options);
 
     res.json({
       success: true,

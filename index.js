@@ -50,6 +50,7 @@ import { verifyBankAccount } from "./src/services/razorpayVerificationService.js
 
 // Import middleware and utilities
 import { errorHandler } from "./src/middleware/errorHandler.js";
+import { optionalAuth } from "./src/middleware/authMiddleware.js";
 import { logger } from "./src/utils/logger.js";
 import { config } from "./src/config/index.js";
 import { setupCronJobs } from "./src/jobs/cronJobs.js";
@@ -157,6 +158,7 @@ async function startServer() {
       schoolService,
       orderService,
       settlementService,
+      optionalAuth,
       productRepository,
       brandRepository,
       productOptionRepository,

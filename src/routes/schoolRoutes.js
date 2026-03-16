@@ -112,6 +112,7 @@ export default function schoolRoutes(dependencies = {}) {
    */
   router.get(
     "/:id",
+    dependencies.optionalAuth || ((req, res, next) => next()), // Fallback if optionalAuth not in dependencies
     validate(paramSchemas.id, "params"),
     schoolController.getSchool
   );
