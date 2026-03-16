@@ -93,6 +93,12 @@ export const userSchemas = {
     isCodEligible: Joi.boolean().required(),
   }),
 
+  deliveryPartnerResendPin: Joi.object({
+    phone: Joi.string()
+      .pattern(/^\+?[\d\s\-\(\)]{10,}$/)
+      .required(),
+  }),
+
   retailerLogin: Joi.object({
     email: emailSchema,
     password: passwordSchema,
@@ -612,6 +618,12 @@ export const orderSchemas = {
         .required(),
       country: Joi.string().max(100).default("India"),
       landmark: Joi.string().max(255).optional(),
+      neighborhood: Joi.string().max(255).optional(),
+      district: Joi.string().max(255).optional(),
+      coordinates: Joi.object({
+        lat: Joi.number().min(-90).max(90).required(),
+        lng: Joi.number().min(-180).max(180).required(),
+      }).optional(),
     }).required(),
     billingAddress: Joi.object({
       recipientName: Joi.string().min(2).max(255).required(),
@@ -626,6 +638,12 @@ export const orderSchemas = {
         .required(),
       country: Joi.string().max(100).default("India"),
       landmark: Joi.string().max(255).optional(),
+      neighborhood: Joi.string().max(255).optional(),
+      district: Joi.string().max(255).optional(),
+      coordinates: Joi.object({
+        lat: Joi.number().min(-90).max(90).required(),
+        lng: Joi.number().min(-180).max(180).required(),
+      }).optional(),
     }).optional(),
     contactPhone: phoneSchema.optional(),
     contactEmail: Joi.string().email().optional(),

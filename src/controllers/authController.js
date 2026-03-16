@@ -509,6 +509,26 @@ export class AuthController {
       });
     }
   }
+
+  async resendDeliveryPartnerPin(req, res) {
+    try {
+      const { phone } = req.body;
+
+      const result = await authService.resendDeliveryPartnerPin(phone);
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+        data: result.data,
+      });
+    } catch (error) {
+      logger.error("Resend delivery partner PIN error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Failed to resend PIN",
+      });
+    }
+  }
 }
 
 const authController = new AuthController();

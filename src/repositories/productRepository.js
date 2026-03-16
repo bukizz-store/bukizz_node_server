@@ -155,6 +155,9 @@ export class ProductRepository {
           ),
           product_images(
             id, url, alt_text, sort_order, is_primary, variant_id
+          ),
+          product_schools(
+            school_id, grade
           )
         `,
         )
@@ -268,6 +271,15 @@ export class ProductRepository {
         ? product.product_brands.map((pb) => pb.brands).filter(Boolean)
         : [];
       product.brands = brs;
+
+      // 6) Format school associations
+      product.schools = Array.isArray(product.product_schools)
+        ? product.product_schools.map((ps) => ({
+            school_id: ps.school_id,
+            grade: ps.grade,
+          }))
+        : [];
+      delete product.product_schools;
 
       // console.log("Optimized product data:", product);
       return product;

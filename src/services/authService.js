@@ -1601,6 +1601,100 @@ export class AuthService {
     }
   }
 
+  async resendDeliveryPartnerPin(phone) {
+    try {
+      const normalizedPhone = this.normalizePhone(phone);
+
+      if (!normalizedPhone) {
+        throw new Error("Phone number is required");
+      }
+
+      const { data: user, error: userError } = await this.supabase
+        .from("users")
+        .select("id, full_name, email, phone, is_active, role")
+        .eq("phone", normalizedPhone)
+        .eq("role", "delivery_partner")
+        .single();
+
+      if (userError || !user) {
+        throw new Error("Delivery partner not found with this phone number");
+      }
+
+      const { data: partnerData, error: partnerError } = await this.supabase
+        .from("delivery_partner_data")
+        .select("kyc_status")
+        .eq("user_id", user.id)
+        .single();
+
+      if (partnerError || !partnerData) {
+        throw new Error("Delivery partner profile not found");
+      }
+
+      if (partnerData.kyc_status !== "verified") {
+        throw new Error("Your account is not yet approved. Please wait for admin approval.");
+      }
+
+      const pin = crypto.randomInt(1000, 10000).toString();
+      const pinHash = await bcrypt.hash(pin, 12);
+
+      const { data: existingPinAuthRows } = await this.supabase
+        .from("user_auths")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("provider", "dp_pin")
+        .limit(1);
+
+      const existingPinAuth = existingPinAuthRows?.[0] || null;
+
+      if (existingPinAuth?.id) {
+        const { error: updatePinError } = await this.supabase
+          .from("user_auths")
+          .update({
+            provider_user_id: normalizedPhone,
+            password_hash: pinHash,
+          })
+          .eq("id", existingPinAuth.id);
+
+        if (updatePinError) throw updatePinError;
+      } else {
+        const { error: createPinError } = await this.supabase
+          .from("user_auths")
+          .insert({
+            id: uuidv4(),
+            user_id: user.id,
+            provider: "dp_pin",
+            provider_user_id: normalizedPhone,
+            password_hash: pinHash,
+            created_at: new Date().toISOString(),
+          });
+
+        if (createPinError) throw createPinError;
+      }
+
+      if (!user.email) {
+        throw new Error("Delivery partner email is missing. Cannot send PIN email.");
+      }
+
+      const emailResult = await emailService.sendDeliveryPartnerWelcomeEmail(
+        user.email,
+        user.full_name,
+        user.phone,
+        pin,
+      );
+
+      return {
+        message: "New PIN sent to your registered email address.",
+        data: {
+          pinSent: !emailResult?.error,
+          emailError: emailResult?.error || null,
+        },
+      };
+    } catch (error) {
+      logger.error("Resend delivery partner PIN error:", error);
+      throw error;
+    }
+  }
+
   async loginDeliveryPartner(phone, pin) {
     try {
       const normalizedPhone = this.normalizePhone(phone);

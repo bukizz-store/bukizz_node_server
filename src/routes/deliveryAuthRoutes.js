@@ -46,5 +46,11 @@ export default function deliveryAuthRoutes(dependencies = {}) {
     authController.loginDeliveryPartner,
   );
 
+  router.post(
+    "/resend-pin",
+    validate(userSchemas.deliveryPartnerResendPin),
+    authController.resendDeliveryPartnerPin,
+  );
+
   return router;
 }

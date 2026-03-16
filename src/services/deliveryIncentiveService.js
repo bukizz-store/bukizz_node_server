@@ -57,8 +57,8 @@ const deliveryIncentiveService = ({
     ].filter(Boolean);
 
     return {
-      lat: shippingAddress.lat ?? null,
-      lng: shippingAddress.lng ?? null,
+      lat: shippingAddress.coordinates?.lat ?? shippingAddress.lat ?? null,
+      lng: shippingAddress.coordinates?.lng ?? shippingAddress.lng ?? null,
       addressString: parts.join(", "),
       pincode: shippingAddress.postalCode || shippingAddress.postal_code || null,
     };
