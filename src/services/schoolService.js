@@ -108,7 +108,7 @@ export class SchoolService {
   /**
    * Get school by ID with enhanced details
    */
-  async getSchool(schoolId) {
+  async getSchool(schoolId, options = {}) {
     try {
       const school = await this.schoolRepository.findById(schoolId);
       if (!school || !school.isActive) {
@@ -117,7 +117,7 @@ export class SchoolService {
 
       // Get additional school data
       const [products, analytics, partnerships] = await Promise.all([
-        this.schoolRepository.getSchoolProducts(schoolId),
+        this.schoolRepository.getSchoolProducts(schoolId, options),
         this.schoolRepository.getSchoolAnalytics(schoolId),
         this.schoolRepository.getSchoolPartnerships(schoolId),
       ]);
