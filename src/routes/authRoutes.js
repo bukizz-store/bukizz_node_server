@@ -76,6 +76,7 @@ export default function authRoutes(dependencies = {}) {
   );
   router.get("/me", authenticateToken, authController.getProfile);
   router.post("/logout", authenticateToken, authController.logout);
+  router.delete("/delete-account", authenticateToken, authController.deleteAccount);
 
   return router;
 }

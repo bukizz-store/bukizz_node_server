@@ -142,7 +142,45 @@ export class ProductService {
         productId,
       });
 
-      // Step 3: Fetch the fully created product to return consistent response format
+      // Step 3: Ensure brand is linked (RPC may not create product_brands entries)
+      if (data.brandData) {
+        try {
+          const existingBrands =
+            await this.productRepository.getProductBrands(productId);
+
+          if (!existingBrands || existingBrands.length === 0) {
+            if (data.brandData.type === "existing" && data.brandData.brandId) {
+              await this.productRepository.addProductBrand(productId, {
+                brandId: data.brandData.brandId,
+                isPrimary: true,
+              });
+            } else if (data.brandData.type === "new" && data.brandData.name) {
+              const newBrand = await this.brandRepository.create({
+                name: data.brandData.name,
+                slug:
+                  data.brandData.slug ||
+                  data.brandData.name.toLowerCase().replace(/\s+/g, "-"),
+                description: data.brandData.description,
+                country: data.brandData.country,
+                logoUrl: data.brandData.logoUrl,
+                metadata: data.brandData.metadata || {},
+              });
+              await this.productRepository.addProductBrand(productId, {
+                brandId: newBrand.id,
+                isPrimary: true,
+              });
+            }
+            logger.info("Brand linked to product after RPC", { productId });
+          }
+        } catch (brandError) {
+          logger.warn(
+            "Failed to ensure brand link after RPC:",
+            brandError.message,
+          );
+        }
+      }
+
+      // Step 4: Fetch the fully created product to return consistent response format
       return await this.productRepository.getProductWithDetails(productId, {
         includeImages: true,
         includeVariantImages: true,
@@ -1329,6 +1367,39 @@ export class ProductService {
       });
     } catch (error) {
       logger.error("Error getting products by type:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get similar products for a given product ID
+   * @param {string} productId
+   * @param {number} limit
+   * @returns {Promise<Array>}
+   */
+  async getSimilarProducts(productId, limit = 10) {
+    try {
+      // 1. Fetch the product to understand its context (schools, categories, type)
+      const product = await this.productRepository.findById(productId);
+      if (!product) {
+        throw new AppError("Product not found", 404);
+      }
+
+      // 2. Extract context
+      const schoolIds = product.schools?.map((s) => s.school_id) || [];
+      const categoryIds = product.categories?.map((c) => c.id) || [];
+      const productType = product.product_type;
+
+      // 3. Find similar products based on context
+      return await this.productRepository.findSimilar(
+        productId,
+        schoolIds,
+        categoryIds,
+        productType,
+        limit
+      );
+    } catch (error) {
+      logger.error(`Error fetching similar products for ${productId}:`, error);
       throw error;
     }
   }

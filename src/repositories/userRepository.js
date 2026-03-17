@@ -867,6 +867,44 @@ export class UserRepository {
       createdAt: row.created_at,
     };
   }
+
+  /**
+   * Update email in user_auths for the 'email' provider
+   */
+  async updateAuthProviderEmail(userId, newEmail) {
+    try {
+      const { error } = await this.supabase
+        .from("user_auths")
+        .update({ provider_user_id: newEmail })
+        .eq("user_id", userId)
+        .eq("provider", "email");
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      logger.error("Error updating auth provider email:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Revoke all active refresh tokens for a user
+   */
+  async revokeAllRefreshTokens(userId) {
+    try {
+      const { error } = await this.supabase
+        .from("refresh_tokens")
+        .update({ revoked_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .is("revoked_at", null);
+
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      logger.error("Error revoking refresh tokens:", error);
+      throw error;
+    }
+  }
 }
 
 export default UserRepository;

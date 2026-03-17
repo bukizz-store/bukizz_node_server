@@ -290,6 +290,92 @@ export class ProductRepository {
   }
 
   /**
+   * Find similar products based on school or category
+   */
+  async findSimilar(
+    productId,
+    schoolIds,
+    categoryIds,
+    productType,
+    limit = 10,
+  ) {
+    try {
+      const supabase = getSupabase();
+      let query = supabase
+        .from("products")
+        .select(
+          `
+          *,
+          product_images(
+            id, url, alt_text, sort_order, is_primary, variant_id
+          ),
+          product_schools(
+            grade, school_id
+          )
+          `,
+        )
+        .eq("is_active", true)
+        .eq("is_deleted", false)
+        .neq("id", productId);
+
+      // Condition 1: School strict match
+      if (schoolIds && schoolIds.length > 0) {
+        // First get product IDs that belong to these schools
+        const { data: schoolProducts, error: spError } = await supabase
+          .from("product_schools")
+          .select("product_id")
+          .in("school_id", schoolIds);
+
+        if (spError) throw spError;
+
+        const productIds = schoolProducts.map((sp) => sp.product_id);
+
+        // Filter by school products AND product type
+        query = query.in("id", productIds).eq("product_type", productType);
+      }
+      // Condition 2: Category match (if no schools)
+      else if (categoryIds && categoryIds.length > 0) {
+        // First get product IDs that belong to these categories
+        const { data: catProducts, error: cpError } = await supabase
+          .from("product_categories")
+          .select("product_id")
+          .in("category_id", categoryIds);
+
+        if (cpError) throw cpError;
+
+        const productIds = catProducts.map((cp) => cp.product_id);
+
+        // Filter by category products
+        query = query.in("id", productIds);
+      } else {
+        // Condition 3: Fallback to product type
+        query = query.eq("product_type", productType);
+      }
+
+      // Execute query
+      const { data, error } = await query.limit(limit);
+
+      if (error) throw error;
+
+      // Process images (simple version)
+      return data.map((product) => {
+        product.images = (product.product_images || [])
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+          .map((img) => ({
+            id: img.id,
+            url: img.url,
+            isPrimary: img.is_primary,
+          }));
+        delete product.product_images;
+        return product;
+      });
+    } catch (error) {
+      logger.error("Error finding similar products:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Map API field names (camelCase) to database column names (snake_case)
    */
   mapSortField(apiField) {

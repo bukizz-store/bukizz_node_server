@@ -261,6 +261,32 @@ export class AuthController {
     }
   }
 
+  async deleteAccount(req, res) {
+    try {
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: "User not authenticated",
+        });
+      }
+
+      const result = await authService.deleteAccount(userId);
+
+      res.status(200).json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error) {
+      logger.error("Delete account error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Account deletion failed",
+      });
+    }
+  }
+
   async requestPasswordReset(req, res) {
     try {
       const { email } = req.body;

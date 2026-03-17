@@ -679,14 +679,18 @@ export class UserService {
         throw new AppError("User not found", 404);
       }
 
+      const emailChanged = updateData.email && updateData.email !== user.email;
+
       // Check for email uniqueness if changed
-      if (updateData.email && updateData.email !== user.email) {
+      if (emailChanged) {
         const existingUser = await this.userRepository.findByEmail(
           updateData.email,
         );
         if (existingUser && existingUser.id !== userId) {
           throw new AppError("Email address is already in use", 409);
         }
+        // Mark email as unverified since it changed
+        updateData.emailVerified = false;
       }
 
       // Check for phone uniqueness if changed
@@ -736,6 +740,19 @@ export class UserService {
       }
 
       const updatedUser = await this.userRepository.update(userId, updateData);
+
+      // If email changed, also update user_auths and revoke all sessions
+      if (emailChanged) {
+        await this.userRepository.updateAuthProviderEmail(
+          userId,
+          updateData.email,
+        );
+        await this.userRepository.revokeAllRefreshTokens(userId);
+
+        logger.info(
+          `Email changed by admin ${adminUserId} for user ${userId}: ${user.email} → ${updateData.email}`,
+        );
+      }
 
       logger.info(`User updated by admin ${adminUserId}: ${userId}`, {
         adminUserId,

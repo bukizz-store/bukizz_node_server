@@ -200,6 +200,22 @@ export class ProductController {
   });
 
   /**
+   * Get similar products
+   * GET /api/v1/products/:id/similar
+   */
+  getSimilarProducts = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    const { limit } = req.query;
+    const products = await this.productService.getSimilarProducts(id, limit);
+
+    res.json({
+      success: true,
+      data: { products },
+      message: "Similar products retrieved successfully",
+    });
+  });
+
+  /**
    * Get products for warehouse (Retailer Dashboard)
    * GET /api/v1/products/warehouse
    * Headers: x-warehouse-id

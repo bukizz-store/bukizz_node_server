@@ -158,6 +158,16 @@ export default function productRoutes(dependencies = {}) {
   );
 
   /**
+   * Get similar products
+   * GET /api/v1/products/:id/similar
+   */
+  router.get(
+    "/:id/similar",
+    validate(paramSchemas.id, "params"),
+    productController.getSimilarProducts,
+  );
+
+  /**
    * Get product by ID
    * GET /api/v1/products/:id
    */

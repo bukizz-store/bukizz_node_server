@@ -849,6 +849,50 @@ export class AuthService {
     }
   }
 
+  async deleteAccount(userId) {
+    try {
+      if (!userId) {
+        throw new Error("User ID is required");
+      }
+
+      // Verify user exists
+      const { data: user, error: findError } = await this.supabase
+        .from("users")
+        .select("id, email, full_name")
+        .eq("id", userId)
+        .single();
+
+      if (findError || !user) {
+        throw new Error("User not found");
+      }
+
+      // Deactivate user (soft delete)
+      const { error: deactivateError } = await this.supabase
+        .from("users")
+        .update({
+          is_active: false,
+          deactivated_at: new Date().toISOString(),
+          deactivation_reason: "User requested account deletion",
+        })
+        .eq("id", userId);
+
+      if (deactivateError) throw deactivateError;
+
+      // Revoke all refresh tokens
+      await this.supabase
+        .from("refresh_tokens")
+        .update({ revoked_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .is("revoked_at", null);
+
+      logger.info(`Account deleted for user: ${user.email} (${userId})`);
+      return { message: "Account deleted successfully" };
+    } catch (error) {
+      logger.error("Delete account error:", error);
+      throw error;
+    }
+  }
+
   async requestPasswordReset(email) {
     try {
       if (email) email = email.toLowerCase();
