@@ -428,6 +428,7 @@ export class OrderRepository {
         search, // alias used by admin frontend
         retailerId,
         warehouseId,
+        city,
       } = filters;
 
       const effectiveSearchTerm = searchTerm || search;
@@ -577,6 +578,7 @@ export class OrderRepository {
       if (startDate) query = query.gte("created_at", startDate);
       if (endDate) query = query.lte("created_at", endDate);
       if (finalOrderIds) query = query.in("id", finalOrderIds);
+      if (city) query = query.ilike("shipping_address->>city", `%${city}%`);
 
       // Apply sorting and pagination
       const ascending = sortOrder.toLowerCase() === "asc";
