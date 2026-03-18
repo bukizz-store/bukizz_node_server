@@ -156,3 +156,17 @@ export async function queueForgotPasswordEmail(email, resetToken, firstName) {
     logger.info(`📬 Queued forgot-password email for ${email}`, { jobId: job.id });
     return job;
 }
+
+/**
+ * Queue a user query email to admin.
+ */
+export async function queueUserQueryEmail(adminEmail, queryData) {
+    if (!isQueueReady()) {
+        logger.info(`📬 [FALLBACK] Sending user-query-admin email directly to ${adminEmail}`);
+        return emailService.sendUserQueryEmail(adminEmail, queryData);
+    }
+    const queue = getEmailQueue();
+    const job = await queue.add("user-query", { adminEmail, queryData });
+    logger.info(`📬 Queued user-query email for ${adminEmail}`, { jobId: job.id });
+    return job;
+}

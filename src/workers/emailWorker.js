@@ -68,6 +68,12 @@ export function startEmailWorker() {
                     break;
                 }
 
+                case "user-query": {
+                    const { adminEmail, queryData } = data;
+                    await emailService.sendUserQueryEmail(adminEmail, queryData);
+                    break;
+                }
+
                 default:
                     logger.warn(`📧 [EMAIL WORKER] Unknown job type: ${name}`, { jobId: job.id });
                     throw new Error(`Unknown email job type: ${name}`);

@@ -7,6 +7,7 @@ import { variantCommissionRepository } from "../repositories/variantCommissionRe
 import {
   queueOrderConfirmationEmail,
   queueRetailerOrderNotificationEmail,
+  queueUserQueryEmail,
 } from "../queue/emailQueue.js";
 import {
   queueOrderDelivered,
@@ -1756,6 +1757,22 @@ export class OrderService {
       });
 
       logger.info(`Order query created: ${query.id} for order: ${orderId}`);
+
+      // Send email notification to admin
+      try {
+        await queueUserQueryEmail("bukizzstore@gmail.com", {
+          orderNumber: order.orderNumber,
+          customerName: order.shippingAddress?.recipientName || "Customer",
+          subject: queryData.subject,
+          message: queryData.message,
+          orderId: orderId
+        });
+        logger.info(`Queued admin notification for query ${query.id}`);
+      } catch (emailError) {
+        logger.error("Failed to queue admin query email:", emailError);
+        // Don't fail the request if email fails
+      }
+
       return query;
     } catch (error) {
       logger.error("Error creating order query:", error);

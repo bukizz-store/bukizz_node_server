@@ -8,7 +8,12 @@ import { logger } from "../utils/logger.js";
 export const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers["authorization"];
-    const token = authHeader && authHeader.split(" ")[1]; // Bearer TOKEN
+    let token = authHeader && authHeader.split(" ")[1]; // Bearer TOKEN
+
+    // Check cookie if header missing
+    if (!token && req.cookies && req.cookies.accessToken) {
+      token = req.cookies.accessToken;
+    }
 
     if (!token) {
       return res.status(401).json({
@@ -65,7 +70,12 @@ export const authenticateToken = async (req, res, next) => {
 export const optionalAuth = async (req, res, next) => {
   try {
     const authHeader = req.headers["authorization"];
-    const token = authHeader && authHeader.split(" ")[1];
+    let token = authHeader && authHeader.split(" ")[1];
+
+    // Check cookie if header missing
+    if (!token && req.cookies && req.cookies.accessToken) {
+      token = req.cookies.accessToken;
+    }
 
     if (!token) {
       return next();

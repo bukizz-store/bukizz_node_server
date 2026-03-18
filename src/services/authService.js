@@ -1031,7 +1031,7 @@ export class AuthService {
 
   async verifyToken(token) {
     try {
-      const decoded = jwt.verify(token, this.jwtSecret);
+      const decoded = jwt.verify(token, this.jwtSecret, { algorithms: ["HS256"] });
 
       // Check if user still exists (do NOT filter by is_active here —
       // retailers may be inactive but still need access to onboarding routes)

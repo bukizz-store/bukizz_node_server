@@ -1,6 +1,45 @@
 import authService from "../services/authService.js";
 import { logger } from "../utils/logger.js";
 
+// Helper to set cookies and send response
+const sendTokenResponse = (res, result, message, statusCode = 200) => {
+  const { accessToken, refreshToken, expiresIn, ...data } = result;
+
+  const isProduction = process.env.NODE_ENV === "production";
+
+  if (accessToken) {
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+      maxAge: 24 * 60 * 60 * 1000 // 24h default
+    });
+  }
+
+  if (refreshToken) {
+    res.cookie("refreshToken", refreshToken, {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: "lax",
+      maxAge: (expiresIn || 7 * 24 * 60 * 60) * 1000 
+    });
+  }
+
+  // Include tokens in response body for frontend compatibility
+  // TODO: Update frontend to use cookies exclusively for better security
+  const responseData = {
+    ...data,
+    accessToken,
+    refreshToken
+  };
+
+  res.status(statusCode).json({
+    success: true,
+    message,
+    data: responseData
+  });
+};
+
 export class AuthController {
   async register(req, res) {
     try {
@@ -12,11 +51,7 @@ export class AuthController {
         password,
       });
 
-      res.status(201).json({
-        success: true,
-        message: "User registered successfully",
-        data: result,
-      });
+      sendTokenResponse(res, result, "User registered successfully", 201);
     } catch (error) {
       logger.error("Registration error:", error);
       res.status(400).json({
@@ -37,11 +72,7 @@ export class AuthController {
         phone,
       });
 
-      res.status(201).json({
-        success: true,
-        message: result.message,
-        data: result,
-      });
+      sendTokenResponse(res, result, result.message, 201);
     } catch (error) {
       logger.error("Retailer registration error:", error);
       res.status(400).json({
@@ -76,11 +107,7 @@ export class AuthController {
 
       const result = await authService.verifyRetailerOtp(email, otp);
 
-      res.status(201).json({
-        success: true,
-        message: result.message,
-        data: result,
-      });
+      sendTokenResponse(res, result, result.message, 201);
     } catch (error) {
       logger.error("Verify retailer OTP error:", error);
       res.status(400).json({
@@ -116,11 +143,7 @@ export class AuthController {
 
       const result = await authService.loginRetailer(email, password);
 
-      res.status(200).json({
-        success: true,
-        message: "Retailer login successful",
-        data: result,
-      });
+      sendTokenResponse(res, result, "Retailer login successful", 200);
     } catch (error) {
       logger.error("Retailer login error:", error);
       const statusCode = error.message?.startsWith("Unauthorized:") ? 403 : 401;
@@ -137,11 +160,7 @@ export class AuthController {
 
       const result = await authService.login(email, password, loginAs);
 
-      res.status(200).json({
-        success: true,
-        message: "Login successful",
-        data: result,
-      });
+      sendTokenResponse(res, result, "Login successful", 200);
     } catch (error) {
       logger.error("Login error:", error);
 
@@ -170,11 +189,7 @@ export class AuthController {
       const result = await authService.googleLogin(token);
       logger.info(`Google login successful for user: ${result.user?.email}`);
 
-      res.status(200).json({
-        success: true,
-        message: "Google login successful",
-        data: result,
-      });
+      sendTokenResponse(res, result, "Google login successful", 200);
     } catch (error) {
       logger.error("Google login error:", error);
       res.status(401).json({
@@ -200,11 +215,7 @@ export class AuthController {
       const result = await authService.appleLogin(token);
       logger.info(`Apple login successful for user: ${result.user?.email}`);
 
-      res.status(200).json({
-        success: true,
-        message: "Apple login successful",
-        data: result,
-      });
+      sendTokenResponse(res, result, "Apple login successful", 200);
     } catch (error) {
       logger.error("Apple login error:", error);
       res.status(401).json({
@@ -220,11 +231,7 @@ export class AuthController {
 
       const result = await authService.refreshToken(refreshToken);
 
-      res.status(200).json({
-        success: true,
-        message: "Token refreshed successfully",
-        data: result,
-      });
+      sendTokenResponse(res, result, "Token refreshed successfully", 200);
     } catch (error) {
       logger.error("Token refresh error:", error);
       res.status(401).json({
@@ -248,6 +255,9 @@ export class AuthController {
 
       const result = await authService.logout(userId, refreshToken);
 
+      res.clearCookie("accessToken");
+      res.clearCookie("refreshToken");
+
       res.status(200).json({
         success: true,
         message: result.message,
@@ -260,6 +270,7 @@ export class AuthController {
       });
     }
   }
+
 
   async deleteAccount(req, res) {
     try {
@@ -436,11 +447,7 @@ export class AuthController {
 
       const result = await authService.verifyOtp(email, otp);
 
-      res.status(200).json({
-        success: true,
-        message: result.message,
-        data: result, // result contains user and tokens now
-      });
+      sendTokenResponse(res, result, result.message, 200);
     } catch (error) {
       logger.error("Verify OTP error:", error);
       res.status(400).json({
@@ -516,11 +523,7 @@ export class AuthController {
 
       const result = await authService.loginDeliveryPartner(phone, pin);
 
-      res.status(200).json({
-        success: true,
-        message: "Delivery partner login successful",
-        data: result,
-      });
+      sendTokenResponse(res, result, "Delivery partner login successful", 200);
     } catch (error) {
       logger.error("Delivery partner login error:", error);
       const statusCode =

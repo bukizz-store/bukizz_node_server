@@ -1,17 +1,26 @@
-const express = require("express");
-const config = require("./config");
-const logger = require("./utils/logger");
-const { connectDB } = require("./db");
-const { setupRoutes } = require("./routes");
-const { errorHandler } = require("./middleware/errorHandler");
-const { setupCronJobs } = require("./jobs/cronJobs.js");
-const path = require("path");
+import express from "express";
+import cors from "cors";
+import helmet from "helmet";
+import path from "path";
+import { fileURLToPath } from "url";
+import { config } from "./config/index.js";
+import { logger, createRequestLogger } from "./utils/logger.js";
+import { connectDB } from "./db/index.js";
+import { setupRoutes } from "./routes/index.js";
+import { errorHandler } from "./middleware/errorHandler.js";
+import { setupCronJobs } from "./jobs/cronJobs.js";
+import { createRateLimiter } from "./middleware/rateLimiter.js";
+import { sanitizeMiddleware } from "./middleware/validator.js";
+import cookieParser from "cookie-parser";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Main application entry point
  * Sets up Express server with all middleware, routes, and error handling
  */
-async function createApp() {
+export async function createApp() {
   const app = express();
   app.set("trust proxy", true);
 
@@ -20,25 +29,19 @@ async function createApp() {
     await connectDB();
     logger.info("Database connected successfully");
 
+    // Security middleware
+    app.use(createRequestLogger());
+    app.use(helmet());
+    app.use(cors(config.cors));
+    app.use(createRateLimiter());
+
     // Basic middleware setup
     app.use(express.json({ limit: "10mb" }));
     app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+    app.use(cookieParser());
 
-    // CORS middleware
-    app.use((req, res, next) => {
-      res.header("Access-Control-Allow-Origin", "*");
-      res.header("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS");
-      res.header(
-        "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, Content-Length, X-Requested-With"
-      );
-
-      if (req.method === "OPTIONS") {
-        res.sendStatus(200);
-      } else {
-        next();
-      }
-    });
+    // Global input sanitization
+    app.use(sanitizeMiddleware);
 
     // Setup routes
     setupRoutes(app);
@@ -64,7 +67,7 @@ async function createApp() {
 /**
  * Start the server
  */
-async function startServer() {
+export async function startServer() {
   try {
     const app = await createApp();
 
@@ -97,8 +100,7 @@ async function startServer() {
 }
 
 // Start server if this file is run directly
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startServer();
 }
 
-module.exports = { createApp, startServer };

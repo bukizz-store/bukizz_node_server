@@ -336,6 +336,43 @@ class EmailService {
       throw error;
     }
   }
+
+  async sendUserQueryEmail(adminEmail, queryData) {
+    const { orderNumber, customerName, subject, message, orderId } = queryData;
+
+    try {
+      const response = await fetch("https://services.theerrors.in/api/services/email/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.OTP_EMAIL_API_KEY
+        },
+        body: JSON.stringify({
+          templateName: "user-query-admin",
+          to: adminEmail || "bukizzstore@gmail.com",
+          data: {
+            orderNumber: orderNumber || "N/A",
+            customerName: customerName || "Customer",
+            subject: subject || "New Query",
+            message: message || "No message content",
+            orderId: orderId
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`External API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+      }
+
+      const result = await response.json();
+      logger.info(`📧 User query email sent to admin for order ${orderNumber}: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      logger.error("📧 Error sending user query email:", error);
+      // Don't throw - email failure should not block query creation
+    }
+  }
 }
 
 export const emailService = new EmailService();

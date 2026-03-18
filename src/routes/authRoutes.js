@@ -2,14 +2,17 @@ import express from "express";
 import { validate } from "../middleware/validator.js";
 import { userSchemas as authSchemas } from "../models/schemas.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
+import { createAuthRateLimiter } from "../middleware/rateLimiter.js";
 
 /**
  * Auth Routes Factory
  * @param {Object} dependencies - Dependency injection container
  * @returns {Router} Express router with auth routes
+ * @returns {Router} Express router with auth routes
  */
 export default function authRoutes(dependencies = {}) {
   const router = express.Router();
+  const authLimiter = createAuthRateLimiter();
 
   // Get the auth controller from dependencies
   const { authController } = dependencies;
@@ -23,17 +26,20 @@ export default function authRoutes(dependencies = {}) {
   // Public routes (no authentication required)
   router.post(
     "/register",
+    authLimiter,
     validate(authSchemas.register),
     authController.register
   );
-  router.post("/login", validate(authSchemas.login), authController.login);
+  router.post("/login", authLimiter, validate(authSchemas.login), authController.login);
   router.post(
     "/login-retailer",
+    authLimiter,
     validate(authSchemas.retailerLogin),
     authController.loginRetailer
   );
   router.post(
     "/register-retailer",
+    authLimiter,
     validate(authSchemas.retailerRegister),
     authController.registerRetailer
   );
@@ -44,26 +50,30 @@ export default function authRoutes(dependencies = {}) {
   );
   router.post(
     "/forgot-password",
+    authLimiter,
     validate(authSchemas.forgotPassword),
     authController.requestPasswordReset
   );
   router.post(
     "/reset-password",
+    authLimiter,
     validate(authSchemas.resetPassword),
     authController.resetPassword
   );
-  router.post("/google-login", authController.googleLogin);
-  router.post("/apple-login", authController.appleLogin);
+  router.post("/google-login", authLimiter, authController.googleLogin);
+  router.post("/apple-login", authLimiter, authController.appleLogin);
   router.post("/verify-token", authController.verifyToken);
-  router.post("/send-otp", authController.sendOtp);
-  router.post("/verify-otp", authController.verifyOtp);
+  router.post("/send-otp", authLimiter, authController.sendOtp);
+  router.post("/verify-otp", authLimiter, authController.verifyOtp);
   router.post(
     "/send-retailer-otp",
+    authLimiter,
     validate(authSchemas.sendRetailerOtp),
     authController.sendRetailerOtp
   );
   router.post(
     "/verify-retailer-otp",
+    authLimiter,
     validate(authSchemas.verifyRetailerOtp),
     authController.verifyRetailerOtp
   );

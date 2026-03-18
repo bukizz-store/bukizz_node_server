@@ -68,26 +68,30 @@ export default function userRoutes(dependencies = {}) {
   router.post("/verify-email", userController.verifyEmail);
   router.post("/verify-phone", userController.verifyPhone);
 
-  // Admin-only routes with specific paths (TODO: Add admin middleware)
-  router.get("/admin/search", userController.searchUsers);
-  router.get("/admin/export", userController.exportUsers);
+  // Admin-only routes with specific paths
+  router.get("/admin/search", requireRoles("admin"), userController.searchUsers);
+  router.get("/admin/export", requireRoles("admin"), userController.exportUsers);
   router.get(
     "/admin/:userId",
+    requireRoles("admin"),
     validate(paramSchemas.userId, "params"),
     userController.getUserById,
   );
   router.put(
     "/admin/:userId",
+    requireRoles("admin"),
     validate(paramSchemas.userId, "params"),
     userController.updateUserByAdmin,
   );
   router.put(
     "/admin/:userId/role",
+    requireRoles("admin"),
     validate(paramSchemas.userId, "params"),
     userController.updateUserRole,
   );
   router.post(
     "/admin/:userId/reactivate",
+    requireRoles("admin"),
     validate(paramSchemas.userId, "params"),
     userController.reactivateAccount,
   );
