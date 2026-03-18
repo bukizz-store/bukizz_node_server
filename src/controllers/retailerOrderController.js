@@ -423,6 +423,10 @@ export class RetailerOrderController {
                             quantity: item.quantity,
                             unitPrice: item.unitPrice,
                             totalPrice: item.totalPrice,
+                            deliveryFee: item.deliveryFee || 0,
+                            platformFee: item.platformFee || 0,
+                            delivery_fee: item.deliveryFee || 0,
+                            platform_fee: item.platformFee || 0,
                             productSnapshot: {
                                 image_url: item.productSnapshot?.image_url || item.productSnapshot?.image || null,
                                 metadata: item.productSnapshot?.metadata || {},
