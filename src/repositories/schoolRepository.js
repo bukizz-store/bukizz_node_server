@@ -704,7 +704,7 @@ export class SchoolRepository {
       // --- Parse & normalize filters ---
       const {
         page = 1,
-        limit = 20,
+        limit = 50,
         grade = null,
         mandatory = null,
         category = null, // category id or slug (we treat as id if UUID)

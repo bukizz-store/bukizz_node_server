@@ -473,7 +473,7 @@ export class ProductRepository {
             products: [],
             pagination: {
               page: 1,
-              limit: filters.limit || 20,
+              limit: filters.limit || 50,
               total: 0,
               totalPages: 0,
             },
@@ -483,7 +483,7 @@ export class ProductRepository {
 
       // Pagination
       const page = Math.max(1, parseInt(filters.page) || 1);
-      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 50));
       const offset = (page - 1) * limit;
 
       query = query.range(offset, offset + limit - 1);
@@ -736,7 +736,7 @@ export class ProductRepository {
             products: [],
             pagination: {
               page: filters.page || 1,
-              limit: filters.limit || 20,
+              limit: filters.limit || 50,
               total: 0,
               totalPages: 0,
             },
@@ -758,7 +758,7 @@ export class ProductRepository {
             products: [],
             pagination: {
               page: filters.page || 1,
-              limit: filters.limit || 20,
+              limit: filters.limit || 50,
               total: 0,
               totalPages: 0,
             },
@@ -781,7 +781,7 @@ export class ProductRepository {
             products: [],
             pagination: {
               page: filters.page || 1,
-              limit: filters.limit || 20,
+              limit: filters.limit || 50,
               total: 0,
               totalPages: 0,
             },
@@ -809,7 +809,7 @@ export class ProductRepository {
             products: [],
             pagination: {
               page: filters.page || 1,
-              limit: filters.limit || 20,
+              limit: filters.limit || 50,
               total: 0,
               totalPages: 0,
             },
@@ -825,7 +825,7 @@ export class ProductRepository {
 
       // Pagination
       const page = Math.max(1, parseInt(filters.page) || 1);
-      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 50));
       const offset = (page - 1) * limit;
 
       query = query.range(offset, offset + limit - 1);
@@ -882,7 +882,7 @@ export class ProductRepository {
           products: [],
           pagination: {
             page: filters.page || 1,
-            limit: filters.limit || 20,
+            limit: filters.limit || 50,
             total: 0,
             totalPages: 0,
           },
@@ -904,7 +904,7 @@ export class ProductRepository {
           products: [],
           pagination: {
             page: filters.page || 1,
-            limit: filters.limit || 20,
+            limit: filters.limit || 50,
             total: 0,
             totalPages: 0,
           },
@@ -950,7 +950,7 @@ export class ProductRepository {
 
       // Pagination
       const page = Math.max(1, parseInt(filters.page) || 1);
-      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 50));
       const offset = (page - 1) * limit;
 
       query = query.range(offset, offset + limit - 1);

@@ -667,7 +667,7 @@ export class ProductService {
 
       // Validate pagination parameters
       const page = Math.max(1, parseInt(filters.page) || 1);
-      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 50));
 
       const searchFilters = {
         ...filters,
@@ -693,7 +693,7 @@ export class ProductService {
 
       // Validate pagination
       const page = Math.max(1, parseInt(filters.page) || 1);
-      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 50));
 
       return await this.productRepository.findByRetailerId(retailerId, {
         ...filters,
@@ -719,7 +719,7 @@ export class ProductService {
       const page = Math.max(1, parseInt(queryParams.page) || 1);
       const limit = Math.min(
         100,
-        Math.max(1, parseInt(queryParams.limit) || 20),
+        Math.max(1, parseInt(queryParams.limit) || 50),
       );
 
       return await this.productRepository.getProductsByWarehouseId(
