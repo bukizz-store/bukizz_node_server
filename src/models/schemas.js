@@ -1245,3 +1245,38 @@ export const dpBankDetailsSchema = Joi.object({
     }),
 });
 
+/**
+ * Admin DP Management validation schemas
+ */
+export const dpAdminSchemas = {
+  dpListQuery: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(20),
+    city: Joi.string().max(100).optional(),
+    status: Joi.string()
+      .valid("Idle", "In-Transit", "Inactive")
+      .optional(),
+    kycStatus: Joi.string()
+      .valid("pending", "approved", "rejected")
+      .optional(),
+  }),
+
+  forceUnassign: Joi.object({
+    orderId: Joi.string().uuid().required(),
+    reason: Joi.string().min(1).max(500).required(),
+  }),
+
+  initiatePayoutBody: Joi.object({
+    amount: Joi.number().positive().required(),
+    paymentMode: Joi.string().required(),
+    referenceNumber: Joi.string().allow(null, "").optional(),
+    notes: Joi.string().max(500).allow(null, "").optional(),
+    receiptUrl: Joi.string().uri().allow(null, "").optional(),
+  }),
+
+  paginationQuery: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(20),
+  }),
+};
+
