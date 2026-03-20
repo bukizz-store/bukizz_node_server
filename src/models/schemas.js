@@ -334,6 +334,7 @@ export const productSchemas = {
     paymentMethods: Joi.array()
       .items(Joi.string().valid("cod", "upi", "card", "netbanking", "wallet"))
       .optional(),
+    deliveryHours: Joi.number().integer().min(1).optional(),
     metadata: Joi.object().optional(),
   }),
 
@@ -353,6 +354,7 @@ export const productSchemas = {
     paymentMethods: Joi.array()
       .items(Joi.string().valid("cod", "upi", "card", "netbanking", "wallet"))
       .optional(),
+    deliveryHours: Joi.number().integer().min(1).optional(),
     metadata: Joi.object().optional(),
   }),
 

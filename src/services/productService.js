@@ -74,6 +74,13 @@ export class ProductService {
         }
       }
 
+      if (productData.deliveryHours !== undefined) {
+        productData.metadata = {
+          ...(productData.metadata || {}),
+          deliveryHours: productData.deliveryHours
+        };
+      }
+
       return await this.productRepository.create(productData);
     } catch (error) {
       logger.error("Error creating product:", error);
@@ -89,6 +96,13 @@ export class ProductService {
     try {
       // Step 1: Validate all input data first
       await this.validateComprehensiveProductData(data);
+
+      if (data.productData && data.productData.deliveryHours !== undefined) {
+        data.productData.metadata = {
+          ...(data.productData.metadata || {}),
+          deliveryHours: data.productData.deliveryHours
+        };
+      }
 
       logger.info("Starting comprehensive product creation via RPC");
 
@@ -407,6 +421,7 @@ export class ProductService {
           city: product.city || "",
           isActive: product.is_active,
           categoryAttributes: product.metadata?.categoryAttributes || {},
+          deliveryHours: product.delivery_hours || product.metadata?.deliveryHours || 24,
         },
         productType: product.product_type || "general",
         images: [],
@@ -746,6 +761,15 @@ export class ProductService {
         throw new AppError("Product not found", 404);
       }
 
+      // Safely fold deliveryHours into metadata so DB schema changes are avoided
+      if (updateData.deliveryHours !== undefined) {
+        updateData.metadata = {
+          ...(existingProduct.metadata || {}),
+          ...(updateData.metadata || {}),
+          deliveryHours: updateData.deliveryHours
+        };
+      }
+
       // Validate business rules
       if (updateData.basePrice !== undefined && updateData.basePrice < 0) {
         throw new AppError("Product price cannot be negative", 400);
@@ -808,6 +832,14 @@ export class ProductService {
 
       // Step 2: Update the main product
       if (productData) {
+        // Safely fold deliveryHours into metadata so DB schema changes are avoided
+        if (productData.deliveryHours !== undefined) {
+          productData.metadata = {
+            ...(productData.metadata || {}),
+            deliveryHours: productData.deliveryHours
+          };
+        }
+
         result.product = await this.productRepository.update(productId, {
           ...productData,
           categoryIds: categories.map((c) => c.id).filter(Boolean),

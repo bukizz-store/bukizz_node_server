@@ -1936,6 +1936,7 @@ export class OrderService {
         quantity: item.quantity,
         totalPrice: item.totalPrice,
         variantLabel: item.productSnapshot?.variantInfo?.metadata?.label || null,
+        deliveryHours: item.productSnapshot?.delivery_hours || item.productSnapshot?.deliveryHours || item.productSnapshot?.metadata?.deliveryHours || 24,
       }));
 
       const customerOrderData = {
@@ -1946,6 +1947,7 @@ export class OrderService {
         address: shippingAddress,
         paymentMethod,
         itemCount: itemsList.length,
+        orderCreatedAt: order.createdAt,
       };
 
       // === CUSTOMER NOTIFICATIONS ===
