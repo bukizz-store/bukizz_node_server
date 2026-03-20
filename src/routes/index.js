@@ -17,6 +17,7 @@ import settlementRoutes from "./settlementRoutes.js";
 import deliveryAuthRoutes from "./deliveryAuthRoutes.js";
 import adminDeliveryRoutes from "./adminDeliveryRoutes.js";
 import deliveryRoutes from "./deliveryRoutes.js";
+import dpAdminRoutes from "./dpAdminRoutes.js";
 import bannerRoutes from "./bannerRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
@@ -62,6 +63,7 @@ export function setupRoutes(app, dependencies = {}) {
         settlements: `${apiV1}/settlements`,
         deliveryAuth: `${apiV1}/delivery/auth`,
         adminDelivery: `${apiV1}/admin/delivery`,
+        adminDeliveryPartners: `${apiV1}/admin/delivery-partners`,
         deliveryBankDetails: `${apiV1}/delivery/bank-details`,
         banners: `${apiV1}/banners`,
       },
@@ -86,6 +88,10 @@ export function setupRoutes(app, dependencies = {}) {
   app.use(`${apiV1}/delivery/auth`, deliveryAuthRoutes(dependencies));
   app.use(`${apiV1}/delivery`, deliveryRoutes(dependencies));
   app.use(`${apiV1}/admin/delivery`, adminDeliveryRoutes(dependencies));
+  app.use(
+    `${apiV1}/admin/delivery-partners`,
+    dpAdminRoutes(dependencies),
+  );
   app.use(`${apiV1}/images`, imageRoutes);
   app.use(
     `${apiV1}/settlements`,
