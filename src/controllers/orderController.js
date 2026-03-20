@@ -1226,4 +1226,253 @@ export class OrderController {
 
     return nextSteps[order.status] || ["Contact support for assistance"];
   }
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // CUSTOMER RETURN REQUEST
+  // ═══════════════════════════════════════════════════════════════════════
+
+  /**
+   * Request a return for a delivered order item (customer initiated)
+   * POST /api/v1/orders/:orderId/items/:itemId/request-return
+   * Body: { reasonCode, reasonText? }
+   */
+  requestReturn = asyncHandler(async (req, res) => {
+    const { orderId, itemId } = req.params;
+    const { reasonCode, reasonText } = req.body;
+    const userId = req.user?.id;
+
+    if (!orderId || !itemId) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID and Item ID are required",
+      });
+    }
+
+    if (!reasonCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Reason code is required",
+      });
+    }
+
+    const validReasonCodes = [
+      "wrong_item",
+      "damaged",
+      "not_as_described",
+      "size_fit_issue",
+      "quality_issue",
+      "changed_mind",
+      "other",
+    ];
+
+    if (!validReasonCodes.includes(reasonCode)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid reason code. Must be one of: ${validReasonCodes.join(", ")}`,
+      });
+    }
+
+    logger.info("Customer requesting return", { userId, orderId, itemId, reasonCode });
+
+    const supabase = getSupabase();
+
+    // Fetch the order and item
+    const { data: order, error: orderError } = await supabase
+      .from("orders")
+      .select(`
+        id, order_number, user_id, status, shipping_address, contact_email, total_amount,
+        order_events ( id, new_status, created_at ),
+        users!user_id ( full_name, email )
+      `)
+      .eq("id", orderId)
+      .single();
+
+    if (orderError || !order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+      });
+    }
+
+    // Verify ownership
+    if (order.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "You do not have permission to request a return for this order",
+      });
+    }
+
+    // Fetch the specific item
+    const { data: item, error: itemError } = await supabase
+      .from("order_items")
+      .select("id, title, quantity, total_price, status, warehouse_id")
+      .eq("id", itemId)
+      .eq("order_id", orderId)
+      .single();
+
+    if (itemError || !item) {
+      return res.status(404).json({
+        success: false,
+        message: "Order item not found",
+      });
+    }
+
+    // Check if item status allows return
+    if (item.status !== "delivered") {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot request return. Item status is "${item.status}", expected "delivered"`,
+      });
+    }
+
+    // Check 7-day return window
+    const deliveredEvent = (order.order_events || []).find(
+      (e) => e.new_status === "delivered"
+    );
+
+    if (!deliveredEvent) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot determine delivery date for return window validation",
+      });
+    }
+
+    const deliveredDate = new Date(deliveredEvent.created_at);
+    const returnWindowMs = 7 * 24 * 60 * 60 * 1000; // 7 days
+    const timeSinceDelivery = Date.now() - deliveredDate.getTime();
+
+    if (timeSinceDelivery > returnWindowMs) {
+      const daysElapsed = Math.floor(timeSinceDelivery / (24 * 60 * 60 * 1000));
+      return res.status(400).json({
+        success: false,
+        message: `Return window has expired. Items can only be returned within 7 days of delivery. ${daysElapsed} days have passed.`,
+      });
+    }
+
+    // Check if a return request already exists for this item
+    const { data: existingReturn } = await supabase
+      .from("order_returns")
+      .select("id, status")
+      .eq("order_item_id", itemId)
+      .eq("return_type", "customer_return")
+      .not("status", "in", '("cancelled")')
+      .single();
+
+    if (existingReturn) {
+      return res.status(409).json({
+        success: false,
+        message: `A return request already exists for this item (Status: ${existingReturn.status})`,
+      });
+    }
+
+    // Update item status to return_requested
+    const { error: updateError } = await supabase
+      .from("order_items")
+      .update({
+        status: "return_requested",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", itemId);
+
+    if (updateError) {
+      throw new AppError(`Failed to update item status: ${updateError.message}`, 500);
+    }
+
+    // Create order_returns record
+    const { data: returnRecord, error: returnError } = await supabase
+      .from("order_returns")
+      .insert({
+        order_id: orderId,
+        order_item_id: itemId,
+        return_type: "customer_return",
+        reason_code: reasonCode,
+        reason_text: reasonText || null,
+        initiated_by: userId,
+        warehouse_id: item.warehouse_id,
+        pickup_address: order.shipping_address,
+        status: "initiated",
+      })
+      .select()
+      .single();
+
+    if (returnError) {
+      // Rollback item status
+      await supabase
+        .from("order_items")
+        .update({ status: "delivered" })
+        .eq("id", itemId);
+      throw new AppError(`Failed to create return record: ${returnError.message}`, 500);
+    }
+
+    // Record order event
+    const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
+    const orderEventRepository = new OrderEventRepository(supabase);
+    await orderEventRepository.create({
+      orderId,
+      orderItemId: itemId,
+      previousStatus: "delivered",
+      newStatus: "return_requested",
+      changedBy: userId,
+      note: `Return requested: ${reasonCode}${reasonText ? ` - ${reasonText}` : ""}`,
+      metadata: { return_id: returnRecord.id, reason_code: reasonCode },
+    });
+
+    // Auto-approve and assign for pickup (status: return_pickup_assigned)
+    await supabase
+      .from("order_items")
+      .update({
+        status: "return_pickup_assigned",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", itemId);
+
+    await supabase
+      .from("order_returns")
+      .update({ status: "pickup_assigned" })
+      .eq("id", returnRecord.id);
+
+    await orderEventRepository.create({
+      orderId,
+      orderItemId: itemId,
+      previousStatus: "return_requested",
+      newStatus: "return_pickup_assigned",
+      changedBy: userId,
+      note: "Return approved - awaiting pickup assignment",
+      metadata: { return_id: returnRecord.id },
+    });
+
+    // Send return approved email
+    try {
+      const { queueReturnApprovedEmail } = await import("../queue/emailQueue.js");
+      const customerEmail = order.contact_email || order.users?.email;
+      const studentName = order.shipping_address?.studentName
+        || order.shipping_address?.recipientName
+        || order.users?.full_name
+        || "Customer";
+
+      if (customerEmail) {
+        await queueReturnApprovedEmail(customerEmail, {
+          orderNumber: order.order_number,
+          studentName,
+          items: [{ title: item.title, quantity: item.quantity }],
+          refundAmount: item.total_price,
+          pickupInfo: "A delivery partner will be assigned to pick up your return within 24-48 hours.",
+        });
+      }
+    } catch (emailErr) {
+      logger.error("Failed to send return approved email", { error: emailErr.message });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        returnId: returnRecord.id,
+        itemId,
+        status: "return_pickup_assigned",
+        reasonCode,
+        estimatedRefund: item.total_price,
+      },
+      message: "Return request submitted successfully. A delivery partner will be assigned for pickup.",
+    });
+  });
 }

@@ -152,6 +152,60 @@ const deliveryIncentiveService = ({
 
       return { balance, transactions, pagination };
     },
+
+    /**
+     * Finalize incentive for return pickup (RTO or customer return).
+     * Uses the same rate as delivery: ₹10/km, min ₹15
+     * Distance is calculated from pickup location → warehouse.
+     *
+     * @param {Object} params
+     * @param {string} params.returnId
+     * @param {string} params.dpUserId
+     * @param {Object} params.pickupAddress   - Customer/shipping address
+     * @param {Object} params.warehouseAddress - Warehouse address
+     * @param {Object} supabase - Supabase client
+     * @returns {Promise<{ distanceKm: number, incentiveAmount: number }>}
+     */
+    async finalizeReturnIncentive({ returnId, dpUserId, pickupAddress, warehouseAddress }, supabase) {
+      const pickupLoc = _buildCustomerLocation(pickupAddress);
+      const warehouseLoc = _buildLocation(warehouseAddress);
+
+      const distanceKm = await calculateDeliveryDistance(pickupLoc, warehouseLoc);
+      const incentiveAmount = calculateIncentive(distanceKm);
+
+      // Update order_returns with distance & incentive
+      const { error: updateError } = await supabase
+        .from("order_returns")
+        .update({
+          distance_km: distanceKm,
+          incentive_amount: incentiveAmount,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", returnId);
+
+      if (updateError) {
+        logger.error("Failed to update return with incentive data:", updateError);
+        throw updateError;
+      }
+
+      // Insert immutable ledger entry for return earning
+      await dpLedgerRepository.createEntry({
+        dp_user_id: dpUserId,
+        return_id: returnId,
+        transaction_type: "return_earning",
+        amount: incentiveAmount,
+        description: `Return pickup earning: ${distanceKm} km × ₹10 = ₹${incentiveAmount}`,
+      });
+
+      logger.info("Return incentive finalized", {
+        returnId,
+        dpUserId,
+        distanceKm,
+        incentiveAmount,
+      });
+
+      return { distanceKm, incentiveAmount };
+    },
   };
 };
 

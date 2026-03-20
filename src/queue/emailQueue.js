@@ -170,3 +170,63 @@ export async function queueUserQueryEmail(adminEmail, queryData) {
     logger.info(`📬 Queued user-query email for ${adminEmail}`, { jobId: job.id });
     return job;
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+//  RETURN/RTO EMAIL PRODUCERS
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * Queue an RTO initiated email to customer (delivery failed).
+ */
+export async function queueRTOInitiatedEmail(email, rtoData) {
+    if (!isQueueReady()) {
+        logger.info(`📬 [FALLBACK] Sending rto-initiated email directly to ${email}`);
+        return emailService.sendRTOInitiatedEmail(email, rtoData);
+    }
+    const queue = getEmailQueue();
+    const job = await queue.add("rto-initiated", { email, rtoData });
+    logger.info(`📬 Queued rto-initiated email for ${email}`, { jobId: job.id });
+    return job;
+}
+
+/**
+ * Queue a return approved email to customer.
+ */
+export async function queueReturnApprovedEmail(email, returnData) {
+    if (!isQueueReady()) {
+        logger.info(`📬 [FALLBACK] Sending return-approved email directly to ${email}`);
+        return emailService.sendReturnApprovedEmail(email, returnData);
+    }
+    const queue = getEmailQueue();
+    const job = await queue.add("return-approved", { email, returnData });
+    logger.info(`📬 Queued return-approved email for ${email}`, { jobId: job.id });
+    return job;
+}
+
+/**
+ * Queue a return picked up email to customer.
+ */
+export async function queueReturnPickedUpEmail(email, returnData) {
+    if (!isQueueReady()) {
+        logger.info(`📬 [FALLBACK] Sending return-picked-up email directly to ${email}`);
+        return emailService.sendReturnPickedUpEmail(email, returnData);
+    }
+    const queue = getEmailQueue();
+    const job = await queue.add("return-picked-up", { email, returnData });
+    logger.info(`📬 Queued return-picked-up email for ${email}`, { jobId: job.id });
+    return job;
+}
+
+/**
+ * Queue a refund processed email to customer.
+ */
+export async function queueRefundProcessedEmail(email, refundData) {
+    if (!isQueueReady()) {
+        logger.info(`📬 [FALLBACK] Sending refund-processed email directly to ${email}`);
+        return emailService.sendRefundProcessedEmail(email, refundData);
+    }
+    const queue = getEmailQueue();
+    const job = await queue.add("refund-processed", { email, refundData });
+    logger.info(`📬 Queued refund-processed email for ${email}`, { jobId: job.id });
+    return job;
+}

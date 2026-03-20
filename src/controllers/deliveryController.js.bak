@@ -1578,6 +1578,7 @@ export class DeliveryController {
         status: "returned",
         locked_by: null,
         locked_at: null,
+        updated_at: new Date().toISOString(),
       })
       .eq("id", returnRecord.order_item_id);
 

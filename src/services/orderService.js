@@ -1893,9 +1893,21 @@ export class OrderService {
     const transitions = {
       initialized: ["processed", "cancelled"],
       processed: ["shipped", "cancelled"],
-      shipped: ["out_for_delivery", "delivered"],
-      out_for_delivery: ["delivered", "shipped"], // Allow return to shipped
-      delivered: ["refunded"], // Only allow refund after delivery
+      shipped: ["out_for_delivery", "delivered", "cancelled"],
+      out_for_delivery: ["delivered", "shipped", "rto_initiated"], // Add RTO
+
+      // RTO flow (Return to Origin - delivery failed)
+      rto_initiated: ["rto_in_transit"],
+      rto_in_transit: ["rto_completed"],
+      rto_completed: ["shipped", "cancelled", "refunded"], // Re-ship, cancel, or refund
+
+      // Customer return flow (after delivery)
+      delivered: ["return_requested", "refunded"],
+      return_requested: ["return_pickup_assigned", "delivered"], // Approve or reject
+      return_pickup_assigned: ["return_in_transit"],
+      return_in_transit: ["returned"],
+      returned: ["refunded"],
+
       cancelled: [], // No transitions from cancelled
       refunded: [], // No transitions from refunded
     };

@@ -158,6 +158,19 @@ export default function orderRoutes(dependencies = {}) {
     },
   );
 
+  // Request return for a delivered order item (customer self-service)
+  router.post(
+    "/:orderId/items/:itemId/request-return",
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.requestReturn(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   // Create order query/support ticket
   router.post(
     "/:orderId/queries",

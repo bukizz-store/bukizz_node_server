@@ -373,6 +373,191 @@ class EmailService {
       // Don't throw - email failure should not block query creation
     }
   }
+
+  // ==========================================
+  // RETURN/RTO NOTIFICATION EMAILS (via theerrors.in)
+  // ==========================================
+
+  /**
+   * Email: RTO Initiated → Customer (Delivery failed)
+   * Template name: "rto-initiated-customer"
+   * Variables: studentName, orderNumber, reason, itemsSummary, nextSteps
+   */
+  async sendRTOInitiatedEmail(email, rtoData) {
+    const { orderNumber, studentName, items, reason, nextSteps } = rtoData;
+
+    const itemsSummary = (items || []).map(item =>
+      `${item.title || "Product"} x${item.quantity || 1}`
+    ).join(" | ");
+
+    try {
+      const response = await fetch("https://services.theerrors.in/api/services/email/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.OTP_EMAIL_API_KEY
+        },
+        body: JSON.stringify({
+          templateName: "rto-initiated-customer",
+          to: email,
+          data: {
+            studentName: studentName || "Customer",
+            orderNumber: orderNumber || "N/A",
+            reason: reason || "Delivery attempt unsuccessful",
+            itemsSummary: itemsSummary || "N/A",
+            nextSteps: nextSteps || "Your order will be returned to our warehouse. You may contact support for redelivery or refund options.",
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`External API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+      }
+
+      const result = await response.json();
+      logger.info(`📧 RTO initiated email sent to ${email} for order ${orderNumber}: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      logger.error("📧 Error sending RTO initiated email:", error);
+    }
+  }
+
+  /**
+   * Email: Return Request Approved → Customer
+   * Template name: "return-request-approved"
+   * Variables: studentName, orderNumber, itemsSummary, pickupInfo, refundAmount
+   */
+  async sendReturnApprovedEmail(email, returnData) {
+    const { orderNumber, studentName, items, refundAmount, pickupInfo } = returnData;
+
+    const itemsSummary = (items || []).map(item =>
+      `${item.title || "Product"} x${item.quantity || 1}`
+    ).join(" | ");
+
+    try {
+      const response = await fetch("https://services.theerrors.in/api/services/email/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.OTP_EMAIL_API_KEY
+        },
+        body: JSON.stringify({
+          templateName: "return-request-approved",
+          to: email,
+          data: {
+            studentName: studentName || "Customer",
+            orderNumber: orderNumber || "N/A",
+            itemsSummary: itemsSummary || "N/A",
+            refundAmount: refundAmount ? `₹${parseFloat(refundAmount).toFixed(2)}` : "N/A",
+            pickupInfo: pickupInfo || "A delivery partner will be assigned shortly to pick up your items.",
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`External API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+      }
+
+      const result = await response.json();
+      logger.info(`📧 Return approved email sent to ${email} for order ${orderNumber}: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      logger.error("📧 Error sending return approved email:", error);
+    }
+  }
+
+  /**
+   * Email: Return Picked Up → Customer
+   * Template name: "return-picked-up-customer"
+   * Variables: studentName, orderNumber, itemsSummary, refundAmount, refundTimeline
+   */
+  async sendReturnPickedUpEmail(email, returnData) {
+    const { orderNumber, studentName, items, refundAmount, refundTimeline } = returnData;
+
+    const itemsSummary = (items || []).map(item =>
+      `${item.title || "Product"} x${item.quantity || 1}`
+    ).join(" | ");
+
+    try {
+      const response = await fetch("https://services.theerrors.in/api/services/email/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.OTP_EMAIL_API_KEY
+        },
+        body: JSON.stringify({
+          templateName: "return-picked-up-customer",
+          to: email,
+          data: {
+            studentName: studentName || "Customer",
+            orderNumber: orderNumber || "N/A",
+            itemsSummary: itemsSummary || "N/A",
+            refundAmount: refundAmount ? `₹${parseFloat(refundAmount).toFixed(2)}` : "N/A",
+            refundTimeline: refundTimeline || "Once items reach our warehouse and pass quality check, your refund will be processed within 3-5 business days.",
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`External API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+      }
+
+      const result = await response.json();
+      logger.info(`📧 Return picked up email sent to ${email} for order ${orderNumber}: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      logger.error("📧 Error sending return picked up email:", error);
+    }
+  }
+
+  /**
+   * Email: Refund Processed → Customer
+   * Template name: "refund-processed-customer"
+   * Variables: studentName, orderNumber, itemsSummary, refundAmount, refundMethod, transactionId
+   */
+  async sendRefundProcessedEmail(email, refundData) {
+    const { orderNumber, studentName, items, refundAmount, refundMethod, transactionId } = refundData;
+
+    const itemsSummary = (items || []).map(item =>
+      `${item.title || "Product"} x${item.quantity || 1}`
+    ).join(" | ");
+
+    try {
+      const response = await fetch("https://services.theerrors.in/api/services/email/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": process.env.OTP_EMAIL_API_KEY
+        },
+        body: JSON.stringify({
+          templateName: "refund-processed-customer",
+          to: email,
+          data: {
+            studentName: studentName || "Customer",
+            orderNumber: orderNumber || "N/A",
+            itemsSummary: itemsSummary || "N/A",
+            refundAmount: refundAmount ? `₹${parseFloat(refundAmount).toFixed(2)}` : "N/A",
+            refundMethod: refundMethod || "Original payment method",
+            transactionId: transactionId || "N/A",
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(`External API Error: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+      }
+
+      const result = await response.json();
+      logger.info(`📧 Refund processed email sent to ${email} for order ${orderNumber}: ${JSON.stringify(result)}`);
+      return result;
+    } catch (error) {
+      logger.error("📧 Error sending refund processed email:", error);
+    }
+  }
 }
 
 export const emailService = new EmailService();

@@ -1,0 +1,103 @@
+<!--
+  TEMPLATE NAME: rto-initiated-customer
+  SUBJECT: Delivery Attempt Failed - Order #{{orderNumber}} - Bukizz
+
+  VARIABLES:
+    {{studentName}}    - Student/Customer name
+    {{orderNumber}}    - Order number
+    {{reason}}         - Reason for delivery failure
+    {{itemsSummary}}   - Items list (e.g. "Notebook x2 | Pen x3")
+    {{nextSteps}}      - What happens next (reattempt/return)
+-->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery Attempt Failed</title>
+</head>
+
+<body style="margin:0;padding:0;background-color:#f4f4f7;font-family:'Segoe UI',Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+        style="background-color:#f4f4f7;padding:24px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+                    style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td
+                            style="background:linear-gradient(135deg,#DC2626,#B91C1C);padding:28px 32px;text-align:center;">
+                            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:0.5px;">
+                                Bukizz</h1>
+                            <p style="margin:6px 0 0;color:#FECACA;font-size:13px;">Delivery Attempt Failed</p>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding:32px;">
+                            <h2 style="margin:0 0 8px;color:#1E293B;font-size:20px;">We couldn't deliver your order</h2>
+                            <p style="margin:0 0 20px;color:#475569;font-size:15px;">Hi
+                                <strong>{{studentName}}</strong>, our delivery partner was unable to complete the delivery of your order.</p>
+
+                            <!-- Reason Card -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                style="background-color:#FEF2F2;border-radius:8px;margin-bottom:20px;border-left:4px solid #DC2626;">
+                                <tr>
+                                    <td style="padding:16px;">
+                                        <p style="margin:0 0 4px;font-size:12px;color:#991B1B;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">
+                                            Reason</p>
+                                        <p style="margin:0;font-size:14px;color:#7F1D1D;">{{reason}}</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Order Details Card -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                style="background-color:#F8FAFC;border-radius:8px;margin-bottom:20px;">
+                                <tr>
+                                    <td style="padding:16px;">
+                                        <p style="margin:4px 0;font-size:14px;color:#334155;"><strong>Order #:</strong>
+                                            {{orderNumber}}</p>
+                                        <p style="margin:4px 0;font-size:14px;color:#334155;"><strong>Items:</strong>
+                                            {{itemsSummary}}</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Next Steps Card -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                style="background-color:#FFF7ED;border-radius:8px;margin-bottom:16px;border-left:4px solid #F97316;">
+                                <tr>
+                                    <td style="padding:16px;">
+                                        <p style="margin:0 0 4px;font-size:12px;color:#C2410C;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">
+                                            What happens next?</p>
+                                        <p style="margin:0;font-size:14px;color:#9A3412;">{{nextSteps}}</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <p style="margin:20px 0 0;color:#64748B;font-size:13px;">If you have any questions or need to reschedule delivery, please contact us at support@bukizz.in or call our helpline.</p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td
+                            style="padding:20px 32px;background-color:#F8FAFC;border-top:1px solid #E2E8F0;text-align:center;">
+                            <p style="margin:0;color:#94A3B8;font-size:12px;">© 2026 Bukizz. All rights reserved.</p>
+                            <p style="margin:4px 0 0;color:#94A3B8;font-size:11px;">For queries, email us at
+                                support@bukizz.in</p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>

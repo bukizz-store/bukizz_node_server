@@ -1427,7 +1427,7 @@ export class OrderRepository {
    */
   async getAvailableWarehouseItems(warehouseId, partnerId, filters = {}) {
     try {
-      const { status = "shipped", limit = 100 } = filters;
+      const { status = "shipped", limit = 100, search, sortBy } = filters;
       const fortyFiveMinsAgo = new Date(Date.now() - 45 * 60 * 1000).toISOString();
 
       let query = this.supabase
@@ -1446,9 +1446,23 @@ export class OrderRepository {
         `)
         .eq("warehouse_id", warehouseId)
         .eq("status", status)
-        .or(`locked_at.is.null,locked_at.lt.${fortyFiveMinsAgo},locked_by.eq.${partnerId}`)
-        .order("created_at", { ascending: true })
-        .limit(limit);
+        .or(`locked_at.is.null,locked_at.lt.${fortyFiveMinsAgo},locked_by.eq.${partnerId}`);
+
+      if (search) {
+        query = query.ilike('orders.order_number', `%${search}%`);
+      }
+
+      if (sortBy === 'incentive') {
+         // Incentive is calculated in JS, so we can't sort by it in DB efficiently without stored function
+         // Fallback to default sort
+         query = query.order("created_at", { ascending: true });
+      } else if (sortBy === 'newest') {
+         query = query.order("created_at", { ascending: false });
+      } else {
+         query = query.order("created_at", { ascending: true });
+      }
+      
+      query = query.limit(limit);
 
       const { data: items, error } = await query;
 

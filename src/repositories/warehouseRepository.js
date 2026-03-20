@@ -26,16 +26,16 @@ export class WarehouseRepository {
             if (warehouseData.address && typeof warehouseData.address === 'object') {
                 const addressPayload = {
                     label: "Warehouse Address",
-                    recipient_name: warehouseData.name,
-                    phone: warehouseData.contactPhone,
+                    recipient_name: warehouseData.address.recipientName || warehouseData.address.recipient_name || warehouseData.name,
+                    phone: warehouseData.address.phone || warehouseData.contactPhone,
                     line1: warehouseData.address.line1,
                     line2: warehouseData.address.line2,
                     city: warehouseData.address.city,
                     state: warehouseData.address.state,
                     postal_code: warehouseData.address.postalCode || warehouseData.address.postal_code || warehouseData.address.pincode,
                     country: warehouseData.address.country || "India",
-                    lat: warehouseData.address.lat,
-                    lng: warehouseData.address.lng,
+                    lat: warehouseData.address.lat || null,
+                    lng: warehouseData.address.lng || null,
                     is_active: true,
                     // valid user_id is needed if the schema enforces it, otherwise null. 
                     // Assuming null is allowed or we don't have user_id here. 
@@ -263,14 +263,16 @@ export class WarehouseRepository {
             if (updates.addressData) {
                 const addrInput = updates.addressData;
                 const addressPayload = {
+                    recipient_name: addrInput.recipientName || addrInput.recipient_name,
+                    phone: addrInput.phone,
                     line1: addrInput.line1,
                     line2: addrInput.line2,
                     city: addrInput.city,
                     state: addrInput.state,
                     postal_code: addrInput.postalCode || addrInput.postal_code || addrInput.pincode,
                     country: addrInput.country || "India",
-                    lat: addrInput.lat,
-                    lng: addrInput.lng,
+                    lat: addrInput.lat || null,
+                    lng: addrInput.lng || null,
                 };
 
                 // Get the warehouse's current address ID

@@ -74,6 +74,32 @@ export function startEmailWorker() {
                     break;
                 }
 
+                // ── Return/RTO Email Jobs ─────────────────────────────────────
+
+                case "rto-initiated": {
+                    const { email, rtoData } = data;
+                    await emailService.sendRTOInitiatedEmail(email, rtoData);
+                    break;
+                }
+
+                case "return-approved": {
+                    const { email, returnData } = data;
+                    await emailService.sendReturnApprovedEmail(email, returnData);
+                    break;
+                }
+
+                case "return-picked-up": {
+                    const { email, returnData } = data;
+                    await emailService.sendReturnPickedUpEmail(email, returnData);
+                    break;
+                }
+
+                case "refund-processed": {
+                    const { email, refundData } = data;
+                    await emailService.sendRefundProcessedEmail(email, refundData);
+                    break;
+                }
+
                 default:
                     logger.warn(`📧 [EMAIL WORKER] Unknown job type: ${name}`, { jobId: job.id });
                     throw new Error(`Unknown email job type: ${name}`);

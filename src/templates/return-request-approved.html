@@ -1,0 +1,120 @@
+<!--
+  TEMPLATE NAME: return-request-approved
+  SUBJECT: Return Request Approved - Order #{{orderNumber}} - Bukizz
+
+  VARIABLES:
+    {{studentName}}    - Student/Customer name
+    {{orderNumber}}    - Order number
+    {{itemsSummary}}   - Items being returned (e.g. "Notebook x2 | Pen x3")
+    {{pickupInfo}}     - Pickup scheduling info
+    {{refundAmount}}   - Expected refund amount
+-->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Return Request Approved</title>
+</head>
+
+<body style="margin:0;padding:0;background-color:#f4f4f7;font-family:'Segoe UI',Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+        style="background-color:#f4f4f7;padding:24px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+                    style="background-color:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+
+                    <!-- Header -->
+                    <tr>
+                        <td
+                            style="background:linear-gradient(135deg,#2563EB,#1D4ED8);padding:28px 32px;text-align:center;">
+                            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;letter-spacing:0.5px;">
+                                Bukizz</h1>
+                            <p style="margin:6px 0 0;color:#BFDBFE;font-size:13px;">Return Request Approved</p>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding:32px;">
+                            <h2 style="margin:0 0 8px;color:#1E293B;font-size:20px;">Your return request is approved!</h2>
+                            <p style="margin:0 0 20px;color:#475569;font-size:15px;">Hi
+                                <strong>{{studentName}}</strong>, we have approved your return request. A delivery partner will be assigned to pick up the items shortly.</p>
+
+                            <!-- Order Details Card -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                style="background-color:#EFF6FF;border-radius:8px;margin-bottom:20px;">
+                                <tr>
+                                    <td style="padding:16px;">
+                                        <p style="margin:4px 0;font-size:14px;color:#1E40AF;"><strong>Order #:</strong>
+                                            {{orderNumber}}</p>
+                                        <p style="margin:4px 0;font-size:14px;color:#1E40AF;"><strong>Expected Refund:</strong>
+                                            {{refundAmount}}</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Items Summary -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                style="background-color:#F8FAFC;border-radius:8px;margin-bottom:20px;">
+                                <tr>
+                                    <td style="padding:16px;">
+                                        <p
+                                            style="margin:0 0 8px;font-size:13px;color:#64748B;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">
+                                            Items to be Returned</p>
+                                        <p style="margin:0;font-size:14px;color:#334155;line-height:1.6;">
+                                            {{itemsSummary}}</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Pickup Info Card -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                style="background-color:#F0FDF4;border-radius:8px;margin-bottom:16px;border-left:4px solid #22C55E;">
+                                <tr>
+                                    <td style="padding:16px;">
+                                        <p style="margin:0 0 4px;font-size:12px;color:#166534;text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">
+                                            Pickup Information</p>
+                                        <p style="margin:0;font-size:14px;color:#15803D;">{{pickupInfo}}</p>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <!-- Instructions -->
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                style="background-color:#FFFBEB;border-radius:8px;margin-bottom:16px;">
+                                <tr>
+                                    <td style="padding:16px;">
+                                        <p style="margin:0 0 8px;font-size:13px;color:#92400E;font-weight:600;">Please ensure:</p>
+                                        <ul style="margin:0;padding-left:20px;color:#92400E;font-size:13px;line-height:1.8;">
+                                            <li>Items are in original packaging</li>
+                                            <li>All tags and labels are intact</li>
+                                            <li>Someone is available at the pickup address</li>
+                                        </ul>
+                                    </td>
+                                </tr>
+                            </table>
+
+                            <p style="margin:20px 0 0;color:#64748B;font-size:13px;">You will receive a notification once the pickup is scheduled. For any queries, contact us at support@bukizz.in.</p>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td
+                            style="padding:20px 32px;background-color:#F8FAFC;border-top:1px solid #E2E8F0;text-align:center;">
+                            <p style="margin:0;color:#94A3B8;font-size:12px;">© 2026 Bukizz. All rights reserved.</p>
+                            <p style="margin:4px 0 0;color:#94A3B8;font-size:11px;">For queries, email us at
+                                support@bukizz.in</p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>

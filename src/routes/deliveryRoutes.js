@@ -96,5 +96,62 @@ export default function deliveryRoutes(dependencies = {}) {
     deliveryController.getBankDetails
   );
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // RTO (Return to Origin) Routes - When delivery partner cannot deliver
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Route to initiate RTO for an item (delivery failed)
+  router.post(
+    "/items/:itemId/initiate-rto",
+    authenticateToken,
+    deliveryController.initiateRTO
+  );
+
+  // Route to get all RTO items that DP needs to return
+  router.get(
+    "/rto-items",
+    authenticateToken,
+    deliveryController.getRTOItems
+  );
+
+  // Route to confirm RTO dropoff at warehouse
+  router.post(
+    "/rto/:returnId/confirm-dropoff",
+    authenticateToken,
+    deliveryController.confirmRTODropoff
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Customer Return Pickup Routes - When customer requests return after delivery
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Route to get available return pickups
+  router.get(
+    "/return-pickups",
+    authenticateToken,
+    deliveryController.getReturnPickups
+  );
+
+  // Route to claim a return pickup
+  router.post(
+    "/return-pickups/:returnId/claim",
+    authenticateToken,
+    deliveryController.claimReturnPickup
+  );
+
+  // Route to confirm return pickup from customer
+  router.post(
+    "/return-pickups/:returnId/confirm-pickup",
+    authenticateToken,
+    deliveryController.confirmReturnPickup
+  );
+
+  // Route to confirm return dropoff at warehouse
+  router.post(
+    "/return-pickups/:returnId/confirm-dropoff",
+    authenticateToken,
+    deliveryController.confirmReturnDropoff
+  );
+
   return router;
 }
