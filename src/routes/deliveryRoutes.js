@@ -82,6 +82,20 @@ export default function deliveryRoutes(dependencies = {}) {
     deliveryController.verifyDeliveryOtp
   );
 
+  // Route to send OTP for customer-refused RTO verification
+  router.post(
+    "/items/:itemId/rto-otp",
+    authenticateToken,
+    deliveryController.sendRtoOtp
+  );
+
+  // Route to verify OTP for customer-refused RTO
+  router.post(
+    "/items/:itemId/verify-rto-otp",
+    authenticateToken,
+    deliveryController.verifyRtoOtp
+  );
+
   // Route to create a Razorpay payment link for COD orders
   router.post(
     "/create-payment-link",
@@ -140,6 +154,20 @@ export default function deliveryRoutes(dependencies = {}) {
     "/rto-items",
     authenticateToken,
     deliveryController.getRTOItems
+  );
+
+  // Route to confirm RTO dropoff at warehouse
+  router.post(
+    "/rto/:returnId/dropoff-otp",
+    authenticateToken,
+    deliveryController.sendRtoDropoffOtp
+  );
+
+  // Route to verify OTP for RTO dropoff confirmation
+  router.post(
+    "/rto/:returnId/verify-dropoff-otp",
+    authenticateToken,
+    deliveryController.verifyRtoDropoffOtp
   );
 
   // Route to confirm RTO dropoff at warehouse

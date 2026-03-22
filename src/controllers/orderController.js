@@ -9,6 +9,7 @@ import { OrderQueryRepository } from "../repositories/orderQueryRepository.js";
 import { WarehouseRepository } from "../repositories/warehouseRepository.js";
 import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
 import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
+import { DeliveryController } from "./deliveryController.js";
 import { AppError } from "../middleware/errorHandler.js";
 import { getSupabase } from "../db/index.js";
 
@@ -331,6 +332,40 @@ export class OrderController {
         userId,
         filters,
       );
+
+      // Expose active delivery OTP on user's order items (if generated and not expired)
+      const otpCache = DeliveryController.deliveryCompletionOTPCache || {};
+      const rtoOtpCache = DeliveryController.rtoCustomerRefusedOTPCache || {};
+      const getActiveOtpForItem = (itemId) => {
+        if (!itemId) return null;
+        const prefix = `${itemId}_`;
+        for (const [key, value] of Object.entries(otpCache)) {
+          if (!key.startsWith(prefix)) continue;
+          if (!value || Date.now() > value.expiresAt) continue;
+          return value.otp || null;
+        }
+        return null;
+      };
+      const getActiveRtoOtpForItem = (itemId) => {
+        if (!itemId) return null;
+        const prefix = `${itemId}_`;
+        for (const [key, value] of Object.entries(rtoOtpCache)) {
+          if (!key.startsWith(prefix)) continue;
+          if (!value || Date.now() > value.expiresAt) continue;
+          return value.otp || null;
+        }
+        return null;
+      };
+
+      if (result?.orders?.length) {
+        result.orders.forEach((order) => {
+          if (!Array.isArray(order.items)) return;
+          order.items.forEach((item) => {
+            item.deliveryOtp = getActiveOtpForItem(item.id);
+            item.rtoOtp = getActiveRtoOtpForItem(item.id);
+          });
+        });
+      }
 
       OrderController._sanitizeOrders(result.orders, req.user?.role);
 
@@ -1417,62 +1452,16 @@ export class OrderController {
       metadata: { return_id: returnRecord.id, reason_code: reasonCode },
     });
 
-    // Auto-approve and assign for pickup (status: return_pickup_assigned)
-    await supabase
-      .from("order_items")
-      .update({
-        status: "return_pickup_assigned",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", itemId);
-
-    await supabase
-      .from("order_returns")
-      .update({ status: "pickup_assigned" })
-      .eq("id", returnRecord.id);
-
-    await orderEventRepository.create({
-      orderId,
-      orderItemId: itemId,
-      previousStatus: "return_requested",
-      newStatus: "return_pickup_assigned",
-      changedBy: userId,
-      note: "Return approved - awaiting pickup assignment",
-      metadata: { return_id: returnRecord.id },
-    });
-
-    // Send return approved email
-    try {
-      const { queueReturnApprovedEmail } = await import("../queue/emailQueue.js");
-      const customerEmail = order.contact_email || order.users?.email;
-      const studentName = order.shipping_address?.studentName
-        || order.shipping_address?.recipientName
-        || order.users?.full_name
-        || "Customer";
-
-      if (customerEmail) {
-        await queueReturnApprovedEmail(customerEmail, {
-          orderNumber: order.order_number,
-          studentName,
-          items: [{ title: item.title, quantity: item.quantity }],
-          refundAmount: item.total_price,
-          pickupInfo: "A delivery partner will be assigned to pick up your return within 24-48 hours.",
-        });
-      }
-    } catch (emailErr) {
-      logger.error("Failed to send return approved email", { error: emailErr.message });
-    }
-
     res.json({
       success: true,
       data: {
         returnId: returnRecord.id,
         itemId,
-        status: "return_pickup_assigned",
+        status: "return_requested",
         reasonCode,
         estimatedRefund: item.total_price,
       },
-      message: "Return request submitted successfully. A delivery partner will be assigned for pickup.",
+      message: "Return request submitted successfully. Admin will assign a delivery partner for pickup.",
     });
   });
 }

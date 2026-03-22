@@ -2,6 +2,7 @@ import express from "express";
 import { authenticateToken, requireRoles } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { paramSchemas, userSchemas } from "../models/schemas.js";
+import defaultDeliveryController from "../controllers/deliveryController.js";
 
 /**
  * Admin Delivery Routes Factory
@@ -11,6 +12,7 @@ import { paramSchemas, userSchemas } from "../models/schemas.js";
 export default function adminDeliveryRoutes(dependencies = {}) {
   const router = express.Router();
   const { authController } = dependencies;
+  const deliveryController = dependencies.deliveryController || defaultDeliveryController;
 
   if (!authController) {
     console.error("AuthController not found in dependencies");
@@ -31,6 +33,13 @@ export default function adminDeliveryRoutes(dependencies = {}) {
     validate(paramSchemas.id, "params"),
     validate(userSchemas.deliveryPartnerApprove),
     authController.approveDeliveryPartner,
+  );
+
+  router.post(
+    "/return-pickups/:returnId/assign",
+    authenticateToken,
+    requireRoles("admin"),
+    deliveryController.assignReturnPickupByAdmin,
   );
 
   return router;

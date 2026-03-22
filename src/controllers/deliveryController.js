@@ -259,6 +259,21 @@ export class DeliveryController {
   // Simple in-memory cache for delivery completion OTPs
   // Format: { 'itemId_partnerId': { otp: '123456', expiresAt: timestamp } }
   static deliveryCompletionOTPCache = {};
+  // Temporary verification cache to allow delivery completion after OTP verify.
+  // Format: { 'itemId_partnerId': { expiresAt: timestamp } }
+  static deliveryOtpVerifiedCache = {};
+  // OTP cache for RTO customer-refused verification.
+  // Format: { 'itemId_partnerId': { otp: '123456', expiresAt: timestamp } }
+  static rtoCustomerRefusedOTPCache = {};
+  // Verification cache for RTO customer-refused OTP.
+  // Format: { 'itemId_partnerId': { expiresAt: timestamp } }
+  static rtoCustomerRefusedVerifiedCache = {};
+  // OTP cache for RTO dropoff confirmation.
+  // Format: { 'returnId_partnerId': { otp: '123456', expiresAt: timestamp } }
+  static rtoDropoffOTPCache = {};
+  // Verification cache for RTO dropoff OTP.
+  // Format: { 'returnId_partnerId': { expiresAt: timestamp } }
+  static rtoDropoffVerifiedCache = {};
 
   /**
    * Send OTP to retailer email for warehouse arrival verification
@@ -498,10 +513,12 @@ export class DeliveryController {
       .from("order_items")
       .select(`
         id,
+        dispatch_id,
         status,
         locked_by,
         orders!inner(
           id,
+          order_number,
           contact_email
         )
       `)
@@ -533,7 +550,15 @@ export class DeliveryController {
     };
 
     const { emailService } = await import("../services/emailService.js");
-    await emailService.sendOtpEmail(customerEmail, otp);
+    await emailService.sendOtpEmail(
+      customerEmail,
+      otp,
+      "customer-delivery-otp-verification",
+      {
+        orderNumber: item.orders?.order_number || item.orders?.id,
+        dispatchId: item.dispatch_id || null,
+      }
+    );
 
     res.json({
       success: true,
@@ -556,7 +581,7 @@ export class DeliveryController {
    */
   verifyDeliveryOtp = asyncHandler(async (req, res) => {
     const { itemId } = req.params;
-    const { otp, paymentCollected, paymentCollectionMethod } = req.body || {};
+    const { otp, paymentCollected, paymentCollectionMethod, completeDelivery = true } = req.body || {};
     const partnerId = req.user?.id;
 
     if (!itemId || !otp) {
@@ -591,6 +616,16 @@ export class DeliveryController {
     }
 
     delete DeliveryController.deliveryCompletionOTPCache[cacheKey];
+    DeliveryController.deliveryOtpVerifiedCache[cacheKey] = {
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+
+    if (completeDelivery === false) {
+      return res.json({
+        success: true,
+        message: "OTP verified successfully.",
+      });
+    }
 
     const data = await this._completeDeliveryForItem({
       itemId,
@@ -598,11 +633,299 @@ export class DeliveryController {
       paymentCollected: !!paymentCollected,
       paymentCollectionMethod: paymentCollectionMethod || null,
     });
+    delete DeliveryController.deliveryOtpVerifiedCache[cacheKey];
 
     res.json({
       success: true,
       data,
       message: "OTP verified and item marked as delivered successfully.",
+    });
+  });
+
+  /**
+   * Send OTP to customer email for customer-refused RTO flow.
+   * POST /api/v1/delivery/items/:itemId/rto-otp
+   */
+  sendRtoOtp = asyncHandler(async (req, res) => {
+    const { itemId } = req.params;
+    const partnerId = req.user?.id;
+
+    if (!itemId) {
+      return res.status(400).json({ success: false, message: "Item ID is required" });
+    }
+
+    const { getSupabase } = await import("../db/index.js");
+    const supabase = getSupabase();
+
+    const { data: item, error: itemError } = await supabase
+      .from("order_items")
+      .select(`
+        id,
+        dispatch_id,
+        status,
+        locked_by,
+        orders!inner(
+          id,
+          order_number,
+          contact_email
+        )
+      `)
+      .eq("id", itemId)
+      .eq("status", "out_for_delivery")
+      .eq("locked_by", partnerId)
+      .single();
+
+    if (itemError || !item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found, not out for delivery, or not assigned to you.",
+      });
+    }
+
+    const customerEmail = item.orders?.contact_email;
+    if (!customerEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer email not found for this order.",
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const cacheKey = `${itemId}_${partnerId}`;
+    DeliveryController.rtoCustomerRefusedOTPCache[cacheKey] = {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+
+    const { emailService } = await import("../services/emailService.js");
+    await emailService.sendOtpEmail(
+      customerEmail,
+      otp,
+      "customer-rto-cancellation-otp-verification",
+      {
+        orderNumber: item.orders?.order_number || item.orders?.id,
+        dispatchId: item.dispatch_id || null,
+      }
+    );
+
+    res.json({
+      success: true,
+      data: {
+        expiresInSeconds: 600,
+        maskedEmail: customerEmail.replace(/(.{2})(.*)(?=@)/, (gp1, gp2, gp3) => {
+          for (let i = 0; i < gp3.length; i++) {
+            gp2 += "*";
+          }
+          return gp2;
+        }),
+      },
+      message: "RTO OTP sent successfully",
+    });
+  });
+
+  /**
+   * Verify OTP for customer-refused RTO flow.
+   * POST /api/v1/delivery/items/:itemId/verify-rto-otp
+   */
+  verifyRtoOtp = asyncHandler(async (req, res) => {
+    const { itemId } = req.params;
+    const { otp } = req.body || {};
+    const partnerId = req.user?.id;
+
+    if (!itemId || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Item ID and OTP are required",
+      });
+    }
+
+    const cacheKey = `${itemId}_${partnerId}`;
+    const cachedData = DeliveryController.rtoCustomerRefusedOTPCache[cacheKey];
+    if (!cachedData) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP not found or expired. Please request a new one.",
+      });
+    }
+
+    if (Date.now() > cachedData.expiresAt) {
+      delete DeliveryController.rtoCustomerRefusedOTPCache[cacheKey];
+      return res.status(400).json({
+        success: false,
+        message: "OTP expired. Please request a new one.",
+      });
+    }
+
+    if (cachedData.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+      });
+    }
+
+    delete DeliveryController.rtoCustomerRefusedOTPCache[cacheKey];
+    DeliveryController.rtoCustomerRefusedVerifiedCache[cacheKey] = {
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+
+    res.json({
+      success: true,
+      message: "RTO OTP verified successfully.",
+    });
+  });
+
+  /**
+   * Send OTP to retailer email for RTO warehouse dropoff confirmation.
+   * POST /api/v1/delivery/rto/:returnId/dropoff-otp
+   */
+  sendRtoDropoffOtp = asyncHandler(async (req, res) => {
+    const { returnId } = req.params;
+    const partnerId = req.user?.id;
+
+    if (!returnId) {
+      return res.status(400).json({
+        success: false,
+        message: "Return ID is required",
+      });
+    }
+
+    const { getSupabase } = await import("../db/index.js");
+    const supabase = getSupabase();
+
+    const { data: returnRecord, error: fetchError } = await supabase
+      .from("order_returns")
+      .select(`
+        id, order_id, order_item_id, pickup_dp_id, warehouse_id, status,
+        order_items!order_item_id ( id, dispatch_id ),
+        orders!order_id ( order_number )
+      `)
+      .eq("id", returnId)
+      .single();
+
+    if (fetchError || !returnRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Return record not found",
+      });
+    }
+
+    if (returnRecord.pickup_dp_id !== partnerId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not assigned to this return",
+      });
+    }
+
+    if (returnRecord.status !== "in_transit") {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot send OTP. Return status is "${returnRecord.status}", expected "in_transit"`,
+      });
+    }
+
+    const { data: retailerLink, error: linkError } = await supabase
+      .from("retailer_warehouse")
+      .select("retailer_id")
+      .eq("warehouse_id", returnRecord.warehouse_id)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkError || !retailerLink?.retailer_id) {
+      return res.status(400).json({
+        success: false,
+        message: "Warehouse is not linked to any retailer",
+      });
+    }
+
+    const { data: retailer, error: retailerError } = await supabase
+      .from("users")
+      .select("email")
+      .eq("id", retailerLink.retailer_id)
+      .single();
+
+    if (retailerError || !retailer?.email) {
+      return res.status(400).json({
+        success: false,
+        message: "Could not find retailer email to send OTP",
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const cacheKey = `${returnId}_${partnerId}`;
+    DeliveryController.rtoDropoffOTPCache[cacheKey] = {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+
+    const { emailService } = await import("../services/emailService.js");
+    await emailService.sendOtpEmail(retailer.email, otp, "retailer-rto-dropoff-otp-verification", {
+      orderNumber: returnRecord.orders?.order_number || returnRecord.order_id,
+      dispatchId: returnRecord.order_items?.dispatch_id || null,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        expiresInSeconds: 600,
+        maskedEmail: retailer.email.replace(/(.{2})(.*)(?=@)/, (gp1, gp2, gp3) => {
+          for (let i = 0; i < gp3.length; i++) {
+            gp2 += "*";
+          }
+          return gp2;
+        }),
+      },
+      message: "RTO dropoff OTP sent successfully",
+    });
+  });
+
+  /**
+   * Verify OTP for RTO warehouse dropoff confirmation.
+   * POST /api/v1/delivery/rto/:returnId/verify-dropoff-otp
+   */
+  verifyRtoDropoffOtp = asyncHandler(async (req, res) => {
+    const { returnId } = req.params;
+    const { otp } = req.body || {};
+    const partnerId = req.user?.id;
+
+    if (!returnId || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Return ID and OTP are required",
+      });
+    }
+
+    const cacheKey = `${returnId}_${partnerId}`;
+    const cachedData = DeliveryController.rtoDropoffOTPCache[cacheKey];
+    if (!cachedData) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP not found or expired. Please request a new one.",
+      });
+    }
+
+    if (Date.now() > cachedData.expiresAt) {
+      delete DeliveryController.rtoDropoffOTPCache[cacheKey];
+      return res.status(400).json({
+        success: false,
+        message: "OTP expired. Please request a new one.",
+      });
+    }
+
+    if (cachedData.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+      });
+    }
+
+    delete DeliveryController.rtoDropoffOTPCache[cacheKey];
+    DeliveryController.rtoDropoffVerifiedCache[cacheKey] = {
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+
+    res.json({
+      success: true,
+      message: "RTO dropoff OTP verified successfully.",
     });
   });
 
@@ -649,6 +972,11 @@ export class DeliveryController {
       });
     }
 
+    const cacheKey = `${itemId}_${partnerId}`;
+    const verifiedData = DeliveryController.deliveryOtpVerifiedCache[cacheKey];
+    const hasVerifiedOtp =
+      !!verifiedData && Date.now() <= verifiedData.expiresAt;
+
     const shippingAddress = item.orders?.shipping_address || {};
     const customerLat =
       shippingAddress?.lat ??
@@ -665,7 +993,7 @@ export class DeliveryController {
       typeof customerLat === "number" &&
       typeof customerLng === "number";
 
-    if (!canCheckDistance) {
+    if (!hasVerifiedOtp && !canCheckDistance) {
       return res.status(403).json({
         success: false,
         requiresOtp: true,
@@ -673,21 +1001,23 @@ export class DeliveryController {
       });
     }
 
-    const distanceMeters = calculateDistanceMeters(
-      currentLat,
-      currentLng,
-      customerLat,
-      customerLng
-    );
+    if (!hasVerifiedOtp) {
+      const distanceMeters = calculateDistanceMeters(
+        currentLat,
+        currentLng,
+        customerLat,
+        customerLng
+      );
 
-    if (distanceMeters > 200) {
-      return res.status(403).json({
-        success: false,
-        requiresOtp: true,
-        distanceMeters: Math.round(distanceMeters),
-        thresholdMeters: 200,
-        message: "Delivery OTP required when you are more than 200m away.",
-      });
+      if (distanceMeters > 200) {
+        return res.status(403).json({
+          success: false,
+          requiresOtp: true,
+          distanceMeters: Math.round(distanceMeters),
+          thresholdMeters: 200,
+          message: "Delivery OTP required when you are more than 200m away.",
+        });
+      }
     }
 
     const data = await this._completeDeliveryForItem({
@@ -696,6 +1026,7 @@ export class DeliveryController {
       paymentCollected: !!paymentCollected,
       paymentCollectionMethod: paymentCollectionMethod || null,
     });
+    delete DeliveryController.deliveryOtpVerifiedCache[cacheKey];
 
     res.json({
       success: true,
@@ -1210,6 +1541,22 @@ export class DeliveryController {
       });
     }
 
+    if (reasonCode === "customer_refused") {
+      const cacheKey = `${itemId}_${partnerId}`;
+      const verifiedData = DeliveryController.rtoCustomerRefusedVerifiedCache[cacheKey];
+      const hasVerifiedOtp =
+        !!verifiedData && Date.now() <= verifiedData.expiresAt;
+
+      if (!hasVerifiedOtp) {
+        return res.status(403).json({
+          success: false,
+          requiresOtp: true,
+          message: "OTP verification is required for customer refused RTO.",
+        });
+      }
+      delete DeliveryController.rtoCustomerRefusedVerifiedCache[cacheKey];
+    }
+
     // Update item status to rto_initiated
     const { error: updateError } = await supabase
       .from("order_items")
@@ -1360,7 +1707,7 @@ export class DeliveryController {
         status,
         created_at,
         order_items!order_item_id (
-          id, title, quantity, total_price, status
+          id, dispatch_id, title, quantity, total_price, status, variant_id
         ),
         orders!order_id (
           id, order_number, shipping_address
@@ -1409,6 +1756,8 @@ export class DeliveryController {
         orderId: ret.order_id,
         orderNumber: ret.orders?.order_number,
         orderItemId: ret.order_item_id,
+        dispatchId: ret.order_items?.dispatch_id || null,
+        variantId: ret.order_items?.variant_id || null,
         itemTitle: ret.order_items?.title,
         itemQuantity: ret.order_items?.quantity,
         itemStatus: ret.order_items?.status,
@@ -1424,9 +1773,13 @@ export class DeliveryController {
       };
     }));
 
+    const { OrderRepository } = await import("../repositories/orderRepository.js");
+    const orderRepo = new OrderRepository(supabase);
+    const withVariant = await orderRepo.enrichItemsWithVariantData(enrichedReturns);
+
     res.json({
       success: true,
-      data: enrichedReturns,
+      data: withVariant,
       message: `Found ${enrichedReturns.length} RTO item(s) to return.`,
     });
   });
@@ -1482,6 +1835,18 @@ export class DeliveryController {
         message: `Cannot confirm dropoff. Return status is "${returnRecord.status}", expected "in_transit"`,
       });
     }
+
+    const cacheKey = `${returnId}_${partnerId}`;
+    const verifiedData = DeliveryController.rtoDropoffVerifiedCache[cacheKey];
+    const hasVerifiedOtp = !!verifiedData && Date.now() <= verifiedData.expiresAt;
+    if (!hasVerifiedOtp) {
+      return res.status(403).json({
+        success: false,
+        requiresOtp: true,
+        message: "Retailer OTP verification is required before confirming dropoff.",
+      });
+    }
+    delete DeliveryController.rtoDropoffVerifiedCache[cacheKey];
 
     // Update return status to completed
     const { error: updateReturnError } = await supabase
@@ -1580,19 +1945,127 @@ export class DeliveryController {
   // ═══════════════════════════════════════════════════════════════════════
 
   /**
+   * Admin assigns a customer return pickup to a delivery partner
+   * POST /api/v1/admin/delivery/return-pickups/:returnId/assign
+   */
+  assignReturnPickupByAdmin = asyncHandler(async (req, res) => {
+    const { returnId } = req.params;
+    const { deliveryPartnerId } = req.body || {};
+    const adminId = req.user?.id;
+
+    if (!returnId || !deliveryPartnerId) {
+      return res.status(400).json({
+        success: false,
+        message: "Return ID and deliveryPartnerId are required",
+      });
+    }
+
+    const { getSupabase } = await import("../db/index.js");
+    const supabase = getSupabase();
+
+    const { data: returnRecord, error: fetchError } = await supabase
+      .from("order_returns")
+      .select("id, order_id, order_item_id, return_type, status")
+      .eq("id", returnId)
+      .single();
+
+    if (fetchError || !returnRecord) {
+      return res.status(404).json({
+        success: false,
+        message: "Return record not found",
+      });
+    }
+
+    if (returnRecord.return_type !== "customer_return") {
+      return res.status(400).json({
+        success: false,
+        message: "This is not a customer return pickup",
+      });
+    }
+
+    if (!["initiated", "pickup_assigned"].includes(returnRecord.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot assign. Return status is "${returnRecord.status}"`,
+      });
+    }
+
+    const { data: deliveryPartner, error: partnerError } = await supabase
+      .from("users")
+      .select("id, role")
+      .eq("id", deliveryPartnerId)
+      .single();
+
+    if (partnerError || !deliveryPartner || deliveryPartner.role !== "delivery_partner") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid deliveryPartnerId",
+      });
+    }
+
+    const now = new Date().toISOString();
+    const { error: updateReturnError } = await supabase
+      .from("order_returns")
+      .update({
+        pickup_dp_id: deliveryPartnerId,
+        status: "pickup_assigned",
+        updated_at: now,
+      })
+      .eq("id", returnId);
+
+    if (updateReturnError) {
+      throw new AppError(`Failed to assign return pickup: ${updateReturnError.message}`, 500);
+    }
+
+    const { error: updateItemError } = await supabase
+      .from("order_items")
+      .update({
+        status: "return_pickup_assigned",
+        updated_at: now,
+      })
+      .eq("id", returnRecord.order_item_id);
+
+    if (updateItemError) {
+      throw new AppError(`Failed to update item status: ${updateItemError.message}`, 500);
+    }
+
+    const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
+    const orderEventRepository = new OrderEventRepository(supabase);
+    await orderEventRepository.create({
+      orderId: returnRecord.order_id,
+      orderItemId: returnRecord.order_item_id,
+      previousStatus: returnRecord.status === "initiated" ? "return_requested" : "return_pickup_assigned",
+      newStatus: "return_pickup_assigned",
+      changedBy: adminId,
+      note: "Return pickup assigned by admin",
+      metadata: { return_id: returnId, delivery_partner_id: deliveryPartnerId },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        returnId,
+        deliveryPartnerId,
+        status: "pickup_assigned",
+        itemStatus: "return_pickup_assigned",
+      },
+      message: "Return pickup assigned successfully.",
+    });
+  });
+
+  /**
    * Get all available customer return pickups for delivery partners
    * GET /api/v1/delivery/return-pickups
    */
   getReturnPickups = asyncHandler(async (req, res) => {
     const partnerId = req.user?.id;
 
-    logger.info("Fetching available return pickups", { partnerId });
+    logger.info("Fetching assigned return pickups", { partnerId });
 
     const { getSupabase } = await import("../db/index.js");
     const supabase = getSupabase();
 
-    // Fetch customer returns that are awaiting pickup assignment (no DP assigned yet)
-    // or already assigned to this DP
+    // Fetch customer returns only when assigned to this DP by admin
     const { data: returns, error } = await supabase
       .from("order_returns")
       .select(`
@@ -1618,6 +2091,7 @@ export class DeliveryController {
         )
       `)
       .eq("return_type", "customer_return")
+      .eq("pickup_dp_id", partnerId)
       .in("status", ["pickup_assigned", "in_transit"])
       .order("created_at", { ascending: true });
 
@@ -1625,13 +2099,8 @@ export class DeliveryController {
       throw new AppError(`Failed to fetch return pickups: ${error.message}`, 500);
     }
 
-    // Filter: show unclaimed pickups OR pickups claimed by this DP
-    const filteredReturns = (returns || []).filter(
-      (ret) => !ret.pickup_dp_id || ret.pickup_dp_id === partnerId
-    );
-
     // Enrich with addresses and incentive estimates
-    const enrichedReturns = await Promise.all(filteredReturns.map(async (ret) => {
+    const enrichedReturns = await Promise.all((returns || []).map(async (ret) => {
       let warehouseAddress = null;
       if (ret.warehouse?.address && typeof ret.warehouse.address === "string") {
         const { data: addr } = await supabase
@@ -1681,7 +2150,7 @@ export class DeliveryController {
     res.json({
       success: true,
       data: enrichedReturns,
-      message: `Found ${enrichedReturns.length} return pickup(s) available.`,
+      message: `Found ${enrichedReturns.length} assigned return pickup(s).`,
     });
   });
 
@@ -1690,73 +2159,9 @@ export class DeliveryController {
    * POST /api/v1/delivery/return-pickups/:returnId/claim
    */
   claimReturnPickup = asyncHandler(async (req, res) => {
-    const { returnId } = req.params;
-    const partnerId = req.user?.id;
-
-    if (!returnId) {
-      return res.status(400).json({
-        success: false,
-        message: "Return ID is required",
-      });
-    }
-
-    logger.info("Claiming return pickup", { partnerId, returnId });
-
-    const { getSupabase } = await import("../db/index.js");
-    const supabase = getSupabase();
-
-    // Fetch return record
-    const { data: returnRecord, error: fetchError } = await supabase
-      .from("order_returns")
-      .select("id, pickup_dp_id, status, return_type")
-      .eq("id", returnId)
-      .single();
-
-    if (fetchError || !returnRecord) {
-      return res.status(404).json({
-        success: false,
-        message: "Return record not found",
-      });
-    }
-
-    if (returnRecord.return_type !== "customer_return") {
-      return res.status(400).json({
-        success: false,
-        message: "This is not a customer return pickup",
-      });
-    }
-
-    if (returnRecord.status !== "pickup_assigned") {
-      return res.status(400).json({
-        success: false,
-        message: `Cannot claim. Return status is "${returnRecord.status}", expected "pickup_assigned"`,
-      });
-    }
-
-    if (returnRecord.pickup_dp_id && returnRecord.pickup_dp_id !== partnerId) {
-      return res.status(409).json({
-        success: false,
-        message: "This return has already been claimed by another delivery partner",
-      });
-    }
-
-    // Assign this DP to the pickup
-    const { error: updateError } = await supabase
-      .from("order_returns")
-      .update({
-        pickup_dp_id: partnerId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", returnId);
-
-    if (updateError) {
-      throw new AppError(`Failed to claim return pickup: ${updateError.message}`, 500);
-    }
-
-    res.json({
-      success: true,
-      data: { returnId, claimedBy: partnerId },
-      message: "Return pickup claimed successfully. Please proceed to customer location.",
+    return res.status(410).json({
+      success: false,
+      message: "Manual claiming is disabled. Returns are assigned by admin.",
     });
   });
 

@@ -79,7 +79,7 @@ class EmailService {
     }
   }
 
-  async sendOtpEmail(email, otp) {
+  async sendOtpEmail(email, otp, templateName = "retailer-email-otp-verification", extraData = {}) {
     try {
       const response = await fetch("https://services.theerrors.in/api/services/email/send", {
         method: "POST",
@@ -88,10 +88,11 @@ class EmailService {
           "x-api-key": process.env.OTP_EMAIL_API_KEY
         },
         body: JSON.stringify({
-          templateName: "retailer-email-otp-verification",
+          templateName,
           to: email,
           data: {
-            otp: otp
+            otp: otp,
+            ...extraData,
           }
         })
       });
