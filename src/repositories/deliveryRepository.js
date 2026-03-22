@@ -66,4 +66,150 @@ export const deliveryRepository = {
       throw error;
     }
   },
+  /**
+   * Get all delivered COD orders for a DP that have not been remitted.
+   * @param {string} partnerId
+   * @returns {Promise<Array>}
+   */
+  async getCashInHandOrders(partnerId) {
+    try {
+      const supabase = getSupabase();
+
+      // 1. Get all remitted order IDs for this DP
+      const { data: remittances, error: remError } = await supabase
+        .from("dp_cash_remittances")
+        .select("order_ids")
+        .eq("dp_id", partnerId)
+        .neq("status", "rejected");
+
+      if (remError) throw remError;
+
+      const remittedOrderIds = new Set();
+      remittances.forEach((r) => {
+        r.order_ids.forEach((id) => remittedOrderIds.add(id));
+      });
+
+      // 2. Get all delivered COD orders
+      const { data: orders, error: orderError } = await supabase
+        .from("orders")
+        .select("id, order_number, order_total_amount, delivered_at")
+        .eq("delivery_partner_id", partnerId)
+        .eq("status", "delivered")
+        .eq("payment_method", "COD");
+
+      if (orderError) throw orderError;
+
+      // 3. Filter out remitted ones
+      return orders.filter((o) => !remittedOrderIds.has(o.id));
+    } catch (error) {
+      logger.error("deliveryRepository.getCashInHandOrders failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Submit a new cash remittance.
+   * @param {string} partnerId
+   * @param {Array<string>} orderIds
+   * @param {number} amount
+   * @returns {Promise<Object>}
+   */
+  async submitCashRemittance(partnerId, orderIds, amount) {
+    try {
+      const supabase = getSupabase();
+
+      const { data, error } = await supabase
+        .from("dp_cash_remittances")
+        .insert({
+          dp_id: partnerId,
+          order_ids: orderIds,
+          amount: amount,
+          status: "pending",
+          submitted_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+
+      if (error) {
+        logger.error("Error submitting cash remittance:", error);
+        throw error;
+      }
+
+      return data;
+    } catch (error) {
+      logger.error("deliveryRepository.submitCashRemittance failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get all cash remittances (filtered by status)
+   * @param {string} status - 'pending', 'approved', etc.
+   * @returns {Promise<Array>}
+   */
+  async getAllCashRemittances(status = null) {
+    try {
+      const supabase = getSupabase();
+      let query = supabase
+        .from("dp_cash_remittances")
+        .select(`
+          *,
+          delivery_partner:dp_id (
+            id,
+            name,
+            phone
+          )
+        `)
+        .order("submitted_at", { ascending: false });
+
+      if (status) {
+        query = query.eq("status", status);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      logger.error("deliveryRepository.getAllCashRemittances failed:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Approve a cash remittance
+   * @param {string} remittanceId
+   * @param {string} adminId
+   * @returns {Promise<Object>}
+   */
+  async approveCashRemittance(remittanceId, adminId) {
+    try {
+      const supabase = getSupabase();
+
+      // 1. Get the remittance to get the order IDs
+      const { data: remittance, error: fetchError } = await supabase
+        .from("dp_cash_remittances")
+        .select("order_ids")
+        .eq("id", remittanceId)
+        .single();
+
+      if (fetchError || !remittance) throw new Error("Remittance not found");
+
+      // 2. Update remittance status
+      const { error: updateError } = await supabase
+        .from("dp_cash_remittances")
+        .update({
+          status: "approved",
+          approved_at: new Date().toISOString(),
+          approved_by: adminId,
+        })
+        .eq("id", remittanceId);
+
+      if (updateError) throw updateError;
+
+      return { success: true };
+    } catch (error) {
+      logger.error("deliveryRepository.approveCashRemittance failed:", error);
+      throw error;
+    }
+  },
 };

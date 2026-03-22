@@ -47,9 +47,6 @@ import { settlementController } from "./src/controllers/settlementController.js"
 import { deliveryRepository } from "./src/repositories/deliveryRepository.js";
 import deliveryBankService from "./src/services/deliveryBankService.js";
 import { verifyBankAccount } from "./src/services/razorpayVerificationService.js";
-import { dpAdminRepository } from "./src/repositories/dpAdminRepository.js";
-import { dpAdminService } from "./src/services/dpAdminService.js";
-import { dpAdminController } from "./src/controllers/dpAdminController.js";
 
 // Import middleware and utilities
 import { errorHandler } from "./src/middleware/errorHandler.js";
@@ -145,11 +142,6 @@ async function startServer() {
       deliveryBankService: deliveryBankSvc,
     });
 
-    // Initialize DP Admin Layer
-    const dpAdminRepo = dpAdminRepository;
-    const dpAdminSvc = dpAdminService({ dpAdminRepository: dpAdminRepo });
-    const dpAdminCtrl = dpAdminController({ dpAdminService: dpAdminSvc });
-
     // Dependency injection container
     const dependencies = {
       supabase,
@@ -160,14 +152,12 @@ async function startServer() {
       orderController,
       settlementController: settlementCtrl,
       deliveryController: deliveryCtrl,
-      dpAdminCtrl,
       authService,
       userService,
       productService,
       schoolService,
       orderService,
       settlementService,
-      dpAdminService: dpAdminSvc,
       optionalAuth,
       productRepository,
       brandRepository,
@@ -176,7 +166,6 @@ async function startServer() {
       userRepository,
       ledgerRepository,
       settlementRepository,
-      dpAdminRepository: dpAdminRepo,
     };
 
     // Setup all routes

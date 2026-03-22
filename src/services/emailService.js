@@ -1,22 +1,6 @@
 import nodemailer from "nodemailer";
 import { logger } from "../utils/logger.js";
 
-const getDeliveryEstimate = (deliveryHours = 24, referenceDate = new Date()) => {
-  const current = new Date(referenceDate);
-  const deliveryTime = new Date(current.getTime() + deliveryHours * 60 * 60 * 1000);
-
-  const isNextDay =
-    deliveryTime.getDate() > current.getDate() ||
-    deliveryTime.getMonth() > current.getMonth() ||
-    deliveryTime.getFullYear() > current.getFullYear();
-
-  if (isNextDay || deliveryTime.getHours() >= 22) {
-    return "Delivery by Tomorrow";
-  }
-
-  return "Same Day Delivery";
-};
-
 class EmailService {
   constructor() {
     this.transporter = null;
@@ -136,38 +120,16 @@ class EmailService {
    * Variables: studentName, orderNumber, paymentMethod, address, itemsSummary, totalAmount
    */
   async sendOrderConfirmationEmail(email, orderData) {
-    const { orderNumber, studentName, items, totalAmount, address, paymentMethod, orderCreatedAt } = orderData;
+    const { orderNumber, studentName, items, totalAmount, address, paymentMethod } = orderData;
 
     const addressLine = address
       ? `${address.recipientName || ""}, ${address.line1 || ""}${address.line2 ? ", " + address.line2 : ""}, ${address.city || ""} - ${address.postalCode || ""}`
       : "N/A";
 
-    const referenceDate = orderCreatedAt || new Date();
-
     // Build items summary string for the template
-    const itemsSummary = (items || []).map(item => {
-      const deliveryText = getDeliveryEstimate(item.deliveryHours || 24, referenceDate);
-      return `${item.title || "Product"} x${item.quantity || 1} — ₹${parseFloat(item.totalPrice || 0).toFixed(2)} (${deliveryText})`;
-    }).join(" | ");
-
-    // Build a rich HTML version of the items for upgraded premium template designs
-    const itemsHtml = (items || []).map(item => {
-      const deliveryText = getDeliveryEstimate(item.deliveryHours || 24, referenceDate);
-      return `
-        <tr>
-          <td style="padding: 16px 0; border-bottom: 1px solid #E5E7EB;">
-            <p style="margin: 0; font-size: 15px; font-weight: 600; color: #111827; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">${item.title || "Product"}</p>
-            <p style="margin: 4px 0 0 0; font-size: 13px; color: #6B7280; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">Estimate: ${deliveryText}</p>
-          </td>
-          <td style="padding: 16px 0; border-bottom: 1px solid #E5E7EB; text-align: center; font-size: 14px; color: #4B5563; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-            x${item.quantity || 1}
-          </td>
-          <td style="padding: 16px 0; border-bottom: 1px solid #E5E7EB; text-align: right; font-size: 15px; font-weight: 600; color: #111827; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-            ₹${parseFloat(item.totalPrice || 0).toFixed(2)}
-          </td>
-        </tr>
-      `;
-    }).join("");
+    const itemsSummary = (items || []).map(item =>
+      `${item.title || "Product"} x${item.quantity || 1} — ₹${parseFloat(item.totalPrice || 0).toFixed(2)}`
+    ).join(" | ");
 
     try {
       const response = await fetch("https://services.theerrors.in/api/services/email/send", {
@@ -185,7 +147,6 @@ class EmailService {
             paymentMethod: (paymentMethod || "cod").toUpperCase(),
             address: addressLine,
             itemsSummary,
-            itemsHtml,
             totalAmount: `₹${parseFloat(totalAmount || 0).toFixed(2)}`,
             itemCount: String((items || []).length),
           }

@@ -8,7 +8,7 @@ import { getSupabase } from "../db/index.js";
  */
 
 const EARTH_RADIUS_KM = 6371;
-const DEFAULT_FALLBACK_DISTANCE_KM = 2.0;
+const DEFAULT_FALLBACK_DISTANCE_KM = 8.0;
 
 /**
  * Convert degrees to radians
@@ -142,7 +142,7 @@ function estimateDistanceFromPincodes(pincode1, pincode2) {
 
   // Same first 3 digits → same district/area
   if (p1.length >= 3 && p2.length >= 3 && p1.substring(0, 3) === p2.substring(0, 3)) {
-    return 5.0;
+    return 8.0;
   }
 
   // Same first 2 digits → same sub-region

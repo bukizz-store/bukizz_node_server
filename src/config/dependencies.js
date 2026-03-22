@@ -25,9 +25,6 @@ import deliveryIncentiveService from "../services/deliveryIncentiveService.js";
 import deliveryBankService from "../services/deliveryBankService.js";
 import { verifyBankAccount } from "../services/razorpayVerificationService.js";
 import { DeliveryController } from "../controllers/deliveryController.js";
-import { dpAdminRepository } from "../repositories/dpAdminRepository.js";
-import { dpAdminService } from "../services/dpAdminService.js";
-import { dpAdminController } from "../controllers/dpAdminController.js";
 import { getDB } from "../db/index.js";
 
 /**
@@ -98,15 +95,6 @@ export function createDependencies(overrides = {}) {
       verifyBankAccountFn: verifyBankAccount,
     });
 
-  // DP Admin Management
-  const dpAdminRepo = overrides.dpAdminRepository || dpAdminRepository;
-  const dpAdminSvc =
-    overrides.dpAdminService ||
-    dpAdminService({ dpAdminRepository: dpAdminRepo });
-  const dpAdminCtrl =
-    overrides.dpAdminController ||
-    dpAdminController({ dpAdminService: dpAdminSvc });
-
   // Controllers (Request Handling Layer)
   const userController =
     overrides.userController || new UserController(userService);
@@ -143,7 +131,6 @@ export function createDependencies(overrides = {}) {
     settlementRepository,
     dpLedgerRepository: dpLedgerRepo,
     deliveryRepository: deliveryRepo,
-    dpAdminRepository: dpAdminRepo,
 
     // Services
     userService,
@@ -154,7 +141,6 @@ export function createDependencies(overrides = {}) {
     settlementService,
     deliveryIncentiveService: deliveryIncentiveSvc,
     deliveryBankService: deliveryBankSvc,
-    dpAdminService: dpAdminSvc,
 
     // Controllers
     userController,
@@ -164,6 +150,5 @@ export function createDependencies(overrides = {}) {
     orderController,
     settlementController: settlementCtrl,
     deliveryController: deliveryCtrl,
-    dpAdminCtrl,
   };
 }

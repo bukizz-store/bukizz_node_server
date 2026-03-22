@@ -129,5 +129,36 @@ export function dpAdminController({ dpAdminService }) {
         message: "COD eligibility updated successfully",
       });
     }),
+    /**
+     * GET /cash/remittances
+     * List all cash remittances from DPs.
+     */
+    listCashRemittances: asyncHandler(async (req, res) => {
+      const { status } = req.query;
+      const { deliveryRepository } = await import("../repositories/deliveryRepository.js");
+      const result = await deliveryRepository.getAllCashRemittances(status);
+
+      res.status(200).json({
+        status: "success",
+        data: result,
+      });
+    }),
+
+    /**
+     * POST /cash/remittances/:id/approve
+     * Approve a cash remittance submission.
+     */
+    approveCashRemittance: asyncHandler(async (req, res) => {
+      const { id } = req.params;
+      const adminId = req.user.id;
+      const { deliveryRepository } = await import("../repositories/deliveryRepository.js");
+      const result = await deliveryRepository.approveCashRemittance(id, adminId);
+
+      res.status(200).json({
+        status: "success",
+        data: result,
+        message: "Cash remittance approved successfully",
+      });
+    }),
   };
 }

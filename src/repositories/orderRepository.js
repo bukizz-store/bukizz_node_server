@@ -848,11 +848,118 @@ export class OrderRepository {
 
       const formatted = (items || []).map(this._formatOrderItem.bind(this));
       const enrichedWithVariants =
-        await this._enrichItemsWithVariantData(formatted);
+        await this.enrichItemsWithVariantData(formatted);
       return await this._enrichItemsWithSchoolData(enrichedWithVariants);
     } catch (error) {
       logger.error("Error getting order items:", error);
       return [];
+    }
+  }
+
+  /**
+   * Enrich order items with full variant data (option values + attributes)
+   * Batch-fetches all variant IDs in one query to avoid N+1
+   */
+  async enrichItemsWithVariantData(items) {
+    try {
+      const variantIds = items.map((item) => item.variantId).filter(Boolean);
+
+      if (variantIds.length === 0) return items;
+
+      // Fetch variants with nested option values and their attributes
+      const { data: variants, error } = await this.supabase
+        .from("product_variants")
+        .select(
+          `
+          id, sku, price, compare_at_price, stock, weight, metadata,
+          option_value_1, option_value_2, option_value_3
+        `,
+        )
+        .in("id", variantIds);
+
+      if (error || !variants || variants.length === 0) {
+        logger.warn("Could not fetch variant data for enrichment:", error);
+        return items;
+      }
+
+      // Collect all option_value UUIDs across all variants
+      const optionValueIds = new Set();
+      variants.forEach((v) => {
+        if (v.option_value_1) optionValueIds.add(v.option_value_1);
+        if (v.option_value_2) optionValueIds.add(v.option_value_2);
+        if (v.option_value_3) optionValueIds.add(v.option_value_3);
+      });
+
+      // Batch-fetch option values with their attribute info
+      let optionValueMap = {};
+      if (optionValueIds.size > 0) {
+        const { data: optionValues, error: ovError } = await this.supabase
+          .from("product_option_values")
+          .select(
+            `
+            id, value, sort_order, image_url,
+            attribute:attribute_id (
+              id, name, position, is_required
+            )
+          `,
+          )
+          .in("id", [...optionValueIds]);
+
+        if (!ovError && optionValues) {
+          optionValues.forEach((ov) => {
+            optionValueMap[ov.id] = {
+              id: ov.id,
+              value: ov.value,
+              imageUrl: ov.image_url,
+              sortOrder: ov.sort_order,
+              attribute: ov.attribute
+                ? {
+                  id: ov.attribute.id,
+                  name: ov.attribute.name,
+                  position: ov.attribute.position,
+                }
+                : null,
+            };
+          });
+        }
+      }
+
+      // Build a variant lookup map
+      const variantMap = {};
+      variants.forEach((v) => {
+        const options = [];
+        if (v.option_value_1 && optionValueMap[v.option_value_1]) {
+          options.push(optionValueMap[v.option_value_1]);
+        }
+        if (v.option_value_2 && optionValueMap[v.option_value_2]) {
+          options.push(optionValueMap[v.option_value_2]);
+        }
+        if (v.option_value_3 && optionValueMap[v.option_value_3]) {
+          options.push(optionValueMap[v.option_value_3]);
+        }
+
+        variantMap[v.id] = {
+          id: v.id,
+          sku: v.sku,
+          price: parseFloat(v.price || 0),
+          compareAtPrice: v.compare_at_price
+            ? parseFloat(v.compare_at_price)
+            : null,
+          stock: v.stock,
+          weight: v.weight,
+          metadata: v.metadata || {},
+          options,
+        };
+      });
+
+      // Attach variant data to each item
+      return items.map((item) => ({
+        ...item,
+        variant: item.variantId ? variantMap[item.variantId] || null : null,
+      }));
+    } catch (error) {
+      logger.error("Error enriching items with variant data:", error);
+      return items; // Return items without variant data on failure
     }
   }
 
@@ -1031,7 +1138,7 @@ export class OrderRepository {
       if (!item) return null;
 
       const formatted = this._formatOrderItem(item);
-      const enrichedWithVariants = await this._enrichItemsWithVariantData([
+      const enrichedWithVariants = await this.enrichItemsWithVariantData([
         formatted,
       ]);
       const enriched =
@@ -1453,8 +1560,6 @@ export class OrderRepository {
       }
 
       if (sortBy === 'incentive') {
-         // Incentive is calculated in JS, so we can't sort by it in DB efficiently without stored function
-         // Fallback to default sort
          query = query.order("created_at", { ascending: true });
       } else if (sortBy === 'newest') {
          query = query.order("created_at", { ascending: false });
@@ -1470,7 +1575,7 @@ export class OrderRepository {
         throw new Error(`Failed to fetch available items: ${error.message}`);
       }
 
-      return (items || []).map((item) => {
+      const formattedItems = (items || []).map((item) => {
         const formatted = this._formatOrderItem(item);
         formatted.orderInfo = {
           id: item.orders.id,
@@ -1483,6 +1588,8 @@ export class OrderRepository {
         };
         return formatted;
       });
+
+      return await this._enrichItemsWithVariantData(formattedItems);
     } catch (error) {
       logger.error("Error getting available warehouse items:", error);
       throw error;
@@ -1561,7 +1668,9 @@ export class OrderRepository {
         throw new Error(`Failed to update item status: ${updateError.message}`);
       }
 
-      return this._formatOrderItem(updated);
+      const formatted = this._formatOrderItem(updated);
+      const enriched = await this._enrichItemsWithVariantData([formatted]);
+      return enriched[0];
     } catch (error) {
       logger.error("Error confirming pickup item:", error);
       throw error;
@@ -1574,7 +1683,7 @@ export class OrderRepository {
    * Clears lock fields after delivery.
    */
   async markItemDelivered(itemId, partnerId, options = {}) {
-    const { markPaymentPaid = false } = options;
+    const { markPaymentPaid = false, paymentCollectionMethod = null } = options;
     try {
       const { data: item, error: fetchError } = await this.supabase
         .from("order_items")
@@ -1607,20 +1716,42 @@ export class OrderRepository {
 
       // If cash collected at doorstep, mark order payment as paid
       if (markPaymentPaid && item.order_id) {
+        const orderUpdate = {
+          payment_status: "paid",
+          updated_at: new Date().toISOString(),
+        };
+
+        // Record how payment was collected (cash / online)
+        if (paymentCollectionMethod) {
+          orderUpdate.payment_collection_method = paymentCollectionMethod;
+        }
+
         const { error: payError } = await this.supabase
           .from("orders")
-          .update({
-            payment_status: "paid",
-            updated_at: new Date().toISOString(),
-          })
+          .update(orderUpdate)
           .eq("id", item.order_id);
 
         if (payError) {
           logger.error("Failed to update payment status for COD order:", payError);
         }
+      } else if (paymentCollectionMethod && item.order_id) {
+        // Even for non-COD, record the collection method if provided
+        const { error: methodError } = await this.supabase
+          .from("orders")
+          .update({
+            payment_collection_method: paymentCollectionMethod,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", item.order_id);
+
+        if (methodError) {
+          logger.error("Failed to update payment collection method:", methodError);
+        }
       }
 
-      return { formatted: this._formatOrderItem(updated), orderId: item.order_id };
+      const formatted = this._formatOrderItem(updated);
+      const enriched = await this._enrichItemsWithVariantData([formatted]);
+      return { formatted: enriched[0], orderId: item.order_id };
     } catch (error) {
       logger.error("Error marking item as delivered:", error);
       throw error;
@@ -1655,7 +1786,7 @@ export class OrderRepository {
         throw new Error(`Failed to fetch active deliveries: ${error.message}`);
       }
 
-      return (items || []).map((item) => {
+      const activeWithInfo = (items || []).map((item) => {
         const formatted = this._formatOrderItem(item);
         formatted.orderInfo = {
           id: item.orders.id,
@@ -1668,6 +1799,8 @@ export class OrderRepository {
         };
         return formatted;
       });
+
+      return await this._enrichItemsWithVariantData(activeWithInfo);
     } catch (error) {
       logger.error("Error fetching active deliveries:", error);
       throw error;

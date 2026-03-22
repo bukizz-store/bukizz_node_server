@@ -33,6 +33,20 @@ export default function deliveryRoutes(dependencies = {}) {
     deliveryController.claimItems
   );
 
+  // Route to send OTP for warehouse arrival verification
+  router.post(
+    "/warehouses/:warehouseId/arrival-otp",
+    authenticateToken,
+    deliveryController.sendWarehouseArrivalOTP
+  );
+
+  // Route to verify OTP for warehouse arrival
+  router.post(
+    "/warehouses/:warehouseId/verify-arrival-otp",
+    authenticateToken,
+    deliveryController.verifyWarehouseArrivalOTP
+  );
+
   // Route to confirm pickup after QR scan (shipped → out_for_delivery)
   router.post(
     "/confirm-pickup",
@@ -52,6 +66,20 @@ export default function deliveryRoutes(dependencies = {}) {
     "/items/:itemId/mark-delivered",
     authenticateToken,
     deliveryController.markDelivered
+  );
+
+  // Route to send delivery OTP when DP is away from destination
+  router.post(
+    "/items/:itemId/delivery-otp",
+    authenticateToken,
+    deliveryController.sendDeliveryOtp
+  );
+
+  // Route to verify delivery OTP and complete delivery
+  router.post(
+    "/items/:itemId/verify-delivery-otp",
+    authenticateToken,
+    deliveryController.verifyDeliveryOtp
   );
 
   // Route to create a Razorpay payment link for COD orders
@@ -151,6 +179,24 @@ export default function deliveryRoutes(dependencies = {}) {
     "/return-pickups/:returnId/confirm-dropoff",
     authenticateToken,
     deliveryController.confirmReturnDropoff
+  );
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Cash Collection Routes
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // Route to get current cash in hand balance
+  router.get(
+    "/cash/balance",
+    authenticateToken,
+    deliveryController.getCashBalance
+  );
+
+  // Route to submit cash remittance for admin approval
+  router.post(
+    "/cash/submit",
+    authenticateToken,
+    deliveryController.submitCashRemittance
   );
 
   return router;

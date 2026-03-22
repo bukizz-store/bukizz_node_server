@@ -85,5 +85,22 @@ export default function dpAdminRoutes(dependencies = {}) {
     dpAdminCtrl.updateCodEligibility,
   );
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Cash Collection Admin Routes
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // GET /cash/remittances — List all cash remittances from DPs
+  router.get(
+    "/cash/remittances",
+    dpAdminCtrl.listCashRemittances,
+  );
+
+  // POST /cash/remittances/:id/approve — Approve a cash remittance
+  router.post(
+    "/cash/remittances/:id/approve",
+    validate(paramSchemas.id, "params"),
+    dpAdminCtrl.approveCashRemittance,
+  );
+
   return router;
 }

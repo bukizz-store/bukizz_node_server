@@ -3,6 +3,21 @@ import warehouseRepository from "../repositories/warehouseRepository.js";
 import { logger } from "../utils/logger.js";
 import { dpBankDetailsSchema } from "../models/schemas.js";
 
+function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const earthRadius = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadius * c;
+}
+
 export class DeliveryController {
   /**
    * @param {Object} deps - Injected dependencies
@@ -141,10 +156,10 @@ export class DeliveryController {
       });
     }
 
-    if (itemIds.length > 5) {
+    if (itemIds.length > 10) {
       return res.status(400).json({
         success: false,
-        message: "You can claim a maximum of 5 items at a time",
+        message: "You can claim a maximum of 10 items at a time",
       });
     }
 
@@ -158,14 +173,14 @@ export class DeliveryController {
     const { getSupabase } = await import("../db/index.js");
     const orderRepository = new OrderRepository(getSupabase());
 
-    // Enforce 5-item limit GLOBALLY (existing locks + new claims)
+    // Enforce 10-item limit GLOBALLY (existing locks + new claims)
     const existingLockCount = await orderRepository.countValidLocks(partnerId);
     const totalRequested = existingLockCount + itemIds.length;
 
-    if (totalRequested > 5) {
+    if (totalRequested > 10) {
       return res.status(400).json({
         success: false,
-        message: `You already have ${existingLockCount} active locks. You can claim at most ${5 - existingLockCount} more items.`,
+        message: `You already have ${existingLockCount} active locks. You can claim at most ${10 - existingLockCount} more items.`,
       });
     }
 
@@ -237,24 +252,151 @@ export class DeliveryController {
       message: "Pickup confirmed. Item is now out for delivery.",
     });
   });
-  /**
-   * Mark an item as delivered
-   * POST /api/v1/delivery/items/:itemId/mark-delivered
-   */
-  markDelivered = asyncHandler(async (req, res) => {
-    const { itemId } = req.params;
-    const partnerId = req.user?.id;
-    const { paymentCollected } = req.body || {};
 
-    if (!itemId) {
-      return res.status(400).json({
-        success: false,
-        message: "Item ID is required",
-      });
+  // Simple in-memory cache for warehouse arrival OTPs
+  // Format: { 'warehouseId_partnerId': { otp: '123456', expiresAt: timestamp } }
+  static warehouseArrivalOTPCache = {};
+  // Simple in-memory cache for delivery completion OTPs
+  // Format: { 'itemId_partnerId': { otp: '123456', expiresAt: timestamp } }
+  static deliveryCompletionOTPCache = {};
+
+  /**
+   * Send OTP to retailer email for warehouse arrival verification
+   * POST /api/v1/delivery/warehouses/:warehouseId/arrival-otp
+   */
+  sendWarehouseArrivalOTP = asyncHandler(async (req, res) => {
+    const { warehouseId } = req.params;
+    const partnerId = req.user?.id;
+
+    if (!warehouseId) {
+      return res.status(400).json({ success: false, message: "Warehouse ID is required" });
     }
 
-    logger.info("Marking item as delivered", { partnerId, itemId, paymentCollected });
+    logger.info("Generating warehouse arrival OTP", { partnerId, warehouseId });
 
+    const { getSupabase } = await import("../db/index.js");
+    const supabase = getSupabase();
+
+    // Fetch warehouse first
+    const { data: warehouse, error: fetchError } = await supabase
+      .from("warehouse")
+      .select("id, name")
+      .eq("id", warehouseId)
+      .single();
+
+    if (fetchError) {
+      logger.error("Failed to fetch warehouse", { warehouseId, error: fetchError.message });
+      return res.status(500).json({ success: false, message: "Failed to fetch warehouse" });
+    }
+
+    if (!warehouse) {
+      return res.status(404).json({ success: false, message: "Warehouse not found" });
+    }
+
+    // Resolve linked retailer from mapping table
+    const { data: retailerLink, error: linkError } = await supabase
+      .from("retailer_warehouse")
+      .select("retailer_id")
+      .eq("warehouse_id", warehouseId)
+      .limit(1)
+      .maybeSingle();
+
+    if (linkError) {
+      logger.error("Failed to fetch warehouse-retailer link", { warehouseId, error: linkError.message });
+      return res.status(500).json({ success: false, message: "Failed to resolve retailer for warehouse" });
+    }
+
+    if (!retailerLink?.retailer_id) {
+      return res.status(400).json({ success: false, message: "Warehouse is not linked to any retailer" });
+    }
+
+    // Get retailer email
+    const { data: retailer, error: retailerError } = await supabase
+      .from("users")
+      .select("email, full_name")
+      .eq("id", retailerLink.retailer_id)
+      .single();
+
+    if (retailerError || !retailer || !retailer.email) {
+      return res.status(400).json({ success: false, message: "Could not find retailer email to send OTP" });
+    }
+
+    // Generate 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Store OTP in memory (expires in 10 minutes)
+    const cacheKey = `${warehouseId}_${partnerId}`;
+    DeliveryController.warehouseArrivalOTPCache[cacheKey] = {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+
+    // Send email using existing template
+    const { emailService } = await import("../services/emailService.js");
+    await emailService.sendOtpEmail(retailer.email, otp);
+
+    res.json({
+      success: true,
+      data: {
+        expiresInSeconds: 600,
+        maskedEmail: retailer.email.replace(/(.{2})(.*)(?=@)/,
+          (gp1, gp2, gp3) => {
+            for(let i = 0; i < gp3.length; i++) {
+              gp2+= "*";
+            } return gp2;
+          }
+        )
+      },
+      message: "OTP sent successfully to retailer",
+    });
+  });
+
+  /**
+   * Verify warehouse arrival OTP
+   * POST /api/v1/delivery/warehouses/:warehouseId/verify-arrival-otp
+   */
+  verifyWarehouseArrivalOTP = asyncHandler(async (req, res) => {
+    const { warehouseId } = req.params;
+    const { otp } = req.body;
+    const partnerId = req.user?.id;
+
+    if (!warehouseId || !otp) {
+      return res.status(400).json({ success: false, message: "Warehouse ID and OTP are required" });
+    }
+
+    logger.info("Verifying warehouse arrival OTP", { partnerId, warehouseId });
+
+    const cacheKey = `${warehouseId}_${partnerId}`;
+    const cachedData = DeliveryController.warehouseArrivalOTPCache[cacheKey];
+
+    if (!cachedData) {
+      return res.status(400).json({ success: false, message: "OTP not found or expired. Please request a new one." });
+    }
+
+    if (Date.now() > cachedData.expiresAt) {
+      delete DeliveryController.warehouseArrivalOTPCache[cacheKey];
+      return res.status(400).json({ success: false, message: "OTP expired. Please request a new one." });
+    }
+
+    if (cachedData.otp !== otp) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
+    }
+
+    // OTP verified successfully, remove from cache
+    delete DeliveryController.warehouseArrivalOTPCache[cacheKey];
+
+    res.json({
+      success: true,
+      message: "OTP verified successfully. Arrival confirmed.",
+    });
+  });
+
+  _completeDeliveryForItem = async ({
+    itemId,
+    partnerId,
+    paymentCollected = false,
+    paymentCollectionMethod = null,
+  }) => {
     const { OrderRepository } = await import("../repositories/orderRepository.js");
     const { getSupabase } = await import("../db/index.js");
     const orderRepository = new OrderRepository(getSupabase());
@@ -262,10 +404,12 @@ export class DeliveryController {
     const { formatted: updatedItem, orderId } = await orderRepository.markItemDelivered(
       itemId,
       partnerId,
-      { markPaymentPaid: !!paymentCollected }
+      {
+        markPaymentPaid: !!paymentCollected,
+        paymentCollectionMethod,
+      }
     );
 
-    // Record delivery event for audit trail
     const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
     const orderEventRepository = new OrderEventRepository(getSupabase());
     await orderEventRepository.create({
@@ -278,12 +422,10 @@ export class DeliveryController {
       metadata: { delivery_partner_id: partnerId },
     });
 
-    // Finalize delivery incentive and credit to DP ledger
     let incentiveData = null;
     if (this.deliveryIncentiveService && orderId) {
       try {
         const supabase = getSupabase();
-        // Fetch order's shipping address and warehouse address
         const { data: orderData } = await supabase
           .from("orders")
           .select("shipping_address, warehouse_id")
@@ -325,19 +467,239 @@ export class DeliveryController {
           partnerId,
           error: err.message,
         });
-        // Non-fatal: delivery is still marked, incentive can be reconciled later
       }
     }
+
+    return {
+      ...updatedItem,
+      ...(incentiveData && {
+        deliveryDistanceKm: incentiveData.distanceKm,
+        deliveryIncentiveAmount: incentiveData.incentiveAmount,
+      }),
+    };
+  };
+
+  /**
+   * Send OTP to customer email for delivery completion fallback.
+   * POST /api/v1/delivery/items/:itemId/delivery-otp
+   */
+  sendDeliveryOtp = asyncHandler(async (req, res) => {
+    const { itemId } = req.params;
+    const partnerId = req.user?.id;
+
+    if (!itemId) {
+      return res.status(400).json({ success: false, message: "Item ID is required" });
+    }
+
+    const { getSupabase } = await import("../db/index.js");
+    const supabase = getSupabase();
+
+    const { data: item, error: itemError } = await supabase
+      .from("order_items")
+      .select(`
+        id,
+        status,
+        locked_by,
+        orders!inner(
+          id,
+          contact_email
+        )
+      `)
+      .eq("id", itemId)
+      .eq("status", "out_for_delivery")
+      .eq("locked_by", partnerId)
+      .single();
+
+    if (itemError || !item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found, not out for delivery, or not assigned to you.",
+      });
+    }
+
+    const customerEmail = item.orders?.contact_email;
+    if (!customerEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Customer email not found for this order.",
+      });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const cacheKey = `${itemId}_${partnerId}`;
+    DeliveryController.deliveryCompletionOTPCache[cacheKey] = {
+      otp,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    };
+
+    const { emailService } = await import("../services/emailService.js");
+    await emailService.sendOtpEmail(customerEmail, otp);
 
     res.json({
       success: true,
       data: {
-        ...updatedItem,
-        ...(incentiveData && {
-          deliveryDistanceKm: incentiveData.distanceKm,
-          deliveryIncentiveAmount: incentiveData.incentiveAmount,
+        expiresInSeconds: 600,
+        maskedEmail: customerEmail.replace(/(.{2})(.*)(?=@)/, (gp1, gp2, gp3) => {
+          for (let i = 0; i < gp3.length; i++) {
+            gp2 += "*";
+          }
+          return gp2;
         }),
       },
+      message: "Delivery OTP sent successfully",
+    });
+  });
+
+  /**
+   * Verify delivery OTP and mark item delivered.
+   * POST /api/v1/delivery/items/:itemId/verify-delivery-otp
+   */
+  verifyDeliveryOtp = asyncHandler(async (req, res) => {
+    const { itemId } = req.params;
+    const { otp, paymentCollected, paymentCollectionMethod } = req.body || {};
+    const partnerId = req.user?.id;
+
+    if (!itemId || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Item ID and OTP are required",
+      });
+    }
+
+    const cacheKey = `${itemId}_${partnerId}`;
+    const cachedData = DeliveryController.deliveryCompletionOTPCache[cacheKey];
+    if (!cachedData) {
+      return res.status(400).json({
+        success: false,
+        message: "OTP not found or expired. Please request a new one.",
+      });
+    }
+
+    if (Date.now() > cachedData.expiresAt) {
+      delete DeliveryController.deliveryCompletionOTPCache[cacheKey];
+      return res.status(400).json({
+        success: false,
+        message: "OTP expired. Please request a new one.",
+      });
+    }
+
+    if (cachedData.otp !== otp) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid OTP",
+      });
+    }
+
+    delete DeliveryController.deliveryCompletionOTPCache[cacheKey];
+
+    const data = await this._completeDeliveryForItem({
+      itemId,
+      partnerId,
+      paymentCollected: !!paymentCollected,
+      paymentCollectionMethod: paymentCollectionMethod || null,
+    });
+
+    res.json({
+      success: true,
+      data,
+      message: "OTP verified and item marked as delivered successfully.",
+    });
+  });
+
+  /**
+   * Mark an item as delivered
+   * POST /api/v1/delivery/items/:itemId/mark-delivered
+   */
+  markDelivered = asyncHandler(async (req, res) => {
+    const { itemId } = req.params;
+    const partnerId = req.user?.id;
+    const { paymentCollected, paymentCollectionMethod, currentLat, currentLng } = req.body || {};
+
+    if (!itemId) {
+      return res.status(400).json({
+        success: false,
+        message: "Item ID is required",
+      });
+    }
+
+    logger.info("Marking item as delivered", { partnerId, itemId, paymentCollected });
+
+    const { getSupabase } = await import("../db/index.js");
+    const supabase = getSupabase();
+    const { data: item, error: itemError } = await supabase
+      .from("order_items")
+      .select(`
+        id,
+        status,
+        locked_by,
+        orders!inner(
+          id,
+          shipping_address
+        )
+      `)
+      .eq("id", itemId)
+      .eq("status", "out_for_delivery")
+      .eq("locked_by", partnerId)
+      .single();
+
+    if (itemError || !item) {
+      return res.status(404).json({
+        success: false,
+        message: "Item not found, not out for delivery, or not assigned to you.",
+      });
+    }
+
+    const shippingAddress = item.orders?.shipping_address || {};
+    const customerLat =
+      shippingAddress?.lat ??
+      shippingAddress?.coordinates?.lat ??
+      null;
+    const customerLng =
+      shippingAddress?.lng ??
+      shippingAddress?.coordinates?.lng ??
+      null;
+
+    const canCheckDistance =
+      typeof currentLat === "number" &&
+      typeof currentLng === "number" &&
+      typeof customerLat === "number" &&
+      typeof customerLng === "number";
+
+    if (!canCheckDistance) {
+      return res.status(403).json({
+        success: false,
+        requiresOtp: true,
+        message: "Delivery OTP required to complete delivery from current location.",
+      });
+    }
+
+    const distanceMeters = calculateDistanceMeters(
+      currentLat,
+      currentLng,
+      customerLat,
+      customerLng
+    );
+
+    if (distanceMeters > 200) {
+      return res.status(403).json({
+        success: false,
+        requiresOtp: true,
+        distanceMeters: Math.round(distanceMeters),
+        thresholdMeters: 200,
+        message: "Delivery OTP required when you are more than 200m away.",
+      });
+    }
+
+    const data = await this._completeDeliveryForItem({
+      itemId,
+      partnerId,
+      paymentCollected: !!paymentCollected,
+      paymentCollectionMethod: paymentCollectionMethod || null,
+    });
+
+    res.json({
+      success: true,
+      data,
       message: "Item marked as delivered successfully.",
     });
   });
@@ -558,7 +920,9 @@ export class DeliveryController {
           id,
           title,
           quantity,
-          total_price
+          total_price,
+          dispatch_id,
+          variant_id
         )
       `, { count: "exact" })
       .eq("new_status", "delivered")
@@ -617,11 +981,13 @@ export class DeliveryController {
       0
     );
 
-    const orders = (data || []).map((ev) => ({
+    // Prepare items for variant enrichment
+    const rawOrders = (data || []).map((ev) => ({
       eventId: ev.id,
       orderId: ev.order_id,
       orderItemId: ev.order_item_id,
       orderNumber: ev.orders?.order_number || '',
+      dispatchId: ev.order_items?.dispatch_id || null,
       deliveredAt: ev.created_at,
       title: ev.order_items?.title || 'Unknown Item',
       quantity: ev.order_items?.quantity || 0,
@@ -629,7 +995,23 @@ export class DeliveryController {
       orderTotalAmount: ev.orders?.total_amount || 0,
       shippingAddress: ev.orders?.shipping_address || {},
       paymentMethod: ev.orders?.payment_method || 'COD',
+      variantId: ev.order_items?.variant_id || null, // Needed for enrichment
     }));
+
+    // Enrich with variant data
+    const { OrderRepository } = await import("../repositories/orderRepository.js");
+    const orderRepo = new OrderRepository(supabase);
+    const enrichedOrders = await orderRepo.enrichItemsWithVariantData(rawOrders);
+
+    // Format variant as string if requested by frontend models
+    const orders = enrichedOrders.map(order => {
+      if (order.variant && order.variant.options) {
+        order.variantString = order.variant.options
+          .map(o => `${o.attribute?.name || 'Option'}: ${o.value}`)
+          .join(", ");
+      }
+      return order;
+    });
 
     res.json({
       success: true,
@@ -1667,6 +2049,56 @@ export class DeliveryController {
         }),
       },
       message: "Return dropoff confirmed. Item returned to warehouse successfully.",
+    });
+  });
+
+  /**
+   * Get total cash in hand for the DP (delivered COD orders not yet remitted)
+   * GET /api/v1/delivery/cash/balance
+   */
+  getCashBalance = asyncHandler(async (req, res) => {
+    const partnerId = req.user?.id;
+    const { deliveryRepository } = await import("../repositories/deliveryRepository.js");
+
+    logger.info("Fetching cash balance for DP", { partnerId });
+
+    const orders = await deliveryRepository.getCashInHandOrders(partnerId);
+    const totalAmount = orders.reduce((sum, o) => sum + (o.order_total_amount || 0), 0);
+
+    res.json({
+      success: true,
+      data: {
+        totalAmount,
+        currency: "INR",
+        count: orders.length,
+        orders,
+      },
+    });
+  });
+
+  /**
+   * Submit cash in hand for admin approval
+   * POST /api/v1/delivery/cash/submit
+   */
+  submitCashRemittance = asyncHandler(async (req, res) => {
+    const partnerId = req.user?.id;
+    const { orderIds, amount } = req.body;
+
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Order IDs are required for remittance",
+      });
+    }
+
+    const { deliveryRepository } = await import("../repositories/deliveryRepository.js");
+
+    const remittance = await deliveryRepository.submitCashRemittance(partnerId, orderIds, amount);
+
+    res.status(201).json({
+      success: true,
+      data: remittance,
+      message: "Cash remittance submitted successfully for admin approval",
     });
   });
 }
