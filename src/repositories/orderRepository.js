@@ -429,6 +429,7 @@ export class OrderRepository {
         retailerId,
         warehouseId,
         city,
+        paymentCollectionMethod,
       } = filters;
 
       const effectiveSearchTerm = searchTerm || search;
@@ -579,6 +580,7 @@ export class OrderRepository {
       if (endDate) query = query.lte("created_at", endDate);
       if (finalOrderIds) query = query.in("id", finalOrderIds);
       if (city) query = query.ilike("shipping_address->>city", `%${city}%`);
+      if (paymentCollectionMethod) query = query.eq("payment_collection_method", paymentCollectionMethod);
 
       // Apply sorting and pagination
       const ascending = sortOrder.toLowerCase() === "asc";
@@ -1342,10 +1344,27 @@ export class OrderRepository {
         return formattedOrder;
       });
 
+      // Get exact item counts per status for frontend tabs
+      const { data: statusItemsData } = await this.supabase
+        .from("order_items")
+        .select("status")
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
+      
+      const statusCounts = { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 };
+      if (statusItemsData) {
+        statusCounts.all = statusItemsData.length;
+        statusItemsData.forEach(item => {
+          if (statusCounts[item.status] !== undefined) statusCounts[item.status]++;
+          else statusCounts[item.status] = 1;
+        });
+      }
+
       const total = count || 0;
 
       return {
         orders: formattedOrders,
+        statusCounts,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -1509,10 +1528,27 @@ export class OrderRepository {
         return formattedOrder;
       });
 
+      // Get exact item counts per status for frontend tabs
+      const { data: statusItemsData } = await this.supabase
+        .from("order_items")
+        .select("status")
+        .in("warehouse_id", warehouseIds)
+        .neq("status", "initialized");
+      
+      const statusCounts = { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 };
+      if (statusItemsData) {
+        statusCounts.all = statusItemsData.length;
+        statusItemsData.forEach(item => {
+          if (statusCounts[item.status] !== undefined) statusCounts[item.status]++;
+          else statusCounts[item.status] = 1;
+        });
+      }
+
       const total = count || 0;
 
       return {
         orders: formattedOrders,
+        statusCounts,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
