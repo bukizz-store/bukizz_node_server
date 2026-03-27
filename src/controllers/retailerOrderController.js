@@ -77,7 +77,7 @@ export class RetailerOrderController {
         const result = await service.getOrdersByWarehouseId(warehouseId, retailerId, filters);
 
         // Apply bifurcation and data reduction
-        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result);
+        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result, filters.status);
 
         logger.info("Retailer fetched warehouse orders (bifurcated)", {
             retailerId,
@@ -123,7 +123,7 @@ export class RetailerOrderController {
         const result = await service.getRetailerOrders(retailerId, filters);
 
         // Apply bifurcation and data reduction
-        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result);
+        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result, filters.status);
 
         res.json({
             success: true,
@@ -364,7 +364,7 @@ export class RetailerOrderController {
         const result = await service.getOrdersByWarehouseId(warehouseId, retailerId, filters);
 
         // Apply bifurcation and data reduction
-        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result);
+        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result, status);
 
         res.json({
             success: true,
@@ -376,7 +376,7 @@ export class RetailerOrderController {
     /**
      * Internal helper to bifurcate and reduce order data for retailer portal
      */
-    _formatBifurcatedRetailerOrders(result) {
+    _formatBifurcatedRetailerOrders(result, requestedStatus) {
         if (!result || !result.orders || !Array.isArray(result.orders)) {
             return result;
         }
@@ -448,14 +448,22 @@ export class RetailerOrderController {
             });
         });
 
+        // The total number of bifurcated items across all pages for the current filter
+        // If the repository provides statusCounts, use the count for the current status (or 'all').
+        // Otherwise, fallback to the repository's total (which is the parent order count).
+        const currentStatus = requestedStatus || 'all';
+        const accurateTotal = result.statusCounts 
+            ? (result.statusCounts[currentStatus] || 0)
+            : result.pagination?.total || bifurcatedOrders.length;
+
         return {
             ...result,
             orders: bifurcatedOrders,
+            statusCounts: result.statusCounts || null,
             pagination: {
                 ...result.pagination,
-                total: bifurcatedOrders.length, // Update total to reflect bifurcated count in current page
-                // Note: accurate totalPages calculation would require bifurcation at the repo/query level
-                // For now, we update the count of the current results
+                total: accurateTotal, // Update total to reflect bifurcated count for accurate frontend pagination
+                totalPages: Math.ceil(accurateTotal / (result.pagination?.limit || 20))
             }
         };
     }
