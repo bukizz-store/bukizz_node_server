@@ -159,6 +159,17 @@ export const userSchemas = {
   refreshToken: Joi.object({
     refreshToken: Joi.string().required(),
   }),
+
+  sendOtp: Joi.object({
+    email: emailSchema,
+    fullName: Joi.string().min(2).max(255).optional(),
+    password: passwordSchema.optional(),
+  }),
+
+  verifyOtp: Joi.object({
+    email: emailSchema,
+    otp: Joi.string().length(6).pattern(/^\d{6}$/).required(),
+  }),
 };
 
 /**
@@ -1281,4 +1292,3 @@ export const dpAdminSchemas = {
     limit: Joi.number().integer().min(1).max(100).default(20),
   }),
 };
-

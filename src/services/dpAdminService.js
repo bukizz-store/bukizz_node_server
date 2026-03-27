@@ -1,5 +1,6 @@
 import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
+import { getSupabase } from "../db/index.js";
 
 /**
  * DP Admin Service Factory
@@ -213,6 +214,7 @@ export function dpAdminService({ dpAdminRepository }) {
 
     /**
      * Initiate a payout to a Delivery Partner.
+     * Uses atomic RPC to prevent race conditions and overdraw.
      */
     async initiatePayout(dpId, payoutData, adminId) {
       const profile = await dpAdminRepository.getDpProfile(dpId);
@@ -221,36 +223,43 @@ export function dpAdminService({ dpAdminRepository }) {
       }
 
       const { amount, paymentMode, referenceNumber, notes, receiptUrl } = payoutData;
-      
-      // Calculate new balance
-      const walletBalance = await dpAdminRepository._getWalletBalance(dpId);
-      
-      // Removed exact bounds checking against total since sometimes manual adj might be needed,
-      // but adding a soft check if amount > walletBalance could be good. 
-      // Let's allow slightly flexible payouts but warn. We'll strict check:
-      if (amount > walletBalance && walletBalance > 0) {
-        throw new AppError(`Payout amount exceeds wallet balance of ₹${walletBalance}`, 400);
-      } else if (walletBalance <= 0) {
-        throw new AppError(`Wallet balance is ₹0 or negative. Cannot initiate payout.`, 400);
+
+      // Build description
+      const description = `Admin Payout (${paymentMode})${referenceNumber ? ` Ref: ${referenceNumber}` : ""}${notes ? ` - ${notes}` : ""}`;
+
+      // Use atomic RPC for balance check + debit in single transaction
+      const supabase = getSupabase();
+      const { data, error } = await supabase.rpc('atomic_wallet_payout', {
+        p_dp_id: dpId,
+        p_amount: amount,
+        p_description: description,
+        p_type: 'payout'
+      });
+
+      if (error) {
+        logger.error("Atomic wallet payout RPC failed", { dpId, amount, error: error.message });
+        throw new AppError(`Payout failed: ${error.message}`, 500);
       }
 
-      // Deduct from ledger (negative amount for payout)
-      const payoutAmount = -Math.abs(amount);
-      const description = `Admin Payout (${paymentMode})${referenceNumber ? ` Ref: ${referenceNumber}` : ""}${notes ? ` - ${notes}` : ""}`;
-      
-      const transaction = await dpAdminRepository.insertLedgerTransaction(
-        dpId,
-        payoutAmount,
-        "payout",
-        description
-      );
+      const result = data?.[0];
+      if (!result?.success) {
+        const errorMsg = result?.error_message || `Insufficient balance. Current: ₹${result?.new_balance || 0}`;
+        throw new AppError(errorMsg, 400);
+      }
 
-      logger.info("Admin initiated DP payout", {
-        adminId, dpId, amount, paymentMode, receiptUrl
+      logger.info("Admin initiated DP payout (atomic)", {
+        adminId,
+        dpId,
+        amount,
+        paymentMode,
+        receiptUrl,
+        newBalance: result.new_balance,
+        transactionId: result.transaction_id
       });
 
       return {
-        transaction,
+        transaction: { id: result.transaction_id },
+        newBalance: result.new_balance,
         message: "Payout executed successfully",
       };
     },

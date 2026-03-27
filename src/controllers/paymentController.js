@@ -54,7 +54,44 @@ export class PaymentController {
             throw new AppError("Order ID is required", 400);
         }
 
-        // Get the order
+        // Atomic check: Lock order and verify payment status to prevent race conditions
+        const { data: guardResult, error: guardError } = await this.serviceClient.rpc(
+            'atomic_payment_order_guard',
+            { p_order_id: orderId }
+        );
+
+        if (guardError) {
+            logger.error("Payment order guard RPC failed", { orderId, error: guardError.message });
+            throw new AppError(`Payment validation failed: ${guardError.message}`, 500);
+        }
+
+        const guard = guardResult?.[0];
+        if (!guard?.can_proceed) {
+            if (guard?.current_status === 'not_found') {
+                throw new AppError("Order not found", 404);
+            }
+            if (guard?.current_status === 'paid') {
+                throw new AppError("Order is already paid", 400);
+            }
+            if (guard?.existing_gateway_id) {
+                // Return existing pending payment order instead of creating new one
+                logger.info("Returning existing payment order", {
+                    orderId,
+                    existingGatewayId: guard.existing_gateway_id
+                });
+                return res.status(200).json({
+                    success: true,
+                    data: {
+                        id: guard.existing_gateway_id,
+                        existingOrder: true,
+                        key: process.env.RAZORPAY_KEY_ID,
+                    },
+                });
+            }
+            throw new AppError("Cannot create payment order for this order", 400);
+        }
+
+        // Get the order details (guard passed, so order exists and is not paid)
         const order = await this.orderRepository.findById(orderId);
 
         if (!order) {
@@ -63,10 +100,6 @@ export class PaymentController {
 
         if (order.userId !== userId) {
             throw new AppError("Access denied", 403);
-        }
-
-        if (order.paymentStatus === "paid") {
-            throw new AppError("Order is already paid", 400);
         }
 
         // Validate amount
@@ -441,8 +474,11 @@ export class PaymentController {
         const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
         if (!secret) {
-            logger.warn("RAZORPAY_WEBHOOK_SECRET is not set. Webhooks cannot be verified.");
-            return res.status(200).send("Webhook received but not verified");
+            logger.error("CRITICAL: RAZORPAY_WEBHOOK_SECRET is not configured. Rejecting unverifiable webhook.");
+            return res.status(500).json({
+                error: "Webhook verification not configured",
+                code: "WEBHOOK_SECRET_MISSING"
+            });
         }
 
         const shasum = crypto.createHmac("sha256", secret);
@@ -477,8 +513,42 @@ export class PaymentController {
 
     /**
      * Fallback: Process webhook inline when Redis is unavailable.
+     * Includes idempotency check to prevent duplicate processing.
      */
     async _processWebhookInline(event, payload) {
+        // Extract entity ID for idempotency
+        const paymentId = payload?.payment?.entity?.id;
+        const paymentLinkId = payload?.payment_link?.entity?.id;
+        const entityId = paymentId || paymentLinkId;
+
+        if (!entityId) {
+            logger.warn("Webhook inline: No entity ID for idempotency check", { event });
+            return;
+        }
+
+        // Check idempotency via RPC
+        const idempotencyKey = `webhook-${event}-${entityId}`;
+        try {
+            const { data: idempotencyCheck, error: idempError } = await this.serviceClient.rpc(
+                'check_and_mark_webhook_processed',
+                {
+                    p_idempotency_key: idempotencyKey,
+                    p_event_type: event
+                }
+            );
+
+            if (idempError) {
+                logger.error("Webhook idempotency check failed", { error: idempError.message, idempotencyKey });
+                // Continue processing - better to risk duplicate than miss payment
+            } else if (idempotencyCheck?.[0]?.already_processed) {
+                logger.info("Webhook already processed, skipping", { idempotencyKey, event });
+                return;
+            }
+        } catch (err) {
+            logger.error("Webhook idempotency RPC exception", { error: err.message, idempotencyKey });
+            // Continue processing
+        }
+
         if (event === "payment.captured") {
             const payment = payload.payment.entity;
             const orderId = payment.notes?.orderId;
@@ -618,6 +688,13 @@ export class PaymentController {
 
                 // Fallback: directly update order and items via service client
                 try {
+                    // First, get items for restocking BEFORE cancelling
+                    const { data: itemsToRestock } = await this.serviceClient
+                        .from("order_items")
+                        .select("id, product_id, variant_id, quantity, status")
+                        .eq("order_id", orderId)
+                        .neq("status", "cancelled");
+
                     await this.serviceClient
                         .from("orders")
                         .update({
@@ -636,7 +713,30 @@ export class PaymentController {
                         .eq("order_id", orderId)
                         .neq("status", "cancelled");
 
-                    logger.info("Fallback: Order and items directly cancelled", { orderId });
+                    // CRITICAL: Restock inventory using atomic RPC
+                    if (itemsToRestock && itemsToRestock.length > 0) {
+                        for (const item of itemsToRestock) {
+                            try {
+                                await this.serviceClient.rpc('atomic_increment_stock', {
+                                    p_variant_id: item.variant_id || null,
+                                    p_product_id: item.variant_id ? null : item.product_id,
+                                    p_quantity: item.quantity
+                                });
+                            } catch (restockError) {
+                                logger.error("Fallback restock item failed", {
+                                    orderId,
+                                    itemId: item.id,
+                                    error: restockError.message
+                                });
+                            }
+                        }
+                        logger.info("Fallback cancellation: Inventory restocked", {
+                            orderId,
+                            itemCount: itemsToRestock.length
+                        });
+                    }
+
+                    logger.info("Fallback: Order and items directly cancelled with restock", { orderId });
                 } catch (fallbackError) {
                     logger.error("Fallback cancellation also failed", { orderId, error: fallbackError.message });
                 }

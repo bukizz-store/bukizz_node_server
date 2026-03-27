@@ -55,6 +55,7 @@ router.put(
 router.get(
   "/verification-status",
   authenticateToken,
+  requireRoles("retailer", "admin"),
   retailerController.checkVerificationStatus,
 );
 
@@ -66,6 +67,7 @@ router.get(
 router.get(
   "/data/status",
   authenticateToken,
+  requireRoles("retailer", "admin"),
   retailerController.checkRetailerDataStatus,
 );
 
@@ -74,6 +76,11 @@ router.get(
  * @desc Get retailer profile
  * @access Private
  */
-router.get("/data", authenticateToken, retailerController.getRetailerProfile);
+router.get(
+  "/data",
+  authenticateToken,
+  requireRoles("retailer", "admin"),
+  retailerController.getRetailerProfile,
+);
 
 export default router;

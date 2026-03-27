@@ -2,7 +2,11 @@ import express from "express";
 import { validate } from "../middleware/validator.js";
 import { userSchemas as authSchemas } from "../models/schemas.js";
 import { authenticateToken } from "../middleware/authMiddleware.js";
-import { createAuthRateLimiter } from "../middleware/rateLimiter.js";
+import {
+  createAuthRateLimiter,
+  createOtpSendRateLimiter,
+  createOtpVerifyRateLimiter,
+} from "../middleware/rateLimiter.js";
 
 /**
  * Auth Routes Factory
@@ -13,6 +17,8 @@ import { createAuthRateLimiter } from "../middleware/rateLimiter.js";
 export default function authRoutes(dependencies = {}) {
   const router = express.Router();
   const authLimiter = createAuthRateLimiter();
+  const otpSendLimiter = createOtpSendRateLimiter();
+  const otpVerifyLimiter = createOtpVerifyRateLimiter();
 
   // Get the auth controller from dependencies
   const { authController } = dependencies;
@@ -63,17 +69,27 @@ export default function authRoutes(dependencies = {}) {
   router.post("/google-login", authLimiter, authController.googleLogin);
   router.post("/apple-login", authLimiter, authController.appleLogin);
   router.post("/verify-token", authController.verifyToken);
-  router.post("/send-otp", authLimiter, authController.sendOtp);
-  router.post("/verify-otp", authLimiter, authController.verifyOtp);
+  router.post(
+    "/send-otp",
+    otpSendLimiter,
+    validate(authSchemas.sendOtp),
+    authController.sendOtp
+  );
+  router.post(
+    "/verify-otp",
+    otpVerifyLimiter,
+    validate(authSchemas.verifyOtp),
+    authController.verifyOtp
+  );
   router.post(
     "/send-retailer-otp",
-    authLimiter,
+    otpSendLimiter,
     validate(authSchemas.sendRetailerOtp),
     authController.sendRetailerOtp
   );
   router.post(
     "/verify-retailer-otp",
-    authLimiter,
+    otpVerifyLimiter,
     validate(authSchemas.verifyRetailerOtp),
     authController.verifyRetailerOtp
   );

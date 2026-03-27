@@ -495,12 +495,13 @@ export class OrderService {
           imageUrl = getBestImage(productData.product_images);
         }
 
+        // Use nullish coalescing to handle null/undefined stock values safely
         const availableStock = item.variantId
-          ? product.variant_stock
-          : product.stock;
+          ? (product.variant_stock ?? 0)
+          : (product.stock ?? 0);
         const currentPrice = item.variantId
-          ? product.variant_price || product.base_price
-          : product.base_price;
+          ? (product.variant_price ?? product.base_price ?? 0)
+          : (product.base_price ?? 0);
 
         // Calculate original price (MRP) for discount calculation
         const originalPrice = item.variantId
@@ -525,10 +526,10 @@ export class OrderService {
           }
         }
 
-        // Check stock availability
-        if (availableStock < item.quantity) {
+        // Check stock availability (explicit null/undefined check before comparison)
+        if (availableStock === null || availableStock === undefined || availableStock < item.quantity) {
           stockErrors.push(
-            `${product.title}: Insufficient stock. Available: ${availableStock}, Requested: ${item.quantity}`,
+            `${product.title}: Insufficient stock. Available: ${availableStock ?? 0}, Requested: ${item.quantity}`,
           );
           continue;
         }
@@ -716,94 +717,48 @@ export class OrderService {
 
   /**
    * Update stock levels after successful order creation
+   * Uses atomic RPC to prevent race conditions and overselling
    */
   async _updateStockLevels(connection, validatedItems) {
-    for (const item of validatedItems) {
-      try {
-        if (item.variantId) {
-          // Get current variant stock first
-          const { data: variantData, error: fetchError } = await connection
-            .from("product_variants")
-            .select("stock")
-            .eq("id", item.variantId)
-            .single();
+    try {
+      // Build items array for atomic batch operation
+      const stockItems = validatedItems.map(item => ({
+        variant_id: item.variantId || null,
+        product_id: item.variantId ? null : item.productId,
+        quantity: item.quantity
+      }));
 
-          if (fetchError || !variantData) {
-            throw new Error(
-              `Failed to fetch variant stock: ${fetchError?.message || "Variant not found"
-              }`,
-            );
-          }
+      // Use atomic RPC for stock decrement with row-level locking
+      const { data, error } = await connection.rpc('atomic_batch_decrement_stock', {
+        p_items: stockItems
+      });
 
-          const newStock = variantData.stock - item.quantity;
-          if (newStock < 0) {
-            throw new Error(`Insufficient stock for variant ${item.variantId}`);
-          }
-
-          // Update variant stock
-          const { error: variantError } = await connection
-            .from("product_variants")
-            .update({
-              stock: newStock,
-            })
-            .eq("id", item.variantId);
-
-          if (variantError) {
-            throw new Error(
-              `Failed to update variant stock: ${variantError.message}`,
-            );
-          }
-        } else {
-          // Get current product stock first
-          const { data: productData, error: fetchError } = await connection
-            .from("products")
-            .select("stock")
-            .eq("id", item.productId)
-            .single();
-
-          if (fetchError || !productData) {
-            throw new Error(
-              `Failed to fetch product stock: ${fetchError?.message || "Product not found"
-              }`,
-            );
-          }
-
-          const newStock = productData.stock - item.quantity;
-          if (newStock < 0) {
-            throw new Error(`Insufficient stock for product ${item.productId}`);
-          }
-
-          // Update product stock
-          const { error: productError } = await connection
-            .from("products")
-            .update({
-              stock: newStock,
-            })
-            .eq("id", item.productId);
-
-          if (productError) {
-            throw new Error(
-              `Failed to update product stock: ${productError.message}`,
-            );
-          }
-        }
-
-        logger.debug("Stock updated successfully", {
-          productId: item.productId,
-          variantId: item.variantId,
-          quantityReduced: item.quantity,
-        });
-      } catch (error) {
-        logger.error("Failed to update stock levels", {
-          productId: item.productId,
-          variantId: item.variantId,
-          error: error.message,
-        });
-        throw new AppError(
-          `Failed to update stock levels: ${error.message}`,
-          500,
-        );
+      if (error) {
+        logger.error("Atomic stock decrement RPC failed", { error: error.message });
+        throw new AppError(`Stock update failed: ${error.message}`, 500);
       }
+
+      // Check if operation was successful
+      const result = data?.[0];
+      if (!result?.success) {
+        const failedId = result?.failed_item_id;
+        const errorMsg = result?.error_message || 'Unknown stock error';
+        logger.warn("Stock decrement failed for item", { failedId, errorMsg });
+        throw new AppError(`Insufficient stock: ${errorMsg}`, 400);
+      }
+
+      logger.debug("Stock updated atomically", {
+        itemCount: validatedItems.length,
+        items: validatedItems.map(i => ({
+          productId: i.productId,
+          variantId: i.variantId,
+          quantity: i.quantity
+        }))
+      });
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      logger.error("Failed to update stock levels", { error: error.message });
+      throw new AppError(`Failed to update stock levels: ${error.message}`, 500);
     }
   }
 
@@ -2154,151 +2109,90 @@ export class OrderService {
 
   /**
    * Restock inventory when order is cancelled
+   * Uses atomic RPC to prevent race conditions
    */
   async _restockCancelledOrder(orderId) {
-    return await this.orderRepository.executeTransaction(async (connection) => {
-      // Get order items
-      const order = await this.orderRepository.findById(orderId);
-      if (!order) {
-        throw new AppError("Order not found for restocking", 404);
+    // Get order items
+    const order = await this.orderRepository.findById(orderId);
+    if (!order) {
+      throw new AppError("Order not found for restocking", 404);
+    }
+
+    if (!order.items || order.items.length === 0) {
+      logger.info("No items to restock for order", { orderId });
+      return;
+    }
+
+    try {
+      // Build items array for atomic batch operation
+      const stockItems = order.items.map(item => ({
+        variant_id: item.variantId || null,
+        product_id: item.variantId ? null : item.productId,
+        quantity: item.quantity
+      }));
+
+      // Use atomic RPC for stock increment
+      const { createServiceClient } = await import("../db/index.js");
+      const serviceClient = createServiceClient();
+
+      const { data, error } = await serviceClient.rpc('atomic_batch_increment_stock', {
+        p_items: stockItems
+      });
+
+      if (error) {
+        logger.error("Atomic restock RPC failed", { orderId, error: error.message });
+        throw new Error(`Failed to restock inventory: ${error.message}`);
       }
 
-      // Restock each item using Supabase operations
-      for (const item of order.items) {
-        try {
-          if (item.variantId) {
-            // Get current variant stock first
-            const { data: variantData, error: fetchError } = await connection
-              .from("product_variants")
-              .select("stock")
-              .eq("id", item.variantId)
-              .single();
-
-            if (fetchError || !variantData) {
-              throw new Error(
-                `Failed to fetch variant stock for restocking: ${fetchError?.message || "Variant not found"
-                }`,
-              );
-            }
-
-            const newStock = variantData.stock + item.quantity;
-
-            // Update variant stock
-            const { error: variantError } = await connection
-              .from("product_variants")
-              .update({
-                stock: newStock,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", item.variantId);
-
-            if (variantError) {
-              throw new Error(
-                `Failed to restock variant: ${variantError.message}`,
-              );
-            }
-          } else {
-            // Get current product stock first
-            const { data: productData, error: fetchError } = await connection
-              .from("products")
-              .select("stock")
-              .eq("id", item.productId)
-              .single();
-
-            if (fetchError || !productData) {
-              throw new Error(
-                `Failed to fetch product stock for restocking: ${fetchError?.message || "Product not found"
-                }`,
-              );
-            }
-
-            const newStock = productData.stock + item.quantity;
-
-            // Update product stock
-            const { error: productError } = await connection
-              .from("products")
-              .update({
-                stock: newStock,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", item.productId);
-
-            if (productError) {
-              throw new Error(
-                `Failed to restock product: ${productError.message}`,
-              );
-            }
-          }
-        } catch (error) {
-          logger.error("Failed to restock item", {
-            productId: item.productId,
-            variantId: item.variantId,
-            quantity: item.quantity,
-            error: error.message,
-          });
-          throw error;
-        }
-      }
-
-      logger.info(
-        `Successfully restocked ${order.items.length} items for cancelled order ${orderId}`,
-      );
-    });
+      const result = data?.[0];
+      logger.info(`Successfully restocked ${result?.items_restocked || order.items.length} items for cancelled order ${orderId}`);
+    } catch (error) {
+      logger.error("Failed to restock cancelled order", {
+        orderId,
+        error: error.message,
+      });
+      throw error;
+    }
   }
 
   /**
    * Restock a single item
+   * Uses atomic RPC to prevent race conditions
    */
   async _restockCancelledItem(item) {
     if (!item) return;
 
-    return await this.orderRepository.executeTransaction(async (connection) => {
-      if (item.variantId) {
-        // Get current variant stock
-        const { data: variantData, error: fetchError } = await connection
-          .from("product_variants")
-          .select("stock")
-          .eq("id", item.variantId)
-          .single();
+    try {
+      const { createServiceClient } = await import("../db/index.js");
+      const serviceClient = createServiceClient();
 
-        if (fetchError || !variantData) {
-          throw new Error(
-            `Variant not found for restocking: ${item.variantId}`,
-          );
-        }
+      const { data, error } = await serviceClient.rpc('atomic_increment_stock', {
+        p_variant_id: item.variantId || null,
+        p_product_id: item.variantId ? null : item.productId,
+        p_quantity: item.quantity
+      });
 
-        const newStock = variantData.stock + item.quantity;
-
-        // Update variant stock
-        await connection
-          .from("product_variants")
-          .update({ stock: newStock })
-          .eq("id", item.variantId);
-      } else {
-        // Get current product stock
-        const { data: productData, error: fetchError } = await connection
-          .from("products")
-          .select("stock")
-          .eq("id", item.productId)
-          .single();
-
-        if (fetchError || !productData) {
-          throw new Error(
-            `Product not found for restocking: ${item.productId}`,
-          );
-        }
-
-        const newStock = productData.stock + item.quantity;
-
-        // Update product stock
-        await connection
-          .from("products")
-          .update({ stock: newStock })
-          .eq("id", item.productId);
+      if (error) {
+        logger.error("Atomic item restock failed", {
+          itemId: item.id,
+          variantId: item.variantId,
+          productId: item.productId,
+          error: error.message
+        });
+        throw new Error(`Failed to restock item: ${error.message}`);
       }
 
-      logger.info(`Restocked item: ${item.title} (Qty: ${item.quantity})`);
-    });
+      const result = data?.[0];
+      logger.info(`Restocked item: ${item.title} (Qty: ${item.quantity}, New Stock: ${result?.new_stock})`);
+    } catch (error) {
+      logger.error("Failed to restock item", {
+        productId: item.productId,
+        variantId: item.variantId,
+        quantity: item.quantity,
+        error: error.message,
+      });
+      throw error;
+    }
   }
 
   /**

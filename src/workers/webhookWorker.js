@@ -104,7 +104,7 @@ export async function stopWebhookWorker() {
  */
 async function handlePaymentCaptured(payload, serviceClient, orderRepository) {
     const payment = payload.payment.entity;
-    const orderId = payment.notes.orderId;
+    const orderId = payment.notes?.orderId;
 
     if (!orderId) {
         logger.warn("🪝 payment.captured: No orderId in payment notes, skipping");
@@ -207,7 +207,7 @@ async function handlePaymentCaptured(payload, serviceClient, orderRepository) {
  */
 async function handlePaymentFailed(payload, serviceClient, orderRepository) {
     const payment = payload.payment.entity;
-    const orderId = payment.notes.orderId;
+    const orderId = payment.notes?.orderId;
 
     if (!orderId) {
         logger.warn("🪝 payment.failed: No orderId in payment notes, skipping");
@@ -215,7 +215,7 @@ async function handlePaymentFailed(payload, serviceClient, orderRepository) {
     }
 
     // 1. Update transaction as failed
-    await serviceClient
+    const { error: txnError } = await serviceClient
         .from("transactions")
         .update({
             payment_id: payment.id,
@@ -226,11 +226,21 @@ async function handlePaymentFailed(payload, serviceClient, orderRepository) {
         })
         .eq("gateway_order_id", payment.order_id);
 
+    if (txnError) {
+        logger.error("🪝 payment.failed: Transaction update failed", { orderId, error: txnError.message });
+        throw new Error(`Transaction update failed: ${txnError.message}`);
+    }
+
     // 2. Set payment_status to failed
-    await serviceClient
+    const { error: orderError } = await serviceClient
         .from("orders")
         .update({ payment_status: "failed", updated_at: new Date().toISOString() })
         .eq("id", orderId);
+
+    if (orderError) {
+        logger.error("🪝 payment.failed: Order update failed", { orderId, error: orderError.message });
+        throw new Error(`Order update failed: ${orderError.message}`);
+    }
 
     // 3. Cancel order + restock if still initialized
     try {

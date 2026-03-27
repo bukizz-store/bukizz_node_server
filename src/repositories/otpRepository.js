@@ -15,13 +15,13 @@ export class OtpRepository {
      * @param {string} otp - OTP code
      * @param {object} metadata - Temporary user data
      */
-    async upsertOtp(email, otp, metadata) {
+    async upsertOtp(email, otpHash, metadata) {
         try {
             const { error } = await this.supabase
                 .from("otp_verifications")
                 .upsert({
                     email: email,
-                    otp: otp,
+                    otp: otpHash,
                     created_at: new Date().toISOString(),
                     metadata: metadata
                 });
@@ -73,6 +73,60 @@ export class OtpRepository {
             return true;
         } catch (error) {
             logger.error("Error deleting OTP:", error);
+            throw error;
+        }
+    }
+
+    /**
+     * Update OTP row by email
+     * @param {string} email - User email
+     * @param {object} updateData - Partial update payload
+     */
+    async updateByEmail(email, updateData) {
+        try {
+            const { data, error } = await this.supabase
+                .from("otp_verifications")
+                .update(updateData)
+                .ilike("email", email)
+                .select("*")
+                .single();
+
+            if (error) {
+                if (error.code === "PGRST116") return null;
+                throw error;
+            }
+
+            return data;
+        } catch (error) {
+            logger.error("Error updating OTP by email:", error);
+            throw error;
+        }
+    }
+
+    /**
+     * Atomically consume OTP row only if email + otp hash match
+     * @param {string} email - User email
+     * @param {string} otpHash - SHA-256 hash of OTP
+     * @returns {object|null} Deleted OTP row or null if no match
+     */
+    async consumeOtp(email, otpHash) {
+        try {
+            const { data, error } = await this.supabase
+                .from("otp_verifications")
+                .delete()
+                .ilike("email", email)
+                .eq("otp", otpHash)
+                .select("*")
+                .single();
+
+            if (error) {
+                if (error.code === "PGRST116") return null;
+                throw error;
+            }
+
+            return data;
+        } catch (error) {
+            logger.error("Error consuming OTP:", error);
             throw error;
         }
     }

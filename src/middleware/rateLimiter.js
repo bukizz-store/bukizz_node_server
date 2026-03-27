@@ -52,3 +52,29 @@ export function createAuthRateLimiter() {
     },
   });
 }
+
+export function createOtpSendRateLimiter() {
+  return createRateLimiter({
+    windowMs: 10 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    keyGenerator: (req) => `${req.ip}:${String(req.body?.email || "").toLowerCase()}`,
+    message: {
+      error: "Too many OTP requests. Please try again later.",
+      retryAfter: "10 minutes",
+    },
+  });
+}
+
+export function createOtpVerifyRateLimiter() {
+  return createRateLimiter({
+    windowMs: 10 * 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    keyGenerator: (req) => `${req.ip}:${String(req.body?.email || "").toLowerCase()}`,
+    message: {
+      error: "Too many OTP verification attempts. Please try again later.",
+      retryAfter: "10 minutes",
+    },
+  });
+}

@@ -618,25 +618,51 @@ export class SettlementService {
    * Calculate the net available balance from a list of ledger entries.
    * CREDIT entries add to the balance, DEBIT entries reduce it.
    * Partially settled entries contribute only their remaining amount.
+   * Uses integer arithmetic (paise) to avoid floating point precision errors.
    *
    * @param {Array<Object>} entries - Ledger rows (must have entry_type, amount, settled_amount).
    * @returns {number} Net available balance.
    */
   _calculateAvailableBalance(entries) {
-    let balance = 0;
+    if (!entries || !Array.isArray(entries)) return 0;
+
+    let balancePaise = 0; // Use paise (1 rupee = 100 paise) for precision
 
     for (const entry of entries) {
-      const remaining =
-        parseFloat(entry.amount) - parseFloat(entry.settled_amount || 0);
+      if (!entry) continue;
 
-      if (entry.entry_type === "CREDIT") {
-        balance += remaining;
-      } else if (entry.entry_type === "DEBIT") {
-        balance -= remaining;
+      const amount = parseFloat(entry.amount);
+      const settledAmount = parseFloat(entry.settled_amount || 0);
+      const entryType = entry.entry_type;
+
+      // Validate amount is a valid number
+      if (isNaN(amount)) {
+        logger.warn("Invalid amount in ledger entry", {
+          entryId: entry.id,
+          amount: entry.amount,
+        });
+        continue;
+      }
+
+      // Validate entry_type
+      if (!["CREDIT", "DEBIT"].includes(entryType)) {
+        logger.warn("Invalid entry_type in ledger entry", {
+          entryId: entry.id,
+          entryType,
+        });
+        continue;
+      }
+
+      const remainingPaise = Math.round((amount - settledAmount) * 100);
+
+      if (entryType === "CREDIT") {
+        balancePaise += remainingPaise;
+      } else if (entryType === "DEBIT") {
+        balancePaise -= remainingPaise;
       }
     }
 
-    return parseFloat(balance.toFixed(2));
+    return balancePaise / 100; // Convert back to rupees
   }
 
   /**
@@ -646,6 +672,7 @@ export class SettlementService {
    * payout amount. Each entry is either fully settled or partially settled.
    * DEBIT entries are skipped in the settlement walk (they were already
    * accounted for in the balance check).
+   * Uses integer arithmetic (paise) to avoid floating point precision errors.
    *
    * @param {Array<Object>} entries       - FIFO-ordered available entries.
    * @param {number}        payoutAmount  - Total amount to settle.
@@ -654,44 +681,47 @@ export class SettlementService {
   _calculateFifoDistribution(entries, payoutAmount) {
     const ledgerUpdates = [];
     const mappingRecords = [];
-    let remaining = payoutAmount;
+    
+    // Convert to paise (integer) to avoid floating point errors
+    let remainingPaise = Math.round(payoutAmount * 100);
 
     for (const entry of entries) {
-      if (remaining <= 0) break;
+      if (remainingPaise <= 0) break;
 
       // Only consume from CREDIT entries in a settlement walk
       if (entry.entry_type !== "CREDIT") continue;
 
-      const entryRemaining =
-        parseFloat(entry.amount) - parseFloat(entry.settled_amount || 0);
+      const entryAmountPaise = Math.round(parseFloat(entry.amount) * 100);
+      const settledAmountPaise = Math.round(parseFloat(entry.settled_amount || 0) * 100);
+      const entryRemainingPaise = entryAmountPaise - settledAmountPaise;
 
-      if (entryRemaining <= 0) continue;
+      if (entryRemainingPaise <= 0) continue;
 
-      // How much we take from this entry
-      const applied = Math.min(remaining, entryRemaining);
-      const newSettledAmount = parseFloat(entry.settled_amount || 0) + applied;
+      // How much we take from this entry (in paise)
+      const appliedPaise = Math.min(remainingPaise, entryRemainingPaise);
+      const newSettledAmountPaise = settledAmountPaise + appliedPaise;
 
-      // Determine new status
-      const isFullySettled =
-        Math.abs(newSettledAmount - parseFloat(entry.amount)) < 0.01;
+      // Fully settled only if amounts are EXACTLY equal (no floating point comparison)
+      const isFullySettled = newSettledAmountPaise === entryAmountPaise;
 
       ledgerUpdates.push({
         id: entry.id,
-        settled_amount: parseFloat(newSettledAmount.toFixed(2)),
+        settled_amount: newSettledAmountPaise / 100, // Convert back to rupees
         status: isFullySettled ? "SETTLED" : "PARTIALLY_SETTLED",
       });
 
       mappingRecords.push({
         id: uuidv4(),
         ledger_id: entry.id,
-        allocated_amount: parseFloat(applied.toFixed(2)),
+        allocated_amount: appliedPaise / 100, // Convert back to rupees
       });
 
-      remaining = parseFloat((remaining - applied).toFixed(2));
+      remainingPaise -= appliedPaise;
     }
 
     // Safety check — should never happen if balance was validated
-    if (remaining > 0.01) {
+    // Using 1 paisa tolerance (0.01 rupees)
+    if (remainingPaise > 1) {
       throw new AppError(
         "FIFO distribution error: could not fully allocate the settlement amount",
         500,

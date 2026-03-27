@@ -46,7 +46,7 @@ export function getWebhookQueue() {
  *
  * @param {string} event    - e.g. "payment.captured" or "payment.failed"
  * @param {object} payload  - The full Razorpay webhook payload
- * @returns {Promise<Job|null>} - The queued job, or null if Redis unavailable
+ * @returns {Promise<Job|null>} - The queued job, or null if Redis unavailable or missing entity ID
  */
 export async function queueWebhookEvent(event, payload) {
     if (!isRedisConfigured()) {
@@ -54,16 +54,39 @@ export async function queueWebhookEvent(event, payload) {
         return null;
     }
 
+    // Extract entity ID for idempotency - require it for reliable deduplication
+    const paymentId = payload?.payment?.entity?.id;
+    const paymentLinkId = payload?.payment_link?.entity?.id;
+    const entityId = paymentId || paymentLinkId;
+
+    if (!entityId) {
+        logger.error("Webhook payload missing entity ID, cannot ensure idempotency", {
+            event,
+            hasPayment: !!payload?.payment,
+            hasPaymentLink: !!payload?.payment_link
+        });
+        // Return null to trigger inline processing with its own idempotency check
+        return null;
+    }
+
     try {
         const queue = getWebhookQueue();
-        const job = await queue.add(event, { event, payload }, {
-            // Deduplicate by payment ID to prevent double-processing
-            jobId: `webhook-${payload?.payment?.entity?.id || Date.now()}`,
+        // Use event type + entity ID for deterministic idempotency key
+        const idempotencyKey = `webhook-${event}-${entityId}`;
+
+        const job = await queue.add(event, { event, payload, idempotencyKey }, {
+            // Deduplicate by event + payment ID to prevent double-processing
+            jobId: idempotencyKey,
         });
-        logger.info(`🪝 Queued webhook event: ${event}`, { jobId: job.id });
+        logger.info(`Queued webhook event: ${event}`, { jobId: job.id, entityId });
         return job;
     } catch (err) {
-        logger.error(`🪝 Failed to queue webhook event: ${event}`, { error: err.message });
+        // BullMQ will throw if job with same ID exists - this is expected for duplicates
+        if (err.message?.includes('Job with')) {
+            logger.info(`Webhook already queued (duplicate): ${event}`, { entityId });
+            return { id: `webhook-${event}-${entityId}`, duplicate: true };
+        }
+        logger.error(`Failed to queue webhook event: ${event}`, { error: err.message, entityId });
         return null; // Caller should process inline as fallback
     }
 }

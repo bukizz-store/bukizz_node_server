@@ -12,6 +12,10 @@ import { setupCronJobs } from "./jobs/cronJobs.js";
 import { createRateLimiter } from "./middleware/rateLimiter.js";
 import { sanitizeMiddleware } from "./middleware/validator.js";
 import cookieParser from "cookie-parser";
+import { isRedisConfigured } from "./queue/connection.js";
+import { startWebhookWorker, stopWebhookWorker } from "./workers/webhookWorker.js";
+import { startEmailWorker, stopEmailWorker } from "./workers/emailWorker.js";
+import { startOrderWorker, stopOrderWorker } from "./workers/orderWorker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -54,6 +58,16 @@ export async function createApp() {
     // Start cron jobs
     setupCronJobs();
 
+    // Start BullMQ workers if Redis is configured
+    if (isRedisConfigured()) {
+      startWebhookWorker();
+      startEmailWorker();
+      startOrderWorker();
+      logger.info("BullMQ workers started (webhook, email, order)");
+    } else {
+      logger.info("Redis not configured - workers disabled, using inline fallback");
+    }
+
     // Global error handler (must be last)
     app.use(errorHandler);
 
@@ -78,15 +92,21 @@ export async function startServer() {
     });
 
     // Graceful shutdown
-    process.on("SIGTERM", () => {
+    process.on("SIGTERM", async () => {
       logger.info("SIGTERM received, shutting down gracefully");
+      await stopWebhookWorker();
+      await stopEmailWorker();
+      await stopOrderWorker();
       server.close(() => {
         process.exit(0);
       });
     });
 
-    process.on("SIGINT", () => {
+    process.on("SIGINT", async () => {
       logger.info("SIGINT received, shutting down gracefully");
+      await stopWebhookWorker();
+      await stopEmailWorker();
+      await stopOrderWorker();
       server.close(() => {
         process.exit(0);
       });

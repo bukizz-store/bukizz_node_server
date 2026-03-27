@@ -1876,6 +1876,43 @@ export class DeliveryController {
       throw new AppError(`Failed to update item status: ${updateItemError.message}`, 500);
     }
 
+    // CRITICAL: Restock inventory for RTO'd item
+    try {
+      // Get item details for restocking
+      const { data: itemData, error: itemFetchError } = await supabase
+        .from("order_items")
+        .select("product_id, variant_id, quantity")
+        .eq("id", returnRecord.order_item_id)
+        .single();
+
+      if (!itemFetchError && itemData) {
+        const { error: restockError } = await supabase.rpc('atomic_increment_stock', {
+          p_variant_id: itemData.variant_id || null,
+          p_product_id: itemData.variant_id ? null : itemData.product_id,
+          p_quantity: itemData.quantity
+        });
+
+        if (restockError) {
+          logger.error("RTO restock failed", {
+            returnId,
+            itemId: returnRecord.order_item_id,
+            error: restockError.message
+          });
+          // Don't fail the RTO completion, but log for manual review
+        } else {
+          logger.info("RTO: Inventory restocked successfully", {
+            returnId,
+            productId: itemData.product_id,
+            variantId: itemData.variant_id,
+            quantity: itemData.quantity
+          });
+        }
+      }
+    } catch (restockErr) {
+      logger.error("RTO restock exception", { returnId, error: restockErr.message });
+      // Don't fail the RTO completion
+    }
+
     // Record order event
     const { OrderEventRepository } = await import("../repositories/orderEventRepository.js");
     const orderEventRepository = new OrderEventRepository(supabase);

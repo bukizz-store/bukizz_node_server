@@ -9,6 +9,11 @@ import OtpRepository from "../repositories/otpRepository.js";
 import { imageService } from "./imageService.js";
 import { emailService } from "./emailService.js";
 
+const OTP_EXPIRY_MS = 10 * 60 * 1000;
+const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_LOCKOUT_MS = 15 * 60 * 1000;
+
 // Initialize Supabase client
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -25,6 +30,10 @@ export class AuthService {
 
   normalizePhone(phone) {
     return String(phone || "").replace(/\D/g, "");
+  }
+
+  hashOtp(otp) {
+    return crypto.createHash("sha256").update(String(otp)).digest("hex");
   }
 
   async _uploadDeliveryPartnerFiles(files = {}, userId) {
@@ -339,12 +348,19 @@ export class AuthService {
         throw new Error("Invalid credentials");
       }
 
-      // Only check that the user is a retailer
+      // Enforce retailer-only login
       if (user.role !== "retailer") {
         throw new Error("Unauthorized: Retailer access required");
       }
 
-      // Generate tokens — no is_active / deactivation_reason checks here
+      // Enforce retailer approval/active checks
+      if (!user.is_active && user.deactivation_reason === "unauthorized") {
+        throw new Error("Unauthorized: Your account is pending admin approval. Please contact the admin.");
+      }
+      if (!user.is_active) {
+        throw new Error("Unauthorized: Your account has been deactivated. Please contact the admin.");
+      }
+
       const tokens = await this.generateTokens(user.id);
 
       // Clean response
@@ -1136,6 +1152,7 @@ export class AuthService {
 
       // Generate 6-digit OTP use secure random
       const otp = crypto.randomInt(100000, 999999).toString();
+      const otpHash = this.hashOtp(otp);
 
       // Hash password if provided (for new registration)
       let passwordHash = null;
@@ -1147,12 +1164,21 @@ export class AuthService {
       const metadata = {
         fullName,
         passwordHash,
+        attemptCount: 0,
+        blockedUntil: null,
         // Add other fields if needed
       };
 
       // Use OtpRepository to upsert OTP
       const otpRepository = new OtpRepository(this.supabase);
-      await otpRepository.upsertOtp(email, otp, metadata);
+      const existingOtp = await otpRepository.findByEmail(email);
+      if (existingOtp) {
+        const elapsed = Date.now() - new Date(existingOtp.created_at).getTime();
+        if (elapsed < OTP_RESEND_COOLDOWN_MS) {
+          throw new Error("Please wait before requesting another OTP");
+        }
+      }
+      await otpRepository.upsertOtp(email, otpHash, metadata);
 
       // Send OTP via email queue (with retries)
       await queueOtpEmail(email, otp);
@@ -1179,19 +1205,50 @@ export class AuthService {
         throw new Error("Invalid or expired OTP");
       }
 
-      if (otpRecord.otp !== otp) {
-        throw new Error("Invalid OTP");
+      const recordMetadata = otpRecord.metadata || {};
+      if (
+        recordMetadata.blockedUntil &&
+        Date.now() < new Date(recordMetadata.blockedUntil).getTime()
+      ) {
+        throw new Error("Too many invalid OTP attempts. Please request a new OTP after lockout.");
       }
 
       // Check expiration (10 minutes)
       const otpCreatedTime = new Date(otpRecord.created_at).getTime();
       const currentTime = new Date().getTime();
-      if (currentTime - otpCreatedTime > 10 * 60 * 1000) {
+      if (currentTime - otpCreatedTime > OTP_EXPIRY_MS) {
+        await otpRepository.deleteByEmail(email);
         throw new Error("OTP Expired");
       }
 
+      const otpHash = this.hashOtp(otp);
+      const consumedOtp = await otpRepository.consumeOtp(email, otpHash);
+      if (!consumedOtp) {
+        const latestOtp = await otpRepository.findByEmail(email);
+        if (!latestOtp) {
+          throw new Error("Invalid or expired OTP");
+        }
+
+        const latestMeta = latestOtp.metadata || {};
+        const attemptCount = (latestMeta.attemptCount || 0) + 1;
+        const newMetadata = {
+          ...latestMeta,
+          attemptCount,
+          ...(attemptCount >= OTP_MAX_ATTEMPTS && {
+            blockedUntil: new Date(Date.now() + OTP_LOCKOUT_MS).toISOString(),
+          }),
+        };
+
+        await otpRepository.updateByEmail(email, { metadata: newMetadata });
+
+        if (attemptCount >= OTP_MAX_ATTEMPTS) {
+          throw new Error("Too many invalid OTP attempts. Please request a new OTP after lockout.");
+        }
+        throw new Error("Invalid OTP");
+      }
+
       // Metadata contains user info
-      const { fullName, passwordHash } = otpRecord.metadata;
+      const { fullName, passwordHash } = consumedOtp.metadata || {};
 
       // Create user in users table
       const userId = uuidv4();
@@ -1222,9 +1279,6 @@ export class AuthService {
 
         if (authError) throw authError;
       }
-
-      // Delete from otp_verifications
-      await otpRepository.deleteByEmail(email);
 
       // Generate tokens
       const tokens = await this.generateTokens(userId);
@@ -1272,6 +1326,7 @@ export class AuthService {
 
       // Generate 6-digit OTP
       const otp = crypto.randomInt(100000, 999999).toString();
+      const otpHash = this.hashOtp(otp);
 
       // Hash password for storage in metadata
       const saltRounds = 12;
@@ -1282,11 +1337,20 @@ export class AuthService {
         passwordHash,
         phone: phone || null,
         role: "retailer",
+        attemptCount: 0,
+        blockedUntil: null,
       };
 
       // Upsert OTP record
       const otpRepository = new OtpRepository(this.supabase);
-      await otpRepository.upsertOtp(email, otp, metadata);
+      const existingOtp = await otpRepository.findByEmail(email);
+      if (existingOtp) {
+        const elapsed = Date.now() - new Date(existingOtp.created_at).getTime();
+        if (elapsed < OTP_RESEND_COOLDOWN_MS) {
+          throw new Error("Please wait before requesting another OTP");
+        }
+      }
+      await otpRepository.upsertOtp(email, otpHash, metadata);
 
       // Send OTP via email queue (with retries)
       await queueOtpEmail(email, otp);
@@ -1313,18 +1377,49 @@ export class AuthService {
         throw new Error("Invalid or expired OTP");
       }
 
-      if (otpRecord.otp !== otp) {
-        throw new Error("Invalid OTP");
+      const recordMetadata = otpRecord.metadata || {};
+      if (
+        recordMetadata.blockedUntil &&
+        Date.now() < new Date(recordMetadata.blockedUntil).getTime()
+      ) {
+        throw new Error("Too many invalid OTP attempts. Please request a new OTP after lockout.");
       }
 
       // Check expiration (10 minutes)
       const otpCreatedTime = new Date(otpRecord.created_at).getTime();
       const currentTime = Date.now();
-      if (currentTime - otpCreatedTime > 10 * 60 * 1000) {
+      if (currentTime - otpCreatedTime > OTP_EXPIRY_MS) {
+        await otpRepository.deleteByEmail(email);
         throw new Error("OTP Expired");
       }
 
-      const { fullName, passwordHash, phone } = otpRecord.metadata;
+      const otpHash = this.hashOtp(otp);
+      const consumedOtp = await otpRepository.consumeOtp(email, otpHash);
+      if (!consumedOtp) {
+        const latestOtp = await otpRepository.findByEmail(email);
+        if (!latestOtp) {
+          throw new Error("Invalid or expired OTP");
+        }
+
+        const latestMeta = latestOtp.metadata || {};
+        const attemptCount = (latestMeta.attemptCount || 0) + 1;
+        const newMetadata = {
+          ...latestMeta,
+          attemptCount,
+          ...(attemptCount >= OTP_MAX_ATTEMPTS && {
+            blockedUntil: new Date(Date.now() + OTP_LOCKOUT_MS).toISOString(),
+          }),
+        };
+
+        await otpRepository.updateByEmail(email, { metadata: newMetadata });
+
+        if (attemptCount >= OTP_MAX_ATTEMPTS) {
+          throw new Error("Too many invalid OTP attempts. Please request a new OTP after lockout.");
+        }
+        throw new Error("Invalid OTP");
+      }
+
+      const { fullName, passwordHash, phone } = consumedOtp.metadata || {};
 
       // Create retailer user with is_active=false, deactivation_reason=unauthorized
       const userId = uuidv4();
@@ -1358,9 +1453,6 @@ export class AuthService {
 
         if (authError) throw authError;
       }
-
-      // Delete OTP record
-      await otpRepository.deleteByEmail(email);
 
       // Generate tokens so retailer can access onboarding routes to submit profile data
       const tokens = await this.generateTokens(userId);

@@ -1597,30 +1597,54 @@ export class OrderRepository {
   }
 
   /**
-   * Claim items for a delivery partner (Soft Lock)
+   * Claim items for a delivery partner (Atomic Lock)
+   * Uses RPC to prevent race conditions when multiple DPs claim simultaneously
    */
   async claimItems(itemIds, partnerId) {
     try {
       if (!itemIds || itemIds.length === 0) return [];
-      const now = new Date().toISOString();
-      const fortyFiveMinsAgo = new Date(Date.now() - this.LOCK_TIMEOUT_MS).toISOString();
 
-      const { data, error } = await this.supabase
-        .from("order_items")
-        .update({
-          locked_by: partnerId,
-          locked_at: now
-        })
-        .in("id", itemIds)
-        .eq("status", "shipped")
-        .or(`locked_at.is.null,locked_at.lt.${fortyFiveMinsAgo},locked_by.eq.${partnerId}`)
-        .select();
+      // Use atomic RPC for claiming to prevent race conditions
+      const { data, error } = await this.supabase.rpc('atomic_claim_items', {
+        p_item_ids: itemIds,
+        p_partner_id: partnerId,
+        p_lock_timeout_ms: this.LOCK_TIMEOUT_MS
+      });
 
       if (error) {
         throw new Error(`Failed to claim items: ${error.message}`);
       }
 
-      return data.map(this._formatOrderItem.bind(this));
+      // Filter to only successfully claimed items
+      const claimedIds = (data || [])
+        .filter(r => r.success)
+        .map(r => r.claimed_item_id);
+
+      if (claimedIds.length === 0) {
+        logger.warn("No items could be claimed (all taken or invalid)", {
+          requested: itemIds.length,
+          partnerId
+        });
+        return [];
+      }
+
+      // Fetch the claimed items for return
+      const { data: claimedItems, error: fetchError } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .in("id", claimedIds);
+
+      if (fetchError) {
+        throw new Error(`Failed to fetch claimed items: ${fetchError.message}`);
+      }
+
+      logger.info("Items claimed atomically", {
+        requested: itemIds.length,
+        claimed: claimedIds.length,
+        partnerId
+      });
+
+      return (claimedItems || []).map(this._formatOrderItem.bind(this));
     } catch (error) {
       logger.error("Error claiming items:", error);
       throw error;

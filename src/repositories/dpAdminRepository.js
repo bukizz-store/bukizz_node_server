@@ -67,21 +67,53 @@ export const dpAdminRepository = {
         throw error;
       }
 
-      // Fetch wallet balances and active order counts for each DP
-      const enriched = await Promise.all(
-        (partners || []).map(async (dp) => {
-          const [balance, activeOrderCount] = await Promise.all([
-            this._getWalletBalance(dp.id),
-            this._getActiveOrderCount(dp.id),
-          ]);
+      // Fetch wallet balances and active order counts using batch RPC (N+1 query fix)
+      let enriched = partners || [];
 
-          return {
-            ...dp,
-            walletBalance: balance,
-            activeOrderCount,
-          };
-        }),
-      );
+      if (partners && partners.length > 0) {
+        const dpIds = partners.map(dp => dp.id);
+
+        try {
+          // Single batch query for all stats
+          const { data: stats, error: statsError } = await supabase.rpc('batch_get_dp_stats', {
+            p_dp_ids: dpIds
+          });
+
+          if (statsError) {
+            logger.error("Batch stats query failed, falling back to individual queries:", statsError);
+            // Fallback to individual queries (original behavior)
+            enriched = await Promise.all(
+              partners.map(async (dp) => {
+                const [balance, activeOrderCount] = await Promise.all([
+                  this._getWalletBalance(dp.id),
+                  this._getActiveOrderCount(dp.id),
+                ]);
+                return { ...dp, walletBalance: balance, activeOrderCount };
+              }),
+            );
+          } else {
+            // Map stats to partners
+            const statsMap = new Map((stats || []).map(s => [s.dp_id, s]));
+            enriched = partners.map(dp => ({
+              ...dp,
+              walletBalance: parseFloat(statsMap.get(dp.id)?.wallet_balance || 0),
+              activeOrderCount: statsMap.get(dp.id)?.active_order_count || 0,
+            }));
+          }
+        } catch (batchError) {
+          logger.error("Batch stats exception, falling back:", batchError);
+          // Fallback to individual queries
+          enriched = await Promise.all(
+            partners.map(async (dp) => {
+              const [balance, activeOrderCount] = await Promise.all([
+                this._getWalletBalance(dp.id),
+                this._getActiveOrderCount(dp.id),
+              ]);
+              return { ...dp, walletBalance: balance, activeOrderCount };
+            }),
+          );
+        }
+      }
 
       return {
         partners: enriched,

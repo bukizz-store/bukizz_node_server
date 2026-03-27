@@ -122,3 +122,6 @@ Thumbs.db
 # Test outputs
 test-results/
 coverage/
+
+#Context File
+SERVER_CONTEXT_NEW.md

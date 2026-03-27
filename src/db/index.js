@@ -70,8 +70,16 @@ export function getSupabase() {
   return supabaseClient;
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// V12 FIX: Client caching to prevent connection exhaustion
+// ═══════════════════════════════════════════════════════════════════════
+const authenticatedClientCache = new Map();
+const CLIENT_CACHE_MAX_SIZE = 100;
+const CLIENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Create an authenticated Supabase client for a specific user
+ * Implements caching to prevent connection exhaustion under high load
  * @param {string} token - JWT access token
  * @returns {SupabaseClient} Authenticated Supabase client
  */
@@ -80,10 +88,23 @@ export function createAuthenticatedClient(token) {
     return getSupabase();
   }
 
+  // Use token prefix as cache key (tokens are long, prefix is sufficient)
+  const cacheKey = token.substring(0, 32);
+  const cached = authenticatedClientCache.get(cacheKey);
+
+  // Return cached client if still valid
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.client;
+  }
+
+  // Evict oldest entry if cache is full (simple LRU-like behavior)
+  if (authenticatedClientCache.size >= CLIENT_CACHE_MAX_SIZE) {
+    const oldestKey = authenticatedClientCache.keys().next().value;
+    authenticatedClientCache.delete(oldestKey);
+  }
+
   try {
-    console.log(config.database.supabase.url,
-      config.database.supabase.serviceKey, config.database.supabase.anonKey)
-    return createClient(
+    const client = createClient(
       config.database.supabase.url,
       config.database.supabase.serviceKey,
       {
@@ -97,11 +118,29 @@ export function createAuthenticatedClient(token) {
         },
       }
     );
+
+    // Cache the client with TTL
+    authenticatedClientCache.set(cacheKey, {
+      client,
+      expiresAt: Date.now() + CLIENT_CACHE_TTL_MS
+    });
+
+    return client;
   } catch (error) {
     logger.error("Failed to create authenticated client:", error);
     return getSupabase();
   }
 }
+
+// Clean up expired clients periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of authenticatedClientCache.entries()) {
+    if (now >= value.expiresAt) {
+      authenticatedClientCache.delete(key);
+    }
+  }
+}, 60000); // Clean every minute
 
 /**
  * Create a Service Role Supabase client (Bypasses RLS)
@@ -283,11 +322,27 @@ export function getDB() {
 
 // Legacy compatibility aliases
 export const executeQuery = executeSupabaseQuery;
+
+/**
+ * @deprecated This function does NOT provide ACID transaction guarantees.
+ * Supabase JS client doesn't support multi-statement transactions.
+ *
+ * For operations requiring atomicity, use PostgreSQL RPC functions instead:
+ * - atomic_batch_decrement_stock() - for stock operations
+ * - atomic_claim_items() - for delivery partner claims
+ * - atomic_wallet_payout() - for wallet operations
+ * - check_and_mark_webhook_processed() - for idempotency
+ *
+ * See: server/src/db/migrations/atomic_functions.sql
+ *
+ * @param {Function} callback - Function receiving supabase client
+ * @returns {Promise<any>} Result of callback
+ */
 export const executeTransaction = async (callback) => {
-  // Supabase handles transactions automatically for single operations
-  // For complex transactions, use Supabase's transaction methods
   logger.warn(
-    "executeTransaction called - consider using Supabase's built-in transaction handling"
+    "DEPRECATED: executeTransaction() does NOT provide ACID guarantees. " +
+    "Use Supabase RPC functions for atomic operations. " +
+    "See: server/src/db/migrations/atomic_functions.sql"
   );
   return await callback(getSupabase());
 };
