@@ -3,6 +3,7 @@ import multer from "multer";
 import { authenticateToken } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { schoolSchemas, paramSchemas } from "../models/schemas.js";
+import { cacheMiddleware } from "../middleware/cacheControl.js";
 
 /**
  * School Routes Factory
@@ -64,6 +65,7 @@ export default function schoolRoutes(dependencies = {}) {
    */
   router.get(
     "/",
+    cacheMiddleware.catalog,
     validate(schoolSchemas.query, "query"),
     schoolController.searchSchools
   );
@@ -72,19 +74,19 @@ export default function schoolRoutes(dependencies = {}) {
    * Get school statistics
    * GET /api/v1/schools/stats
    */
-  router.get("/stats", schoolController.getSchoolStats);
+  router.get("/stats", cacheMiddleware.static, schoolController.getSchoolStats);
 
   /**
    * Get popular schools
    * GET /api/v1/schools/popular
    */
-  router.get("/popular", schoolController.getPopularSchools);
+  router.get("/popular", cacheMiddleware.catalog, schoolController.getPopularSchools);
 
   /**
    * Get nearby schools with geolocation
    * GET /api/v1/schools/nearby
    */
-  router.get("/nearby", schoolController.getNearbySchools);
+  router.get("/nearby", cacheMiddleware.details, schoolController.getNearbySchools);
 
   /**
    * Validate school data (utility endpoint)
@@ -102,6 +104,7 @@ export default function schoolRoutes(dependencies = {}) {
    */
   router.get(
     "/city/:city",
+    cacheMiddleware.catalog,
     validate(paramSchemas.city, "params"),
     schoolController.getSchoolsByCity
   );
@@ -112,6 +115,7 @@ export default function schoolRoutes(dependencies = {}) {
    */
   router.get(
     "/:id",
+    cacheMiddleware.details,
     dependencies.optionalAuth || ((req, res, next) => next()), // Fallback if optionalAuth not in dependencies
     validate(paramSchemas.id, "params"),
     schoolController.getSchool
@@ -123,6 +127,7 @@ export default function schoolRoutes(dependencies = {}) {
    */
   router.get(
     "/:id/analytics",
+    cacheMiddleware.details,
     validate(paramSchemas.id, "params"),
     schoolController.getSchoolAnalytics
   );
@@ -133,6 +138,7 @@ export default function schoolRoutes(dependencies = {}) {
    */
   router.get(
     "/:id/catalog",
+    cacheMiddleware.catalog,
     validate(paramSchemas.id, "params"),
     schoolController.getSchoolCatalog
   );

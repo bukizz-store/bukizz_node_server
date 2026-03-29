@@ -15,6 +15,7 @@ import {
 } from "../models/schemas.js";
 
 import { upload } from "../middleware/upload.js";
+import { cacheMiddleware } from "../middleware/cacheControl.js";
 
 /**
  * Product Routes Factory
@@ -41,6 +42,7 @@ export default function productRoutes(dependencies = {}) {
    */
   router.get(
     "/",
+    cacheMiddleware.catalog,
     validate(productSchemas.query, "query"),
     productController.searchProducts,
   );
@@ -163,6 +165,7 @@ export default function productRoutes(dependencies = {}) {
    */
   router.get(
     "/:id/similar",
+    cacheMiddleware.catalog,
     validate(paramSchemas.id, "params"),
     productController.getSimilarProducts,
   );
@@ -173,6 +176,7 @@ export default function productRoutes(dependencies = {}) {
    */
   router.get(
     "/:id",
+    cacheMiddleware.details,
     validate(paramSchemas.id, "params"),
     productController.getProduct,
   );
@@ -183,6 +187,7 @@ export default function productRoutes(dependencies = {}) {
    */
   router.get(
     "/:id/comprehensive",
+    cacheMiddleware.details,
     validate(paramSchemas.id, "params"),
     productController.getComprehensiveProduct,
   );
@@ -193,6 +198,7 @@ export default function productRoutes(dependencies = {}) {
    */
   router.get(
     "/:id/complete",
+    cacheMiddleware.details,
     validate(paramSchemas.id, "params"),
     productController.getProductWithDetails,
   );

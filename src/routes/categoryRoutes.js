@@ -7,6 +7,7 @@ import {
     paramSchemas
 } from "../models/schemas.js";
 import categoryController from "../controllers/categoryController.js";
+import { cacheMiddleware } from "../middleware/cacheControl.js";
 
 /**
  * Category Routes
@@ -39,6 +40,7 @@ export default function categoryRoutes() {
      */
     router.get(
         "/",
+        cacheMiddleware.static,
         validate(categorySchemas.query, "query"),
         categoryController.searchCategories
     );
@@ -49,6 +51,7 @@ export default function categoryRoutes() {
      */
     router.get(
         "/:id",
+        cacheMiddleware.static,
         validate(paramSchemas.id, "params"),
         categoryController.getCategory
     );
