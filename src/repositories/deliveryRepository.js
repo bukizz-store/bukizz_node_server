@@ -142,33 +142,50 @@ export const deliveryRepository = {
     }
   },
 
-  /**
-   * Get all cash remittances (filtered by status)
-   * @param {string} status - 'pending', 'approved', etc.
-   * @returns {Promise<Array>}
-   */
   async getAllCashRemittances(status = null) {
     try {
       const supabase = getSupabase();
       let query = supabase
         .from("dp_cash_remittances")
-        .select(`
-          *,
-          delivery_partner:dp_id (
-            id,
-            name,
-            phone
-          )
-        `)
+        .select("*")
         .order("submitted_at", { ascending: false });
 
       if (status) {
         query = query.eq("status", status);
       }
 
-      const { data, error } = await query;
+      const { data: remittances, error } = await query;
       if (error) throw error;
-      return data;
+      
+      if (!remittances || remittances.length === 0) return [];
+
+      // Extract unique dp_ids (which correspond to user IDs)
+      const dpIds = [...new Set(remittances.map(r => r.dp_id).filter(Boolean))];
+
+      if (dpIds.length === 0) return remittances;
+
+      // Fetch the corresponding users
+      const { data: users, error: usersError } = await supabase
+        .from("users")
+        .select("id, full_name, phone")
+        .in("id", dpIds);
+
+      if (usersError) {
+        logger.error("getAllCashRemittances: Failed to fetch users", usersError);
+        // Return without joined user data if it fails, but ideally it shouldn't
+        return remittances;
+      }
+
+      const userMap = new Map();
+      (users || []).forEach(u => userMap.set(u.id, u));
+
+      // Merge data
+      return remittances.map(r => ({
+        ...r,
+        delivery_partner: userMap.has(r.dp_id) 
+          ? userMap.get(r.dp_id) 
+          : { id: r.dp_id, full_name: "Unknown", phone: "N/A" }
+      }));
     } catch (error) {
       logger.error("deliveryRepository.getAllCashRemittances failed:", error);
       throw error;

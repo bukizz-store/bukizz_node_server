@@ -50,9 +50,9 @@ export const dpAdminRepository = {
       }
 
       // Apply active/inactive filter from status
-      if (filters.status === "Inactive") {
+      if (filters.status === "inactive" || filters.status === "Inactive") {
         query = query.eq("is_active", false);
-      } else if (filters.status === "Idle" || filters.status === "In-Transit") {
+      } else if (filters.status === "active" || filters.status === "Idle" || filters.status === "In-Transit") {
         query = query.eq("is_active", true);
       }
 

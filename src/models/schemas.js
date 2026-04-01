@@ -1267,11 +1267,12 @@ export const dpAdminSchemas = {
     limit: Joi.number().integer().min(1).max(100).default(20),
     city: Joi.string().max(100).optional(),
     status: Joi.string()
-      .valid("Idle", "In-Transit", "Inactive")
+      .valid("active", "inactive", "Idle", "In-Transit", "Inactive")
       .optional(),
     kycStatus: Joi.string()
       .valid("pending", "approved", "rejected")
       .optional(),
+    search: Joi.string().max(255).optional(),
   }),
 
   forceUnassign: Joi.object({
