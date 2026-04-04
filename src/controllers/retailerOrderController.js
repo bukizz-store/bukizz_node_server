@@ -76,19 +76,16 @@ export class RetailerOrderController {
         const service = getOrderService();
         const result = await service.getOrdersByWarehouseId(warehouseId, retailerId, filters);
 
-        // Apply bifurcation and data reduction
-        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result, filters.status);
-
-        logger.info("Retailer fetched warehouse orders (bifurcated)", {
+        // Data is already item-level paginated and bifurcated from the repository
+        logger.info("Retailer fetched warehouse orders", {
             retailerId,
             warehouseId,
-            originalOrdersCount: result.orders?.length || 0,
-            bifurcatedOrdersCount: bifurcatedResult.orders?.length || 0,
+            ordersCount: result.orders?.length || 0,
         });
 
         res.json({
             success: true,
-            data: bifurcatedResult,
+            data: result,
             message: "Warehouse orders retrieved successfully",
         });
     });
@@ -122,12 +119,10 @@ export class RetailerOrderController {
         const service = getOrderService();
         const result = await service.getRetailerOrders(retailerId, filters);
 
-        // Apply bifurcation and data reduction
-        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result, filters.status);
-
+        // Data is already item-level paginated and bifurcated from the repository
         res.json({
             success: true,
-            data: bifurcatedResult,
+            data: result,
             message: "Retailer orders retrieved successfully",
         });
     });
