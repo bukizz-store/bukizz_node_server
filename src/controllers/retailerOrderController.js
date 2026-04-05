@@ -113,7 +113,7 @@ export class RetailerOrderController {
             productType: req.body.productType,
             schoolIds: req.body.schoolIds || [],
             productIds: req.body.productIds || [],
-            studentNames: req.body.studentNames || [],
+            statusList: req.body.statusList || [],
         };
 
         const service = getOrderService();
@@ -156,9 +156,9 @@ export class RetailerOrderController {
     });
 
     /**
-     * GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/students
+     * GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/statuses
      */
-    getFilterStudents = asyncHandler(async (req, res) => {
+    getFilterStatuses = asyncHandler(async (req, res) => {
         const retailerId = req.user?.id;
         const { warehouseId } = req.params;
 
@@ -166,9 +166,9 @@ export class RetailerOrderController {
         if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
 
         const service = getOrderService();
-        const students = await service.getFilterStudents(warehouseId, retailerId);
+        const statuses = await service.getFilterStatuses(warehouseId, retailerId);
 
-        res.json({ success: true, data: students });
+        res.json({ success: true, data: statuses });
     });
 
     /**

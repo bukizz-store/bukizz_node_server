@@ -1405,16 +1405,16 @@ export class OrderService {
   }
 
   /**
-   * Get student names for filter dropdown
+   * Get statuses for filter dropdown
    */
-  async getFilterStudents(warehouseId, retailerId) {
+  async getFilterStatuses(warehouseId, retailerId) {
     try {
       if (!warehouseId) throw new AppError("Warehouse ID is required", 400);
       const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
       if (!isLinked) throw new AppError("Access denied.", 403);
-      return await this.orderRepository.getFilterStudents(warehouseId);
+      return await this.orderRepository.getFilterStatuses(warehouseId);
     } catch (error) {
-      logger.error("Error getting filter students:", error);
+      logger.error("Error getting filter statuses:", error);
       throw error;
     }
   }

@@ -96,14 +96,14 @@ router.get(
 );
 
 /**
- * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/students
- * @desc    Get student names with user names for filter dropdown
+ * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/statuses
+ * @desc    Get unique item statuses for filter dropdown
  * @access  Private (Retailer)
  */
 router.get(
-    "/warehouse/:warehouseId/filter-options/students",
+    "/warehouse/:warehouseId/filter-options/statuses",
     orderQueryLimiter,
-    retailerOrderController.getFilterStudents
+    retailerOrderController.getFilterStatuses
 );
 
 /**

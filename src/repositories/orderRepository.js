@@ -1476,54 +1476,21 @@ export class OrderRepository {
   }
 
   /**
-   * Get distinct student names with user names from orders in this warehouse
+   * Get distinct statuses from non-initialized orders in this warehouse
    */
-  async getFilterStudents(warehouseId) {
+  async getFilterStatuses(warehouseId) {
     try {
-      // Get distinct order IDs for this warehouse
+      // Get distinct statuses for items in this warehouse
       const { data: items } = await this.supabase
         .from("order_items")
-        .select("order_id")
+        .select("status")
         .eq("warehouse_id", warehouseId)
         .neq("status", "initialized");
 
-      const orderIds = [...new Set((items || []).map(i => i.order_id).filter(Boolean))];
-      if (orderIds.length === 0) return [];
-
-      // Fetch orders with shipping_address and user's full_name
-      const { data: orders } = await this.supabase
-        .from("orders")
-        .select("shipping_address, user_id")
-        .in("id", orderIds);
-
-      // Get user names
-      const userIds = [...new Set((orders || []).map(o => o.user_id).filter(Boolean))];
-      let userMap = {};
-      if (userIds.length > 0) {
-        const { data: users } = await this.supabase
-          .from("users")
-          .select("id, full_name")
-          .in("id", userIds);
-        (users || []).forEach(u => { userMap[u.id] = u.full_name; });
-      }
-
-      // Build distinct student entries
-      const studentMap = {};
-      (orders || []).forEach(order => {
-        const studentName = order.shipping_address?.studentName;
-        if (studentName && !studentMap[studentName]) {
-          studentMap[studentName] = {
-            studentName,
-            userName: userMap[order.user_id] || null,
-          };
-        }
-      });
-
-      return Object.values(studentMap).sort((a, b) =>
-        a.studentName.localeCompare(b.studentName)
-      );
+      const statuses = [...new Set((items || []).map(i => i.status).filter(Boolean))];
+      return statuses.sort();
     } catch (error) {
-      logger.error("Error getting filter students:", error);
+      logger.error("Error getting filter statuses:", error);
       throw error;
     }
   }
@@ -1547,7 +1514,7 @@ export class OrderRepository {
         productType,     // "all" | "school" | "general"
         schoolIds = [],  // array of school UUIDs
         productIds = [], // array of product UUIDs
-        studentNames = [], // array of student name strings
+        statusList = [], // array of statuses
       } = filters;
 
       const offset = (page - 1) * limit;
@@ -1669,26 +1636,7 @@ export class OrderRepository {
         if (allOrderIds.size === 0 && searchItemIds.length === 0) return emptyResult;
       }
 
-      // Student name filter (separate from search)
-      if (studentNames && studentNames.length > 0 && !searchTerm) {
-        // Find order IDs where shipping_address->>studentName matches any of the names
-        let allStudentOrderIds = [];
-        for (const name of studentNames) {
-          const { data: studentOrders } = await this.supabase
-            .from("orders")
-            .select("id")
-            .ilike("shipping_address->>studentName", `%${name}%`);
-          allStudentOrderIds.push(...(studentOrders || []).map(o => o.id));
-        }
-        const uniqueStudentOrderIds = [...new Set(allStudentOrderIds)];
-        if (uniqueStudentOrderIds.length === 0) return emptyResult;
 
-        filterOrderIds = filterOrderIds
-          ? { ...filterOrderIds, orderIds: filterOrderIds.orderIds.filter(id => uniqueStudentOrderIds.includes(id)) }
-          : { orderIds: uniqueStudentOrderIds, itemIds: [] };
-
-        if (filterOrderIds.orderIds.length === 0 && filterOrderIds.itemIds.length === 0) return emptyResult;
-      }
 
       // ── Step 2: Build the item-level query ──
       let itemsQuery = this.supabase
@@ -1696,11 +1644,26 @@ export class OrderRepository {
         .select("id, order_id", { count: "exact" })
         .eq("warehouse_id", warehouseId);
 
-      // Status filter
+      // Status filter (combines tab status and advanced statusList)
+      let activeItemQueryStatuses = [];
       if (status === 'active') {
-        itemsQuery = itemsQuery.in("status", activeStatuses);
+        activeItemQueryStatuses = activeStatuses;
       } else if (status && validOrderStatuses.includes(status)) {
-        itemsQuery = itemsQuery.eq("status", status);
+        activeItemQueryStatuses = [status];
+      }
+      
+      // If advanced statusList is provided, intersect with the base status filter if it exists
+      if (statusList && statusList.length > 0) {
+        if (activeItemQueryStatuses.length > 0) {
+          activeItemQueryStatuses = activeItemQueryStatuses.filter(s => statusList.includes(s));
+          if (activeItemQueryStatuses.length === 0) return emptyResult; // Conflict means no results
+        } else {
+          activeItemQueryStatuses = statusList;
+        }
+      }
+
+      if (activeItemQueryStatuses.length > 0) {
+        itemsQuery = itemsQuery.in("status", activeItemQueryStatuses);
       } else {
         itemsQuery = itemsQuery.neq("status", "initialized");
       }
