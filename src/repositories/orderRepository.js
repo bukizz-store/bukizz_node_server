@@ -1228,143 +1228,141 @@ export class OrderRepository {
 
       const offset = (page - 1) * limit;
       const validOrderStatuses = [
-        "processed",
-        "shipped",
-        "out_for_delivery",
-        "delivered",
-        "cancelled",
-        "refunded",
+        "processed", "shipped", "out_for_delivery", "delivered", "cancelled", "refunded",
       ];
+      const activeStatuses = ["processed", "shipped", "out_for_delivery"];
 
-      // ITEM-FIRST approach: status lives on order_items, not orders.
-      // Step 1a: Get order IDs from items directly assigned to this warehouse
-      let itemQuery = this.supabase
+      const emptyResult = {
+        orders: [],
+        statusCounts: { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 },
+        summary: { totalAmount: 0, totalItems: 0, cancelledAmount: 0, cancelledItems: 0, refundedAmount: 0, refundedItems: 0 },
+        pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
+      };
+
+      // ── ITEM-LEVEL PAGINATION ──
+      // The retailer portal displays one row per item (bifurcated), so we
+      // must paginate at the item level, not the parent-order level.
+
+      // Step 0: If search is active, pre-find matching parent order IDs
+      let searchOrderIds = null;
+      if (searchTerm) {
+        const { data: searchOrders } = await this.supabase
+          .from("orders")
+          .select("id")
+          .or(
+            `order_number.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_email.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_phone.ilike."%${searchTerm.replace(/"/g, '""')}%"`
+          );
+        searchOrderIds = (searchOrders || []).map(o => o.id);
+        if (searchOrderIds.length === 0) return emptyResult;
+      }
+
+      // Step 1: Build item-level query with status + warehouse filter
+      let itemsQuery = this.supabase
         .from("order_items")
-        .select("order_id")
+        .select("id, order_id", { count: "exact" })
         .eq("warehouse_id", warehouseId);
 
-      if (status && validOrderStatuses.includes(status)) {
-        itemQuery = itemQuery.eq("status", status);
+      if (status === 'active') {
+        itemsQuery = itemsQuery.in("status", activeStatuses);
+      } else if (status && validOrderStatuses.includes(status)) {
+        itemsQuery = itemsQuery.eq("status", status);
       } else {
-        // Always exclude initialized orders for retailer/warehouse APIs
-        itemQuery = itemQuery.neq("status", "initialized");
+        itemsQuery = itemsQuery.neq("status", "initialized");
       }
 
-      const { data: matchedItems, error: itemError } = await itemQuery;
+      if (searchOrderIds) itemsQuery = itemsQuery.in("order_id", searchOrderIds);
+      if (startDate) itemsQuery = itemsQuery.gte("created_at", startDate);
+      if (endDate) itemsQuery = itemsQuery.lte("created_at", endDate);
+
+      // Sort + paginate at item level
+      const ascending = sortOrder.toLowerCase() === "asc";
+      itemsQuery = itemsQuery
+        .order(sortBy, { ascending })
+        .range(offset, offset + limit - 1);
+
+      const { data: paginatedItemRefs, error: itemError, count: itemTotal } = await itemsQuery;
 
       if (itemError) {
-        throw new Error(
-          `Failed to fetch warehouse order items: ${itemError.message}`,
-        );
+        const errMsg = typeof itemError.message === 'string' ? itemError.message : JSON.stringify(itemError);
+        throw new Error(`Failed to fetch warehouse order items: ${errMsg}`);
       }
 
-      // Step 1b: Fallback — orders with warehouse_id at order level (for items with NULL warehouse_id)
-      const { data: fallbackOrders } = await this.supabase
-        .from("orders")
-        .select("id")
-        .eq("warehouse_id", warehouseId)
-        .neq("status", "initialized");
-      const fallbackOrderIds = (fallbackOrders || []).map((o) => o.id);
-
-      // If status filter is active, further filter fallback orders
-      // by checking if they have ANY item with that status
-      let filteredFallbackIds = fallbackOrderIds;
-      if (
-        status &&
-        validOrderStatuses.includes(status) &&
-        fallbackOrderIds.length > 0
-      ) {
-        const { data: fallbackItems } = await this.supabase
-          .from("order_items")
-          .select("order_id")
-          .in("order_id", fallbackOrderIds)
-          .eq("status", status);
-        filteredFallbackIds = (fallbackItems || []).map((i) => i.order_id);
-      }
-
-      const orderIdsFromItems = (matchedItems || []).map(
-        (item) => item.order_id,
-      );
-      const orderIds = [
-        ...new Set([...orderIdsFromItems, ...filteredFallbackIds]),
-      ];
-
-      if (orderIds.length === 0) {
+      if (!paginatedItemRefs || paginatedItemRefs.length === 0) {
+        // Still need statusCounts + summary even if current page is empty
+        const { statusCounts, summary } = await this._getStatusCountsAndSummary(warehouseId);
         return {
           orders: [],
+          statusCounts,
+          summary,
           pagination: {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            total: 0,
-            totalPages: 0,
-            hasNext: false,
-            hasPrev: false,
+            page: parseInt(page), limit: parseInt(limit),
+            total: parseInt(itemTotal || 0),
+            totalPages: Math.ceil((itemTotal || 0) / limit),
+            hasNext: false, hasPrev: page > 1,
           },
         };
       }
 
-      // 2. Fetch the parent orders (no status filter here — status is on items)
-      let query = this.supabase
+      // Step 2: Fetch full item data for this page
+      const paginatedItemIds = paginatedItemRefs.map(i => i.id);
+      const { data: fullItems } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .in("id", paginatedItemIds)
+        .order(sortBy, { ascending });
+
+      const formattedItems = (fullItems || []).map(this._formatOrderItem.bind(this));
+      const enrichedWithVariants = await this.enrichItemsWithVariantData(formattedItems);
+      const enrichedItems = await this._enrichItemsWithSchoolData(enrichedWithVariants);
+
+      // Step 3: Fetch parent orders for these items
+      const orderIdsForPage = [...new Set(paginatedItemRefs.map(i => i.order_id))];
+      const { data: parentOrders } = await this.supabase
         .from("orders")
-        .select("*", { count: "exact" })
-        .in("id", orderIds)
-        .neq("status", "initialized");
+        .select("*")
+        .in("id", orderIdsForPage);
 
-      if (paymentStatus) query = query.eq("payment_status", paymentStatus);
-      if (startDate) query = query.gte("created_at", startDate);
-      if (endDate) query = query.lte("created_at", endDate);
+      const orderMap = {};
+      (parentOrders || []).forEach(o => { orderMap[o.id] = this._formatOrder(o); });
 
-      if (searchTerm) {
-        query = query.or(
-          `order_number.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_email.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_phone.ilike."%${searchTerm.replace(/"/g, '""')}%"`,
-        );
-      }
-
-      const ascending = sortOrder.toLowerCase() === "asc";
-      query = query
-        .order(sortBy, { ascending })
-        .range(offset, offset + limit - 1);
-
-      const { data: orders, error, count } = await query;
-
-      if (error) {
-        throw new Error(`Failed to fetch warehouse orders: ${error.message}`);
-      }
-
-      // 3. Batch fetch items for all orders (only items for this warehouse)
-      const fetchedOrderIds = (orders || []).map((o) => o.id);
-      const itemsMap = await this._getWarehouseItemsForOrders(
-        fetchedOrderIds,
-        warehouseId,
-      );
-
-      const formattedOrders = (orders || []).map((order) => {
-        const formattedOrder = this._formatOrder(order);
-        formattedOrder.items = itemsMap[order.id] || [];
-        return formattedOrder;
+      // Step 4: Build bifurcated response (one entry per item)
+      const bifurcatedOrders = enrichedItems.map(item => {
+        const parent = orderMap[item._orderId] || {};
+        return {
+          id: parent.id,
+          orderNumber: parent.orderNumber,
+          userId: parent.userId,
+          status: parent.status,
+          totalAmount: parent.totalAmount,
+          currency: parent.currency || "INR",
+          paymentMethod: parent.paymentMethod,
+          paymentStatus: parent.paymentStatus,
+          shippingAddress: {
+            studentName: parent.shippingAddress?.studentName || null,
+            recipientName: parent.shippingAddress?.recipientName || null,
+            line1: parent.shippingAddress?.line1,
+            line2: parent.shippingAddress?.line2,
+            city: parent.shippingAddress?.city,
+            state: parent.shippingAddress?.state,
+            postalCode: parent.shippingAddress?.postalCode,
+            phone: parent.shippingAddress?.phone,
+          },
+          contactPhone: parent.contactPhone,
+          contactEmail: parent.contactEmail,
+          createdAt: parent.createdAt,
+          items: [item],
+        };
       });
 
-      // Get exact item counts per status for frontend tabs
-      const { data: statusItemsData } = await this.supabase
-        .from("order_items")
-        .select("status")
-        .eq("warehouse_id", warehouseId)
-        .neq("status", "initialized");
-      
-      const statusCounts = { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 };
-      if (statusItemsData) {
-        statusCounts.all = statusItemsData.length;
-        statusItemsData.forEach(item => {
-          if (statusCounts[item.status] !== undefined) statusCounts[item.status]++;
-          else statusCounts[item.status] = 1;
-        });
-      }
+      // Step 5: StatusCounts + Summary
+      const { statusCounts, summary } = await this._getStatusCountsAndSummary(warehouseId);
 
-      const total = count || 0;
+      const total = itemTotal || 0;
 
       return {
-        orders: formattedOrders,
+        orders: bifurcatedOrders,
         statusCounts,
+        summary,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -1376,6 +1374,424 @@ export class OrderRepository {
       };
     } catch (error) {
       logger.error("Error getting orders by warehouse ID:", error);
+      throw error;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // ADVANCED FILTER — OPTIONS + FILTERED QUERY
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Get distinct schools whose products appear in this warehouse's order items
+   */
+  async getFilterSchools(warehouseId) {
+    try {
+      // Get distinct product IDs from this warehouse's items
+      const { data: items } = await this.supabase
+        .from("order_items")
+        .select("product_id")
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
+
+      const productIds = [...new Set((items || []).map(i => i.product_id).filter(Boolean))];
+      if (productIds.length === 0) return [];
+
+      // Find schools linked to these products
+      const { data: links } = await this.supabase
+        .from("product_schools")
+        .select("school_id, schools(id, name)")
+        .in("product_id", productIds);
+
+      const schoolMap = {};
+      (links || []).forEach(l => {
+        if (l.schools?.id && !schoolMap[l.schools.id]) {
+          schoolMap[l.schools.id] = { id: l.schools.id, name: l.schools.name };
+        }
+      });
+
+      return Object.values(schoolMap).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+      logger.error("Error getting filter schools:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get products in warehouse, optionally filtered by school IDs
+   */
+  async getFilterProducts(warehouseId, schoolIds = []) {
+    try {
+      // Get distinct product IDs from this warehouse's items
+      const { data: items } = await this.supabase
+        .from("order_items")
+        .select("product_id")
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
+
+      let productIds = [...new Set((items || []).map(i => i.product_id).filter(Boolean))];
+      if (productIds.length === 0) return [];
+
+      // If school IDs provided, narrow to products linked to those schools
+      if (schoolIds && schoolIds.length > 0) {
+        const { data: links } = await this.supabase
+          .from("product_schools")
+          .select("product_id")
+          .in("school_id", schoolIds)
+          .in("product_id", productIds);
+
+        productIds = [...new Set((links || []).map(l => l.product_id))];
+        if (productIds.length === 0) return [];
+      }
+
+      // Fetch product details
+      const { data: products } = await this.supabase
+        .from("products")
+        .select("id, title, product_type")
+        .in("id", productIds)
+        .eq("is_active", true)
+        .order("title", { ascending: true });
+
+      // Also get school info per product for cascading
+      const { data: schoolLinks } = await this.supabase
+        .from("product_schools")
+        .select("product_id, school_id")
+        .in("product_id", productIds);
+
+      const productSchoolMap = {};
+      (schoolLinks || []).forEach(l => {
+        productSchoolMap[l.product_id] = l.school_id;
+      });
+
+      return (products || []).map(p => ({
+        id: p.id,
+        title: p.title,
+        productType: p.product_type,
+        schoolId: productSchoolMap[p.id] || null,
+      }));
+    } catch (error) {
+      logger.error("Error getting filter products:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get distinct statuses from non-initialized orders in this warehouse
+   */
+  async getFilterStatuses(warehouseId) {
+    try {
+      // Get distinct statuses for items in this warehouse
+      const { data: items } = await this.supabase
+        .from("order_items")
+        .select("status")
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
+
+      const statuses = [...new Set((items || []).map(i => i.status).filter(Boolean))];
+      return statuses.sort();
+    } catch (error) {
+      logger.error("Error getting filter statuses:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Advanced filtered query — item-level pagination with product type,
+   * school, product, student, and enhanced search filters.
+   * Used by the POST /filter endpoint.
+   */
+  async getFilteredItemsByWarehouse(warehouseId, filters = {}) {
+    try {
+      const {
+        status,
+        limit = 50,
+        page = 1,
+        startDate,
+        endDate,
+        sortBy = "created_at",
+        sortOrder = "desc",
+        searchTerm,
+        productType,     // "all" | "school" | "general"
+        schoolIds = [],  // array of school UUIDs
+        productIds = [], // array of product UUIDs
+        statusList = [], // array of statuses
+      } = filters;
+
+      const offset = (page - 1) * limit;
+      const validOrderStatuses = [
+        "processed", "shipped", "out_for_delivery", "delivered", "cancelled", "refunded",
+      ];
+      const activeStatuses = ["processed", "shipped", "out_for_delivery"];
+
+      const emptyResult = {
+        orders: [],
+        statusCounts: { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 },
+        summary: { totalAmount: 0, totalItems: 0, cancelledAmount: 0, cancelledItems: 0, refundedAmount: 0, refundedItems: 0 },
+        pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
+      };
+
+      // ── Step 0: Resolve product-level filters into a set of product IDs ──
+      let filterProductIds = null; // null = no product filter
+
+      if (productIds && productIds.length > 0) {
+        // Explicit product filter takes priority
+        filterProductIds = productIds;
+      } else if (schoolIds && schoolIds.length > 0) {
+        // Filter by school → get products linked to those schools
+        const { data: schoolLinks } = await this.supabase
+          .from("product_schools")
+          .select("product_id")
+          .in("school_id", schoolIds);
+
+        filterProductIds = (schoolLinks || []).map(l => l.product_id);
+        if (filterProductIds.length === 0) return emptyResult;
+      } else if (productType && productType !== "all") {
+        // Filter by product type: school vs general
+        // Get all product IDs that have a school link
+        const { data: schoolLinks } = await this.supabase
+          .from("product_schools")
+          .select("product_id");
+
+        const schoolProductIdSet = new Set((schoolLinks || []).map(l => l.product_id));
+
+        if (productType === "school") {
+          // Only school products — get all items in warehouse, then filter
+          const { data: warehouseItems } = await this.supabase
+            .from("order_items")
+            .select("product_id")
+            .eq("warehouse_id", warehouseId)
+            .neq("status", "initialized");
+
+          filterProductIds = [...new Set(
+            (warehouseItems || []).map(i => i.product_id).filter(id => schoolProductIdSet.has(id))
+          )];
+          if (filterProductIds.length === 0) return emptyResult;
+        } else if (productType === "general") {
+          const { data: warehouseItems } = await this.supabase
+            .from("order_items")
+            .select("product_id")
+            .eq("warehouse_id", warehouseId)
+            .neq("status", "initialized");
+
+          filterProductIds = [...new Set(
+            (warehouseItems || []).map(i => i.product_id).filter(id => !schoolProductIdSet.has(id))
+          )];
+          if (filterProductIds.length === 0) return emptyResult;
+        }
+      }
+
+      // ── Step 1: Pre-filter order IDs for search + student name ──
+      let filterOrderIds = null;
+
+      // Enhanced search: dispatch_id is on items (handled below), but order_number, studentName, userName are on orders/users
+      if (searchTerm) {
+        const escaped = searchTerm.replace(/"/g, '""');
+
+        // Search orders by order_number, studentName (JSONB), contactPhone
+        const { data: orderMatches } = await this.supabase
+          .from("orders")
+          .select("id")
+          .or(
+            `order_number.ilike."%${escaped}%",contact_email.ilike."%${escaped}%",contact_phone.ilike."%${escaped}%"`
+          );
+
+        // Search orders by studentName in shipping_address JSONB
+        const { data: studentOrderMatches } = await this.supabase
+          .from("orders")
+          .select("id")
+          .ilike("shipping_address->>studentName", `%${searchTerm}%`);
+
+        // Search users by full_name, then find their orders
+        const { data: userMatches } = await this.supabase
+          .from("users")
+          .select("id")
+          .ilike("full_name", `%${searchTerm}%`);
+
+        let userOrderIds = [];
+        if (userMatches && userMatches.length > 0) {
+          const { data: userOrders } = await this.supabase
+            .from("orders")
+            .select("id")
+            .in("user_id", userMatches.map(u => u.id));
+          userOrderIds = (userOrders || []).map(o => o.id);
+        }
+
+        // Search items by dispatch_id (handled separately in the item query below)
+        const { data: dispatchItems } = await this.supabase
+          .from("order_items")
+          .select("id")
+          .eq("warehouse_id", warehouseId)
+          .ilike("dispatch_id", `%${searchTerm}%`);
+
+        const searchItemIds = (dispatchItems || []).map(i => i.id);
+
+        // Merge all order ID matches
+        const allOrderIds = new Set([
+          ...(orderMatches || []).map(o => o.id),
+          ...(studentOrderMatches || []).map(o => o.id),
+          ...userOrderIds,
+        ]);
+
+        filterOrderIds = { orderIds: [...allOrderIds], itemIds: searchItemIds };
+        if (allOrderIds.size === 0 && searchItemIds.length === 0) return emptyResult;
+      }
+
+
+
+      // ── Step 2: Build the item-level query ──
+      let itemsQuery = this.supabase
+        .from("order_items")
+        .select("id, order_id", { count: "exact" })
+        .eq("warehouse_id", warehouseId);
+
+      // Status filter (combines tab status and advanced statusList)
+      let activeItemQueryStatuses = [];
+      if (status === 'active') {
+        activeItemQueryStatuses = activeStatuses;
+      } else if (status && validOrderStatuses.includes(status)) {
+        activeItemQueryStatuses = [status];
+      }
+      
+      // If advanced statusList is provided, intersect with the base status filter if it exists
+      if (statusList && statusList.length > 0) {
+        if (activeItemQueryStatuses.length > 0) {
+          activeItemQueryStatuses = activeItemQueryStatuses.filter(s => statusList.includes(s));
+          if (activeItemQueryStatuses.length === 0) return emptyResult; // Conflict means no results
+        } else {
+          activeItemQueryStatuses = statusList;
+        }
+      }
+
+      if (activeItemQueryStatuses.length > 0) {
+        itemsQuery = itemsQuery.in("status", activeItemQueryStatuses);
+      } else {
+        itemsQuery = itemsQuery.neq("status", "initialized");
+      }
+
+      // Product filter
+      if (filterProductIds) {
+        itemsQuery = itemsQuery.in("product_id", filterProductIds);
+      }
+
+      // Order-based filters (search results, student names)
+      if (filterOrderIds) {
+        if (filterOrderIds.itemIds.length > 0 && filterOrderIds.orderIds.length > 0) {
+          // Match items by order_id OR by direct item ID (dispatch_id search)
+          // Supabase doesn't support OR across different columns easily, so we merge
+          // We'll use the order_id filter and add dispatch_id matched items separately
+          itemsQuery = itemsQuery.or(
+            `order_id.in.(${filterOrderIds.orderIds.join(',')}),id.in.(${filterOrderIds.itemIds.join(',')})`
+          );
+        } else if (filterOrderIds.orderIds.length > 0) {
+          itemsQuery = itemsQuery.in("order_id", filterOrderIds.orderIds);
+        } else if (filterOrderIds.itemIds.length > 0) {
+          itemsQuery = itemsQuery.in("id", filterOrderIds.itemIds);
+        }
+      }
+
+      // Date filter
+      if (startDate) itemsQuery = itemsQuery.gte("created_at", startDate);
+      if (endDate) itemsQuery = itemsQuery.lte("created_at", endDate);
+
+      // Sort + paginate
+      const ascending = sortOrder.toLowerCase() === "asc";
+      itemsQuery = itemsQuery
+        .order(sortBy, { ascending })
+        .range(offset, offset + limit - 1);
+
+      const { data: paginatedItemRefs, error: itemError, count: itemTotal } = await itemsQuery;
+
+      if (itemError) {
+        const errMsg = typeof itemError.message === 'string' ? itemError.message : JSON.stringify(itemError);
+        throw new Error(`Failed to fetch filtered items: ${errMsg}`);
+      }
+
+      if (!paginatedItemRefs || paginatedItemRefs.length === 0) {
+        const { statusCounts, summary } = await this._getStatusCountsAndSummary(warehouseId);
+        return {
+          orders: [],
+          statusCounts,
+          summary,
+          pagination: {
+            page: parseInt(page), limit: parseInt(limit),
+            total: parseInt(itemTotal || 0),
+            totalPages: Math.ceil((itemTotal || 0) / limit),
+            hasNext: false, hasPrev: page > 1,
+          },
+        };
+      }
+
+      // ── Step 3: Fetch full item data ──
+      const paginatedItemIds = paginatedItemRefs.map(i => i.id);
+      const { data: fullItems } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .in("id", paginatedItemIds)
+        .order(sortBy, { ascending });
+
+      const formattedItems = (fullItems || []).map(this._formatOrderItem.bind(this));
+      const enrichedWithVariants = await this.enrichItemsWithVariantData(formattedItems);
+      const enrichedItems = await this._enrichItemsWithSchoolData(enrichedWithVariants);
+
+      // ── Step 4: Fetch parent orders ──
+      const orderIdsForPage = [...new Set(paginatedItemRefs.map(i => i.order_id))];
+      const { data: parentOrders } = await this.supabase
+        .from("orders")
+        .select("*")
+        .in("id", orderIdsForPage);
+
+      const orderMap = {};
+      (parentOrders || []).forEach(o => { orderMap[o.id] = this._formatOrder(o); });
+
+      // ── Step 5: Build bifurcated response ──
+      const bifurcatedOrders = enrichedItems.map(item => {
+        const parent = orderMap[item._orderId] || {};
+        return {
+          id: parent.id,
+          orderNumber: parent.orderNumber,
+          userId: parent.userId,
+          status: parent.status,
+          totalAmount: parent.totalAmount,
+          currency: parent.currency || "INR",
+          paymentMethod: parent.paymentMethod,
+          paymentStatus: parent.paymentStatus,
+          shippingAddress: {
+            studentName: parent.shippingAddress?.studentName || null,
+            recipientName: parent.shippingAddress?.recipientName || null,
+            line1: parent.shippingAddress?.line1,
+            line2: parent.shippingAddress?.line2,
+            city: parent.shippingAddress?.city,
+            state: parent.shippingAddress?.state,
+            postalCode: parent.shippingAddress?.postalCode,
+            phone: parent.shippingAddress?.phone,
+          },
+          contactPhone: parent.contactPhone,
+          contactEmail: parent.contactEmail,
+          createdAt: parent.createdAt,
+          items: [item],
+        };
+      });
+
+      // ── Step 6: StatusCounts + Summary ──
+      const { statusCounts, summary } = await this._getStatusCountsAndSummary(warehouseId);
+
+      const total = itemTotal || 0;
+
+      return {
+        orders: bifurcatedOrders,
+        statusCounts,
+        summary,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(total),
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error) {
+      logger.error("Error getting filtered items by warehouse:", error);
       throw error;
     }
   }
@@ -1396,159 +1812,143 @@ export class OrderRepository {
         sortOrder = "desc",
         searchTerm,
         paymentStatus,
-        validOrderStatuses = [
-          "initialized",
-          "processed",
-          "shipped",
-          "out_for_delivery",
-          "delivered",
-          "cancelled",
-          "refunded",
-        ],
       } = filters;
 
       const offset = (page - 1) * limit;
+      const validOrderStatuses = [
+        "processed", "shipped", "out_for_delivery", "delivered", "cancelled", "refunded",
+      ];
+      const activeStatuses = ["processed", "shipped", "out_for_delivery"];
 
-      if (!warehouseIds || warehouseIds.length === 0) {
-        return {
-          orders: [],
-          pagination: {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            total: 0,
-            totalPages: 0,
-            hasNext: false,
-            hasPrev: false,
-          },
-        };
+      const emptyResult = {
+        orders: [],
+        statusCounts: { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 },
+        summary: { totalAmount: 0, totalItems: 0, cancelledAmount: 0, cancelledItems: 0, refundedAmount: 0, refundedItems: 0 },
+        pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
+      };
+
+      if (!warehouseIds || warehouseIds.length === 0) return emptyResult;
+
+      // ── ITEM-LEVEL PAGINATION ──
+
+      // Step 0: If search is active, pre-find matching parent order IDs
+      let searchOrderIds = null;
+      if (searchTerm) {
+        const { data: searchOrders } = await this.supabase
+          .from("orders")
+          .select("id")
+          .or(
+            `order_number.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_email.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_phone.ilike."%${searchTerm.replace(/"/g, '""')}%"`
+          );
+        searchOrderIds = (searchOrders || []).map(o => o.id);
+        if (searchOrderIds.length === 0) return emptyResult;
       }
 
-      // ITEM-FIRST approach: status lives on order_items, not orders.
-      // Step 1a: Get order IDs from items directly assigned to these warehouses
-      let itemQuery = this.supabase
+      // Step 1: Build item-level query across all warehouses
+      let itemsQuery = this.supabase
         .from("order_items")
-        .select("order_id")
+        .select("id, order_id", { count: "exact" })
         .in("warehouse_id", warehouseIds);
 
-      if (status && validOrderStatuses.includes(status)) {
-        itemQuery = itemQuery.eq("status", status);
+      if (status === 'active') {
+        itemsQuery = itemsQuery.in("status", activeStatuses);
+      } else if (status && validOrderStatuses.includes(status)) {
+        itemsQuery = itemsQuery.eq("status", status);
       } else {
-        // Always exclude initialized orders for retailer/warehouse APIs
-        itemQuery = itemQuery.neq("status", "initialized");
+        itemsQuery = itemsQuery.neq("status", "initialized");
       }
 
-      const { data: matchedItems, error: itemError } = await itemQuery;
-
-      if (itemError) {
-        throw new Error(
-          `Failed to fetch warehouse order items: ${itemError.message}`,
-        );
-      }
-
-      // Step 1b: Fallback — orders with warehouse_id at order level
-      const { data: fallbackOrders } = await this.supabase
-        .from("orders")
-        .select("id")
-        .in("warehouse_id", warehouseIds)
-        .neq("status", "initialized");
-
-      let filteredFallbackIds = (fallbackOrders || []).map((o) => o.id);
-      if (
-        status &&
-        validOrderStatuses.includes(status) &&
-        filteredFallbackIds.length > 0
-      ) {
-        const { data: fallbackItems } = await this.supabase
-          .from("order_items")
-          .select("order_id")
-          .in("order_id", filteredFallbackIds)
-          .eq("status", status);
-        filteredFallbackIds = (fallbackItems || []).map((i) => i.order_id);
-      }
-
-      const orderIdsFromItems = (matchedItems || []).map(
-        (item) => item.order_id,
-      );
-      const orderIds = [
-        ...new Set([...orderIdsFromItems, ...filteredFallbackIds]),
-      ];
-
-      if (orderIds.length === 0) {
-        return {
-          orders: [],
-          pagination: {
-            page: parseInt(page),
-            limit: parseInt(limit),
-            total: 0,
-            totalPages: 0,
-            hasNext: false,
-            hasPrev: false,
-          },
-        };
-      }
-
-      // 2. Fetch the parent orders (no status filter — status is on items)
-      let query = this.supabase
-        .from("orders")
-        .select("*", { count: "exact" })
-        .in("id", orderIds)
-        .neq("status", "initialized");
-
-      if (paymentStatus) query = query.eq("payment_status", paymentStatus);
-      if (startDate) query = query.gte("created_at", startDate);
-      if (endDate) query = query.lte("created_at", endDate);
-
-      if (searchTerm) {
-        query = query.or(
-          `order_number.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_email.ilike."%${searchTerm.replace(/"/g, '""')}%",contact_phone.ilike."%${searchTerm.replace(/"/g, '""')}%"`,
-        );
-      }
+      if (searchOrderIds) itemsQuery = itemsQuery.in("order_id", searchOrderIds);
+      if (startDate) itemsQuery = itemsQuery.gte("created_at", startDate);
+      if (endDate) itemsQuery = itemsQuery.lte("created_at", endDate);
 
       const ascending = sortOrder.toLowerCase() === "asc";
-      query = query
+      itemsQuery = itemsQuery
         .order(sortBy, { ascending })
         .range(offset, offset + limit - 1);
 
-      const { data: orders, error, count } = await query;
+      const { data: paginatedItemRefs, error: itemError, count: itemTotal } = await itemsQuery;
 
-      if (error) {
-        throw new Error(`Failed to fetch retailer orders: ${error.message}`);
+      if (itemError) {
+        const errMsg = typeof itemError.message === 'string' ? itemError.message : JSON.stringify(itemError);
+        throw new Error(`Failed to fetch retailer order items: ${errMsg}`);
       }
 
-      // Batch fetch items (only items belonging to retailer's warehouses)
-      const fetchedOrderIds = (orders || []).map((o) => o.id);
-      const itemsMap = await this._getWarehouseItemsForOrdersBulk(
-        fetchedOrderIds,
-        warehouseIds,
-      );
+      if (!paginatedItemRefs || paginatedItemRefs.length === 0) {
+        const { statusCounts, summary } = await this._getStatusCountsAndSummaryBulk(warehouseIds);
+        return {
+          orders: [],
+          statusCounts,
+          summary,
+          pagination: {
+            page: parseInt(page), limit: parseInt(limit),
+            total: parseInt(itemTotal || 0),
+            totalPages: Math.ceil((itemTotal || 0) / limit),
+            hasNext: false, hasPrev: page > 1,
+          },
+        };
+      }
 
-      const formattedOrders = (orders || []).map((order) => {
-        const formattedOrder = this._formatOrder(order);
-        formattedOrder.items = itemsMap[order.id] || [];
-        return formattedOrder;
+      // Step 2: Fetch full item data for this page
+      const paginatedItemIds = paginatedItemRefs.map(i => i.id);
+      const { data: fullItems } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .in("id", paginatedItemIds)
+        .order(sortBy, { ascending });
+
+      const formattedItems = (fullItems || []).map(this._formatOrderItem.bind(this));
+      const enrichedWithVariants = await this.enrichItemsWithVariantData(formattedItems);
+      const enrichedItems = await this._enrichItemsWithSchoolData(enrichedWithVariants);
+
+      // Step 3: Fetch parent orders
+      const orderIdsForPage = [...new Set(paginatedItemRefs.map(i => i.order_id))];
+      const { data: parentOrders } = await this.supabase
+        .from("orders")
+        .select("*")
+        .in("id", orderIdsForPage);
+
+      const orderMap = {};
+      (parentOrders || []).forEach(o => { orderMap[o.id] = this._formatOrder(o); });
+
+      // Step 4: Build bifurcated response (one entry per item)
+      const bifurcatedOrders = enrichedItems.map(item => {
+        const parent = orderMap[item._orderId] || {};
+        return {
+          id: parent.id,
+          orderNumber: parent.orderNumber,
+          userId: parent.userId,
+          status: parent.status,
+          totalAmount: parent.totalAmount,
+          currency: parent.currency || "INR",
+          paymentMethod: parent.paymentMethod,
+          paymentStatus: parent.paymentStatus,
+          shippingAddress: {
+            studentName: parent.shippingAddress?.studentName || null,
+            recipientName: parent.shippingAddress?.recipientName || null,
+            line1: parent.shippingAddress?.line1,
+            line2: parent.shippingAddress?.line2,
+            city: parent.shippingAddress?.city,
+            state: parent.shippingAddress?.state,
+            postalCode: parent.shippingAddress?.postalCode,
+            phone: parent.shippingAddress?.phone,
+          },
+          contactPhone: parent.contactPhone,
+          contactEmail: parent.contactEmail,
+          createdAt: parent.createdAt,
+          items: [item],
+        };
       });
 
-      // Get exact item counts per status for frontend tabs
-      const { data: statusItemsData } = await this.supabase
-        .from("order_items")
-        .select("status")
-        .in("warehouse_id", warehouseIds)
-        .neq("status", "initialized");
-      
-      const statusCounts = { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 };
-      if (statusItemsData) {
-        statusCounts.all = statusItemsData.length;
-        statusItemsData.forEach(item => {
-          if (statusCounts[item.status] !== undefined) statusCounts[item.status]++;
-          else statusCounts[item.status] = 1;
-        });
-      }
+      // Step 5: StatusCounts + Summary
+      const { statusCounts, summary } = await this._getStatusCountsAndSummaryBulk(warehouseIds);
 
-      const total = count || 0;
+      const total = itemTotal || 0;
 
       return {
-        orders: formattedOrders,
+        orders: bifurcatedOrders,
         statusCounts,
+        summary,
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
@@ -2024,6 +2424,68 @@ export class OrderRepository {
       logger.error("Error getting warehouse order statistics:", error);
       throw error;
     }
+  }
+
+  /**
+   * Compute statusCounts + summary for a single warehouse (reusable helper)
+   */
+  async _getStatusCountsAndSummary(warehouseId) {
+    const { data: statusItemsData } = await this.supabase
+      .from("order_items")
+      .select("status, total_price")
+      .eq("warehouse_id", warehouseId)
+      .neq("status", "initialized");
+
+    const statusCounts = { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 };
+    const summary = {
+      totalAmount: 0, totalItems: 0,
+      cancelledAmount: 0, cancelledItems: 0,
+      refundedAmount: 0, refundedItems: 0,
+    };
+    if (statusItemsData) {
+      statusCounts.all = statusItemsData.length;
+      summary.totalItems = statusItemsData.length;
+      statusItemsData.forEach(item => {
+        const price = parseFloat(item.total_price || 0);
+        summary.totalAmount += price;
+        if (statusCounts[item.status] !== undefined) statusCounts[item.status]++;
+        else statusCounts[item.status] = 1;
+        if (item.status === 'cancelled') { summary.cancelledAmount += price; summary.cancelledItems++; }
+        if (item.status === 'refunded') { summary.refundedAmount += price; summary.refundedItems++; }
+      });
+    }
+    return { statusCounts, summary };
+  }
+
+  /**
+   * Compute statusCounts + summary for multiple warehouses (reusable helper)
+   */
+  async _getStatusCountsAndSummaryBulk(warehouseIds) {
+    const { data: statusItemsData } = await this.supabase
+      .from("order_items")
+      .select("status, total_price")
+      .in("warehouse_id", warehouseIds)
+      .neq("status", "initialized");
+
+    const statusCounts = { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 };
+    const summary = {
+      totalAmount: 0, totalItems: 0,
+      cancelledAmount: 0, cancelledItems: 0,
+      refundedAmount: 0, refundedItems: 0,
+    };
+    if (statusItemsData) {
+      statusCounts.all = statusItemsData.length;
+      summary.totalItems = statusItemsData.length;
+      statusItemsData.forEach(item => {
+        const price = parseFloat(item.total_price || 0);
+        summary.totalAmount += price;
+        if (statusCounts[item.status] !== undefined) statusCounts[item.status]++;
+        else statusCounts[item.status] = 1;
+        if (item.status === 'cancelled') { summary.cancelledAmount += price; summary.cancelledItems++; }
+        if (item.status === 'refunded') { summary.refundedAmount += price; summary.refundedItems++; }
+      });
+    }
+    return { statusCounts, summary };
   }
 
   /**

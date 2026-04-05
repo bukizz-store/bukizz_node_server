@@ -1358,6 +1358,68 @@ export class OrderService {
   }
 
   /**
+   * Get filtered orders for a warehouse (advanced POST filter)
+   */
+  async getFilteredOrdersByWarehouse(warehouseId, retailerId, filters = {}) {
+    try {
+      if (!warehouseId) throw new AppError("Warehouse ID is required", 400);
+
+      const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
+      if (!isLinked) throw new AppError("Access denied. You do not own this warehouse.", 403);
+
+      return await this.orderRepository.getFilteredItemsByWarehouse(warehouseId, filters);
+    } catch (error) {
+      logger.error("Error getting filtered orders by warehouse:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get schools for filter dropdown
+   */
+  async getFilterSchools(warehouseId, retailerId) {
+    try {
+      if (!warehouseId) throw new AppError("Warehouse ID is required", 400);
+      const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
+      if (!isLinked) throw new AppError("Access denied.", 403);
+      return await this.orderRepository.getFilterSchools(warehouseId);
+    } catch (error) {
+      logger.error("Error getting filter schools:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get products for filter dropdown
+   */
+  async getFilterProducts(warehouseId, retailerId, schoolIds = []) {
+    try {
+      if (!warehouseId) throw new AppError("Warehouse ID is required", 400);
+      const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
+      if (!isLinked) throw new AppError("Access denied.", 403);
+      return await this.orderRepository.getFilterProducts(warehouseId, schoolIds);
+    } catch (error) {
+      logger.error("Error getting filter products:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get statuses for filter dropdown
+   */
+  async getFilterStatuses(warehouseId, retailerId) {
+    try {
+      if (!warehouseId) throw new AppError("Warehouse ID is required", 400);
+      const isLinked = await this.warehouseRepository.isLinkedToRetailer(retailerId, warehouseId);
+      if (!isLinked) throw new AppError("Access denied.", 403);
+      return await this.orderRepository.getFilterStatuses(warehouseId);
+    } catch (error) {
+      logger.error("Error getting filter statuses:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Get all orders across all warehouses for a retailer
    * Aggregates orders from all retailer's warehouses
    */

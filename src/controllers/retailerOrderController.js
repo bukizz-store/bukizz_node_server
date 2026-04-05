@@ -76,21 +76,99 @@ export class RetailerOrderController {
         const service = getOrderService();
         const result = await service.getOrdersByWarehouseId(warehouseId, retailerId, filters);
 
-        // Apply bifurcation and data reduction
-        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result, filters.status);
-
-        logger.info("Retailer fetched warehouse orders (bifurcated)", {
+        // Data is already item-level paginated and bifurcated from the repository
+        logger.info("Retailer fetched warehouse orders", {
             retailerId,
             warehouseId,
-            originalOrdersCount: result.orders?.length || 0,
-            bifurcatedOrdersCount: bifurcatedResult.orders?.length || 0,
+            ordersCount: result.orders?.length || 0,
         });
 
         res.json({
             success: true,
-            data: bifurcatedResult,
+            data: result,
             message: "Warehouse orders retrieved successfully",
         });
+    });
+
+    /**
+     * POST /api/v1/retailer/orders/warehouse/:warehouseId/filter
+     * Advanced filtered order query
+     */
+    getFilteredOrders = asyncHandler(async (req, res) => {
+        const retailerId = req.user?.id;
+        const { warehouseId } = req.params;
+
+        if (!retailerId) return res.status(401).json({ success: false, message: "User not authenticated" });
+        if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
+
+        const filters = {
+            status: req.body.status,
+            page: parseInt(req.body.page) || 1,
+            limit: req.body.limit === 'all' ? 99999 : Math.min(parseInt(req.body.limit) || 50, 99999),
+            startDate: req.body.startDate,
+            endDate: req.body.endDate,
+            sortBy: req.body.sortBy || "created_at",
+            sortOrder: req.body.sortOrder || "desc",
+            searchTerm: req.body.search,
+            productType: req.body.productType,
+            schoolIds: req.body.schoolIds || [],
+            productIds: req.body.productIds || [],
+            statusList: req.body.statusList || [],
+        };
+
+        const service = getOrderService();
+        const result = await service.getFilteredOrdersByWarehouse(warehouseId, retailerId, filters);
+
+        res.json({ success: true, data: result, message: "Filtered orders retrieved successfully" });
+    });
+
+    /**
+     * GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/schools
+     */
+    getFilterSchools = asyncHandler(async (req, res) => {
+        const retailerId = req.user?.id;
+        const { warehouseId } = req.params;
+
+        if (!retailerId) return res.status(401).json({ success: false, message: "User not authenticated" });
+        if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
+
+        const service = getOrderService();
+        const schools = await service.getFilterSchools(warehouseId, retailerId);
+
+        res.json({ success: true, data: schools });
+    });
+
+    /**
+     * GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/products
+     */
+    getFilterProducts = asyncHandler(async (req, res) => {
+        const retailerId = req.user?.id;
+        const { warehouseId } = req.params;
+        const schoolIds = req.query.schoolIds ? req.query.schoolIds.split(",").filter(Boolean) : [];
+
+        if (!retailerId) return res.status(401).json({ success: false, message: "User not authenticated" });
+        if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
+
+        const service = getOrderService();
+        const products = await service.getFilterProducts(warehouseId, retailerId, schoolIds);
+
+        res.json({ success: true, data: products });
+    });
+
+    /**
+     * GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/statuses
+     */
+    getFilterStatuses = asyncHandler(async (req, res) => {
+        const retailerId = req.user?.id;
+        const { warehouseId } = req.params;
+
+        if (!retailerId) return res.status(401).json({ success: false, message: "User not authenticated" });
+        if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
+
+        const service = getOrderService();
+        const statuses = await service.getFilterStatuses(warehouseId, retailerId);
+
+        res.json({ success: true, data: statuses });
     });
 
     /**
@@ -122,12 +200,10 @@ export class RetailerOrderController {
         const service = getOrderService();
         const result = await service.getRetailerOrders(retailerId, filters);
 
-        // Apply bifurcation and data reduction
-        const bifurcatedResult = this._formatBifurcatedRetailerOrders(result, filters.status);
-
+        // Data is already item-level paginated and bifurcated from the repository
         res.json({
             success: true,
-            data: bifurcatedResult,
+            data: result,
             message: "Retailer orders retrieved successfully",
         });
     });
