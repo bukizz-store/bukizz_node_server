@@ -91,6 +91,87 @@ export class RetailerOrderController {
     });
 
     /**
+     * POST /api/v1/retailer/orders/warehouse/:warehouseId/filter
+     * Advanced filtered order query
+     */
+    getFilteredOrders = asyncHandler(async (req, res) => {
+        const retailerId = req.user?.id;
+        const { warehouseId } = req.params;
+
+        if (!retailerId) return res.status(401).json({ success: false, message: "User not authenticated" });
+        if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
+
+        const filters = {
+            status: req.body.status,
+            page: parseInt(req.body.page) || 1,
+            limit: req.body.limit === 'all' ? 99999 : Math.min(parseInt(req.body.limit) || 50, 99999),
+            startDate: req.body.startDate,
+            endDate: req.body.endDate,
+            sortBy: req.body.sortBy || "created_at",
+            sortOrder: req.body.sortOrder || "desc",
+            searchTerm: req.body.search,
+            productType: req.body.productType,
+            schoolIds: req.body.schoolIds || [],
+            productIds: req.body.productIds || [],
+            studentNames: req.body.studentNames || [],
+        };
+
+        const service = getOrderService();
+        const result = await service.getFilteredOrdersByWarehouse(warehouseId, retailerId, filters);
+
+        res.json({ success: true, data: result, message: "Filtered orders retrieved successfully" });
+    });
+
+    /**
+     * GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/schools
+     */
+    getFilterSchools = asyncHandler(async (req, res) => {
+        const retailerId = req.user?.id;
+        const { warehouseId } = req.params;
+
+        if (!retailerId) return res.status(401).json({ success: false, message: "User not authenticated" });
+        if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
+
+        const service = getOrderService();
+        const schools = await service.getFilterSchools(warehouseId, retailerId);
+
+        res.json({ success: true, data: schools });
+    });
+
+    /**
+     * GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/products
+     */
+    getFilterProducts = asyncHandler(async (req, res) => {
+        const retailerId = req.user?.id;
+        const { warehouseId } = req.params;
+        const schoolIds = req.query.schoolIds ? req.query.schoolIds.split(",").filter(Boolean) : [];
+
+        if (!retailerId) return res.status(401).json({ success: false, message: "User not authenticated" });
+        if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
+
+        const service = getOrderService();
+        const products = await service.getFilterProducts(warehouseId, retailerId, schoolIds);
+
+        res.json({ success: true, data: products });
+    });
+
+    /**
+     * GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/students
+     */
+    getFilterStudents = asyncHandler(async (req, res) => {
+        const retailerId = req.user?.id;
+        const { warehouseId } = req.params;
+
+        if (!retailerId) return res.status(401).json({ success: false, message: "User not authenticated" });
+        if (!warehouseId) return res.status(400).json({ success: false, message: "Warehouse ID is required" });
+
+        const service = getOrderService();
+        const students = await service.getFilterStudents(warehouseId, retailerId);
+
+        res.json({ success: true, data: students });
+    });
+
+    /**
      * Get all orders across all retailer warehouses
      * GET /api/v1/retailer/orders
      */

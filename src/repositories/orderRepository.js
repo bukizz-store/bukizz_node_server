@@ -1378,6 +1378,461 @@ export class OrderRepository {
     }
   }
 
+  // ═══════════════════════════════════════════════════════════════
+  // ADVANCED FILTER — OPTIONS + FILTERED QUERY
+  // ═══════════════════════════════════════════════════════════════
+
+  /**
+   * Get distinct schools whose products appear in this warehouse's order items
+   */
+  async getFilterSchools(warehouseId) {
+    try {
+      // Get distinct product IDs from this warehouse's items
+      const { data: items } = await this.supabase
+        .from("order_items")
+        .select("product_id")
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
+
+      const productIds = [...new Set((items || []).map(i => i.product_id).filter(Boolean))];
+      if (productIds.length === 0) return [];
+
+      // Find schools linked to these products
+      const { data: links } = await this.supabase
+        .from("product_schools")
+        .select("school_id, schools(id, name)")
+        .in("product_id", productIds);
+
+      const schoolMap = {};
+      (links || []).forEach(l => {
+        if (l.schools?.id && !schoolMap[l.schools.id]) {
+          schoolMap[l.schools.id] = { id: l.schools.id, name: l.schools.name };
+        }
+      });
+
+      return Object.values(schoolMap).sort((a, b) => a.name.localeCompare(b.name));
+    } catch (error) {
+      logger.error("Error getting filter schools:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get products in warehouse, optionally filtered by school IDs
+   */
+  async getFilterProducts(warehouseId, schoolIds = []) {
+    try {
+      // Get distinct product IDs from this warehouse's items
+      const { data: items } = await this.supabase
+        .from("order_items")
+        .select("product_id")
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
+
+      let productIds = [...new Set((items || []).map(i => i.product_id).filter(Boolean))];
+      if (productIds.length === 0) return [];
+
+      // If school IDs provided, narrow to products linked to those schools
+      if (schoolIds && schoolIds.length > 0) {
+        const { data: links } = await this.supabase
+          .from("product_schools")
+          .select("product_id")
+          .in("school_id", schoolIds)
+          .in("product_id", productIds);
+
+        productIds = [...new Set((links || []).map(l => l.product_id))];
+        if (productIds.length === 0) return [];
+      }
+
+      // Fetch product details
+      const { data: products } = await this.supabase
+        .from("products")
+        .select("id, title, product_type")
+        .in("id", productIds)
+        .eq("is_active", true)
+        .order("title", { ascending: true });
+
+      // Also get school info per product for cascading
+      const { data: schoolLinks } = await this.supabase
+        .from("product_schools")
+        .select("product_id, school_id")
+        .in("product_id", productIds);
+
+      const productSchoolMap = {};
+      (schoolLinks || []).forEach(l => {
+        productSchoolMap[l.product_id] = l.school_id;
+      });
+
+      return (products || []).map(p => ({
+        id: p.id,
+        title: p.title,
+        productType: p.product_type,
+        schoolId: productSchoolMap[p.id] || null,
+      }));
+    } catch (error) {
+      logger.error("Error getting filter products:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get distinct student names with user names from orders in this warehouse
+   */
+  async getFilterStudents(warehouseId) {
+    try {
+      // Get distinct order IDs for this warehouse
+      const { data: items } = await this.supabase
+        .from("order_items")
+        .select("order_id")
+        .eq("warehouse_id", warehouseId)
+        .neq("status", "initialized");
+
+      const orderIds = [...new Set((items || []).map(i => i.order_id).filter(Boolean))];
+      if (orderIds.length === 0) return [];
+
+      // Fetch orders with shipping_address and user's full_name
+      const { data: orders } = await this.supabase
+        .from("orders")
+        .select("shipping_address, user_id")
+        .in("id", orderIds);
+
+      // Get user names
+      const userIds = [...new Set((orders || []).map(o => o.user_id).filter(Boolean))];
+      let userMap = {};
+      if (userIds.length > 0) {
+        const { data: users } = await this.supabase
+          .from("users")
+          .select("id, full_name")
+          .in("id", userIds);
+        (users || []).forEach(u => { userMap[u.id] = u.full_name; });
+      }
+
+      // Build distinct student entries
+      const studentMap = {};
+      (orders || []).forEach(order => {
+        const studentName = order.shipping_address?.studentName;
+        if (studentName && !studentMap[studentName]) {
+          studentMap[studentName] = {
+            studentName,
+            userName: userMap[order.user_id] || null,
+          };
+        }
+      });
+
+      return Object.values(studentMap).sort((a, b) =>
+        a.studentName.localeCompare(b.studentName)
+      );
+    } catch (error) {
+      logger.error("Error getting filter students:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Advanced filtered query — item-level pagination with product type,
+   * school, product, student, and enhanced search filters.
+   * Used by the POST /filter endpoint.
+   */
+  async getFilteredItemsByWarehouse(warehouseId, filters = {}) {
+    try {
+      const {
+        status,
+        limit = 50,
+        page = 1,
+        startDate,
+        endDate,
+        sortBy = "created_at",
+        sortOrder = "desc",
+        searchTerm,
+        productType,     // "all" | "school" | "general"
+        schoolIds = [],  // array of school UUIDs
+        productIds = [], // array of product UUIDs
+        studentNames = [], // array of student name strings
+      } = filters;
+
+      const offset = (page - 1) * limit;
+      const validOrderStatuses = [
+        "processed", "shipped", "out_for_delivery", "delivered", "cancelled", "refunded",
+      ];
+      const activeStatuses = ["processed", "shipped", "out_for_delivery"];
+
+      const emptyResult = {
+        orders: [],
+        statusCounts: { all: 0, processed: 0, shipped: 0, out_for_delivery: 0, delivered: 0, cancelled: 0, refunded: 0 },
+        summary: { totalAmount: 0, totalItems: 0, cancelledAmount: 0, cancelledItems: 0, refundedAmount: 0, refundedItems: 0 },
+        pagination: { page: parseInt(page), limit: parseInt(limit), total: 0, totalPages: 0, hasNext: false, hasPrev: false },
+      };
+
+      // ── Step 0: Resolve product-level filters into a set of product IDs ──
+      let filterProductIds = null; // null = no product filter
+
+      if (productIds && productIds.length > 0) {
+        // Explicit product filter takes priority
+        filterProductIds = productIds;
+      } else if (schoolIds && schoolIds.length > 0) {
+        // Filter by school → get products linked to those schools
+        const { data: schoolLinks } = await this.supabase
+          .from("product_schools")
+          .select("product_id")
+          .in("school_id", schoolIds);
+
+        filterProductIds = (schoolLinks || []).map(l => l.product_id);
+        if (filterProductIds.length === 0) return emptyResult;
+      } else if (productType && productType !== "all") {
+        // Filter by product type: school vs general
+        // Get all product IDs that have a school link
+        const { data: schoolLinks } = await this.supabase
+          .from("product_schools")
+          .select("product_id");
+
+        const schoolProductIdSet = new Set((schoolLinks || []).map(l => l.product_id));
+
+        if (productType === "school") {
+          // Only school products — get all items in warehouse, then filter
+          const { data: warehouseItems } = await this.supabase
+            .from("order_items")
+            .select("product_id")
+            .eq("warehouse_id", warehouseId)
+            .neq("status", "initialized");
+
+          filterProductIds = [...new Set(
+            (warehouseItems || []).map(i => i.product_id).filter(id => schoolProductIdSet.has(id))
+          )];
+          if (filterProductIds.length === 0) return emptyResult;
+        } else if (productType === "general") {
+          const { data: warehouseItems } = await this.supabase
+            .from("order_items")
+            .select("product_id")
+            .eq("warehouse_id", warehouseId)
+            .neq("status", "initialized");
+
+          filterProductIds = [...new Set(
+            (warehouseItems || []).map(i => i.product_id).filter(id => !schoolProductIdSet.has(id))
+          )];
+          if (filterProductIds.length === 0) return emptyResult;
+        }
+      }
+
+      // ── Step 1: Pre-filter order IDs for search + student name ──
+      let filterOrderIds = null;
+
+      // Enhanced search: dispatch_id is on items (handled below), but order_number, studentName, userName are on orders/users
+      if (searchTerm) {
+        const escaped = searchTerm.replace(/"/g, '""');
+
+        // Search orders by order_number, studentName (JSONB), contactPhone
+        const { data: orderMatches } = await this.supabase
+          .from("orders")
+          .select("id")
+          .or(
+            `order_number.ilike."%${escaped}%",contact_email.ilike."%${escaped}%",contact_phone.ilike."%${escaped}%"`
+          );
+
+        // Search orders by studentName in shipping_address JSONB
+        const { data: studentOrderMatches } = await this.supabase
+          .from("orders")
+          .select("id")
+          .ilike("shipping_address->>studentName", `%${searchTerm}%`);
+
+        // Search users by full_name, then find their orders
+        const { data: userMatches } = await this.supabase
+          .from("users")
+          .select("id")
+          .ilike("full_name", `%${searchTerm}%`);
+
+        let userOrderIds = [];
+        if (userMatches && userMatches.length > 0) {
+          const { data: userOrders } = await this.supabase
+            .from("orders")
+            .select("id")
+            .in("user_id", userMatches.map(u => u.id));
+          userOrderIds = (userOrders || []).map(o => o.id);
+        }
+
+        // Search items by dispatch_id (handled separately in the item query below)
+        const { data: dispatchItems } = await this.supabase
+          .from("order_items")
+          .select("id")
+          .eq("warehouse_id", warehouseId)
+          .ilike("dispatch_id", `%${searchTerm}%`);
+
+        const searchItemIds = (dispatchItems || []).map(i => i.id);
+
+        // Merge all order ID matches
+        const allOrderIds = new Set([
+          ...(orderMatches || []).map(o => o.id),
+          ...(studentOrderMatches || []).map(o => o.id),
+          ...userOrderIds,
+        ]);
+
+        filterOrderIds = { orderIds: [...allOrderIds], itemIds: searchItemIds };
+        if (allOrderIds.size === 0 && searchItemIds.length === 0) return emptyResult;
+      }
+
+      // Student name filter (separate from search)
+      if (studentNames && studentNames.length > 0 && !searchTerm) {
+        // Find order IDs where shipping_address->>studentName matches any of the names
+        let allStudentOrderIds = [];
+        for (const name of studentNames) {
+          const { data: studentOrders } = await this.supabase
+            .from("orders")
+            .select("id")
+            .ilike("shipping_address->>studentName", `%${name}%`);
+          allStudentOrderIds.push(...(studentOrders || []).map(o => o.id));
+        }
+        const uniqueStudentOrderIds = [...new Set(allStudentOrderIds)];
+        if (uniqueStudentOrderIds.length === 0) return emptyResult;
+
+        filterOrderIds = filterOrderIds
+          ? { ...filterOrderIds, orderIds: filterOrderIds.orderIds.filter(id => uniqueStudentOrderIds.includes(id)) }
+          : { orderIds: uniqueStudentOrderIds, itemIds: [] };
+
+        if (filterOrderIds.orderIds.length === 0 && filterOrderIds.itemIds.length === 0) return emptyResult;
+      }
+
+      // ── Step 2: Build the item-level query ──
+      let itemsQuery = this.supabase
+        .from("order_items")
+        .select("id, order_id", { count: "exact" })
+        .eq("warehouse_id", warehouseId);
+
+      // Status filter
+      if (status === 'active') {
+        itemsQuery = itemsQuery.in("status", activeStatuses);
+      } else if (status && validOrderStatuses.includes(status)) {
+        itemsQuery = itemsQuery.eq("status", status);
+      } else {
+        itemsQuery = itemsQuery.neq("status", "initialized");
+      }
+
+      // Product filter
+      if (filterProductIds) {
+        itemsQuery = itemsQuery.in("product_id", filterProductIds);
+      }
+
+      // Order-based filters (search results, student names)
+      if (filterOrderIds) {
+        if (filterOrderIds.itemIds.length > 0 && filterOrderIds.orderIds.length > 0) {
+          // Match items by order_id OR by direct item ID (dispatch_id search)
+          // Supabase doesn't support OR across different columns easily, so we merge
+          // We'll use the order_id filter and add dispatch_id matched items separately
+          itemsQuery = itemsQuery.or(
+            `order_id.in.(${filterOrderIds.orderIds.join(',')}),id.in.(${filterOrderIds.itemIds.join(',')})`
+          );
+        } else if (filterOrderIds.orderIds.length > 0) {
+          itemsQuery = itemsQuery.in("order_id", filterOrderIds.orderIds);
+        } else if (filterOrderIds.itemIds.length > 0) {
+          itemsQuery = itemsQuery.in("id", filterOrderIds.itemIds);
+        }
+      }
+
+      // Date filter
+      if (startDate) itemsQuery = itemsQuery.gte("created_at", startDate);
+      if (endDate) itemsQuery = itemsQuery.lte("created_at", endDate);
+
+      // Sort + paginate
+      const ascending = sortOrder.toLowerCase() === "asc";
+      itemsQuery = itemsQuery
+        .order(sortBy, { ascending })
+        .range(offset, offset + limit - 1);
+
+      const { data: paginatedItemRefs, error: itemError, count: itemTotal } = await itemsQuery;
+
+      if (itemError) {
+        const errMsg = typeof itemError.message === 'string' ? itemError.message : JSON.stringify(itemError);
+        throw new Error(`Failed to fetch filtered items: ${errMsg}`);
+      }
+
+      if (!paginatedItemRefs || paginatedItemRefs.length === 0) {
+        const { statusCounts, summary } = await this._getStatusCountsAndSummary(warehouseId);
+        return {
+          orders: [],
+          statusCounts,
+          summary,
+          pagination: {
+            page: parseInt(page), limit: parseInt(limit),
+            total: parseInt(itemTotal || 0),
+            totalPages: Math.ceil((itemTotal || 0) / limit),
+            hasNext: false, hasPrev: page > 1,
+          },
+        };
+      }
+
+      // ── Step 3: Fetch full item data ──
+      const paginatedItemIds = paginatedItemRefs.map(i => i.id);
+      const { data: fullItems } = await this.supabase
+        .from("order_items")
+        .select("*")
+        .in("id", paginatedItemIds)
+        .order(sortBy, { ascending });
+
+      const formattedItems = (fullItems || []).map(this._formatOrderItem.bind(this));
+      const enrichedWithVariants = await this.enrichItemsWithVariantData(formattedItems);
+      const enrichedItems = await this._enrichItemsWithSchoolData(enrichedWithVariants);
+
+      // ── Step 4: Fetch parent orders ──
+      const orderIdsForPage = [...new Set(paginatedItemRefs.map(i => i.order_id))];
+      const { data: parentOrders } = await this.supabase
+        .from("orders")
+        .select("*")
+        .in("id", orderIdsForPage);
+
+      const orderMap = {};
+      (parentOrders || []).forEach(o => { orderMap[o.id] = this._formatOrder(o); });
+
+      // ── Step 5: Build bifurcated response ──
+      const bifurcatedOrders = enrichedItems.map(item => {
+        const parent = orderMap[item._orderId] || {};
+        return {
+          id: parent.id,
+          orderNumber: parent.orderNumber,
+          userId: parent.userId,
+          status: parent.status,
+          totalAmount: parent.totalAmount,
+          currency: parent.currency || "INR",
+          paymentMethod: parent.paymentMethod,
+          paymentStatus: parent.paymentStatus,
+          shippingAddress: {
+            studentName: parent.shippingAddress?.studentName || null,
+            recipientName: parent.shippingAddress?.recipientName || null,
+            line1: parent.shippingAddress?.line1,
+            line2: parent.shippingAddress?.line2,
+            city: parent.shippingAddress?.city,
+            state: parent.shippingAddress?.state,
+            postalCode: parent.shippingAddress?.postalCode,
+            phone: parent.shippingAddress?.phone,
+          },
+          contactPhone: parent.contactPhone,
+          contactEmail: parent.contactEmail,
+          createdAt: parent.createdAt,
+          items: [item],
+        };
+      });
+
+      // ── Step 6: StatusCounts + Summary ──
+      const { statusCounts, summary } = await this._getStatusCountsAndSummary(warehouseId);
+
+      const total = itemTotal || 0;
+
+      return {
+        orders: bifurcatedOrders,
+        statusCounts,
+        summary,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total: parseInt(total),
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
+        },
+      };
+    } catch (error) {
+      logger.error("Error getting filtered items by warehouse:", error);
+      throw error;
+    }
+  }
+
   /**
    * Get orders for multiple warehouses belonging to a retailer
    * Aggregates orders across all warehouses owned by the retailer
