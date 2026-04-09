@@ -49,7 +49,8 @@ class EmailService {
   }
 
   async sendVerificationEmail(email, token, firstName) {
-    const verificationUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/verify-email?token=${token}`;
+    const frontendUrl = process.env.FRONTEND_URL || (process.env.NODE_ENV === "production" ? "https://bukizz.in" : "http://localhost:3000");
+    const verificationUrl = `${frontendUrl}/verify-email?token=${token}`;
 
     const mailOptions = {
       from: '"Bukizz Support" <support@bukizz.in>',
@@ -305,7 +306,8 @@ class EmailService {
 
 
   async sendForgotPasswordEmail(email, resetToken, firstName) {
-    const resetUrl = `${process.env.FRONTEND_URL || "http://localhost:3000"}/reset-password?token=${resetToken}`;
+    const frontendUrl = process.env.FRONTEND_URL || (process.env.NODE_ENV === "production" ? "https://bukizz.in" : "http://localhost:3000");
+    const resetUrl = `${frontendUrl}/reset-password?token=${resetToken}`;
 
     try {
       const response = await fetch("https://services.theerrors.in/api/services/email/send", {

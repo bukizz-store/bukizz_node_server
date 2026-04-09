@@ -299,6 +299,19 @@ export const productVariantSchemas = {
     optionValue3: optionalUuidSchema,
     metadata: Joi.object().optional(),
   }),
+
+  bulkUpdateStock: Joi.object({
+    updates: Joi.array()
+      .items(
+        Joi.object({
+          variantId: uuidSchema,
+          quantity: Joi.number().integer().min(0).required(),
+          operation: Joi.string().valid("set", "increment", "decrement").default("set"),
+        }),
+      )
+      .min(1)
+      .required(),
+  }),
 };
 
 /**

@@ -11,6 +11,9 @@ export const config = {
   // Server configuration
   port: parseInt(process.env.PORT) || 5000,
   env: process.env.NODE_ENV || "development",
+  
+  // Frontend URL (for email links like password reset)
+  frontendUrl: process.env.FRONTEND_URL || (process.env.NODE_ENV === "production" ? "https://bukizz.in" : "http://localhost:3000"),
 
   // Database configuration
   database: {

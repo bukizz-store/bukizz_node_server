@@ -201,6 +201,36 @@ export class DeliveryController {
   });
 
   /**
+   * Get all claimed (locked but not picked up) orders for the current partner.
+   * Used to show scan timer on home page.
+   * GET /api/v1/delivery/my-claimed-orders
+   */
+  getMyClaimedOrders = asyncHandler(async (req, res) => {
+    const partnerId = req.user?.id;
+
+    if (!partnerId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    logger.info("Fetching claimed orders for partner", { partnerId });
+
+    const { OrderRepository } = await import("../repositories/orderRepository.js");
+    const { getSupabase } = await import("../db/index.js");
+    const orderRepository = new OrderRepository(getSupabase());
+
+    const claimedOrders = await orderRepository.getMyClaimedOrders(partnerId);
+
+    res.json({
+      success: true,
+      data: claimedOrders,
+      message: `Found ${claimedOrders.length} claimed orders`,
+    });
+  });
+
+  /**
    * Confirm pickup after QR scan — transitions item from shipped → out_for_delivery
    * POST /api/v1/delivery/confirm-pickup
    * Body: { orderItemId, orderId }

@@ -464,6 +464,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/variants/bulk-stock-update",
     authenticateToken,
+    validate(productVariantSchemas.bulkUpdateStock),
     productController.bulkUpdateVariantStocks,
   );
 

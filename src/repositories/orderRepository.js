@@ -1892,6 +1892,60 @@ export class OrderRepository {
   }
 
   /**
+   * Get all claimed (locked, not yet picked up) orders for a partner.
+   * These are items with status='shipped', locked_by=partnerId, and non-expired lock.
+   * Used to show the scan timer on the home page.
+   */
+  async getMyClaimedOrders(partnerId) {
+    try {
+      const lockThreshold = new Date(Date.now() - this.LOCK_TIMEOUT_MS).toISOString();
+
+      const { data: items, error } = await this.supabase
+        .from("order_items")
+        .select(`
+          *,
+          orders!inner (
+            id,
+            order_number,
+            shipping_address,
+            contact_phone,
+            contact_email,
+            payment_method,
+            total_amount
+          )
+        `)
+        .eq("status", "shipped")
+        .eq("locked_by", partnerId)
+        .gte("locked_at", lockThreshold)
+        .order("locked_at", { ascending: true });
+
+      if (error) {
+        throw new Error(`Failed to fetch claimed orders: ${error.message}`);
+      }
+
+      // Format the items similar to getAvailableWarehouseItems (include orderInfo)
+      const formattedItems = (items || []).map((item) => {
+        const formatted = this._formatOrderItem(item);
+        formatted.orderInfo = {
+          id: item.orders.id,
+          orderNumber: item.orders.order_number,
+          shippingAddress: item.orders.shipping_address,
+          contactPhone: item.orders.contact_phone,
+          contactEmail: item.orders.contact_email,
+          paymentMethod: item.orders.payment_method,
+          orderTotalAmount: item.orders.total_amount,
+        };
+        return formatted;
+      });
+
+      return await this._enrichItemsWithVariantData(formattedItems);
+    } catch (error) {
+      logger.error("Error fetching claimed orders:", error);
+      throw error;
+    }
+  }
+
+  /**
    * Get order statistics for a specific warehouse
    */
   async getWarehouseOrderStats(warehouseId, filters = {}) {

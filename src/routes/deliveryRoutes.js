@@ -33,6 +33,14 @@ export default function deliveryRoutes(dependencies = {}) {
     deliveryController.claimItems
   );
 
+  // Route to get all claimed (locked but not picked up) orders for current partner
+  // Used for scan timer on home page
+  router.get(
+    "/my-claimed-orders",
+    authenticateToken,
+    deliveryController.getMyClaimedOrders
+  );
+
   // Route to send OTP for warehouse arrival verification
   router.post(
     "/warehouses/:warehouseId/arrival-otp",
