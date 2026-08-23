@@ -1,8 +1,7 @@
 import express from "express";
-
 import {
   authenticateToken,
-  requireRoles,
+  requirePermissions,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import {
@@ -23,17 +22,14 @@ import { upload } from "../middleware/upload.js";
  */
 export default function productRoutes(dependencies = {}) {
   const router = express.Router();
+  const { productController, accessService } = dependencies;
 
-  // Get the product controller from dependencies
-  const { productController } = dependencies;
-
-  // If no productController is provided, return empty router
   if (!productController) {
     console.error("ProductController not found in dependencies");
     return router;
   }
 
-  // Public product routes (no authentication required)
+  // ─── Public Product Routes (Customer Browsing & Search) ─────────────
 
   /**
    * Search/Get all products
@@ -43,32 +39,6 @@ export default function productRoutes(dependencies = {}) {
     "/",
     validate(productSchemas.query, "query"),
     productController.searchProducts,
-  );
-
-  /**
-   * Get products for warehouse (Retailer Dashboard)
-   * GET /api/v1/products/warehouse
-   */
-  router.get(
-    "/warehouse",
-    authenticateToken,
-    // requireRoles("retailer"),
-    validate(headerSchemas.warehouseHeaders, "headers"),
-    validate(productSchemas.warehouseProductQuery, "query"),
-    productController.getProductsByWarehouse,
-  );
-
-  /**
-   * Get low-stock products for a warehouse (Retailer Dashboard)
-   * GET /api/v1/products/warehouse/low-stock
-   * Header: x-warehouse-id
-   * Query: threshold (default 10), outOfStockOnly ("true"/"false")
-   */
-  router.get(
-    "/warehouse/low-stock",
-    authenticateToken,
-    validate(headerSchemas.warehouseHeaders, "headers"),
-    productController.getLowStockProducts,
   );
 
   /**
@@ -99,7 +69,7 @@ export default function productRoutes(dependencies = {}) {
    */
   router.get(
     "/variants/search",
-    validate(productVariantSchemas.update, "query"), // Using update schema as it's optional fields
+    validate(productVariantSchemas.update, "query"),
     productController.searchVariants,
   );
 
@@ -267,7 +237,32 @@ export default function productRoutes(dependencies = {}) {
     productController.getProductBrands,
   );
 
-  // Protected routes (require authentication)
+  // ─── Protected Routes (RBAC & Scoped Guarding) ──────────────────────
+
+  /**
+   * Get products for warehouse (Retailer Dashboard)
+   * GET /api/v1/products/warehouse
+   */
+  router.get(
+    "/warehouse",
+    authenticateToken,
+    requirePermissions(accessService, "products:read"),
+    validate(headerSchemas.warehouseHeaders, "headers"),
+    validate(productSchemas.warehouseProductQuery, "query"),
+    productController.getProductsByWarehouse,
+  );
+
+  /**
+   * Get low-stock products for a warehouse (Retailer Dashboard)
+   * GET /api/v1/products/warehouse/low-stock
+   */
+  router.get(
+    "/warehouse/low-stock",
+    authenticateToken,
+    requirePermissions(accessService, "products:read"),
+    validate(headerSchemas.warehouseHeaders, "headers"),
+    productController.getLowStockProducts,
+  );
 
   /**
    * Admin Search Products
@@ -276,6 +271,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/admin/search",
     authenticateToken,
+    requirePermissions(accessService, "products:read"),
     validate(productSchemas.adminQuery, "query"),
     productController.adminSearchProducts,
   );
@@ -287,6 +283,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/",
     authenticateToken,
+    requirePermissions(accessService, "products:manage"),
     validate(productSchemas.create),
     productController.createProduct,
   );
@@ -298,6 +295,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/comprehensive",
     authenticateToken,
+    requirePermissions(accessService, "products:manage"),
     productController.createComprehensiveProduct,
   );
 
@@ -308,6 +306,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/addon/comprehensive",
     authenticateToken,
+    requirePermissions(accessService, "products:addons:manage"),
     productController.createComprehensiveAddonProduct,
   );
 
@@ -318,6 +317,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/:id",
     authenticateToken,
+    requirePermissions(accessService, "products:manage"),
     validate(paramSchemas.id, "params"),
     validate(productSchemas.update),
     productController.updateProduct,
@@ -330,6 +330,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/:id/comprehensive",
     authenticateToken,
+    requirePermissions(accessService, "products:manage"),
     validate(paramSchemas.id, "params"),
     productController.updateComprehensiveProduct,
   );
@@ -341,17 +342,19 @@ export default function productRoutes(dependencies = {}) {
   router.delete(
     "/:id",
     authenticateToken,
+    requirePermissions(accessService, "products:manage"),
     validate(paramSchemas.id, "params"),
     productController.deleteProduct,
   );
 
   /**
-   * Activate product
+   * Activate / Approve product
    * PATCH /api/v1/products/:id/activate
    */
   router.patch(
     "/:id/activate",
     authenticateToken,
+    requirePermissions(accessService, "approvals:products:manage"),
     validate(paramSchemas.id, "params"),
     productController.activateProduct,
   );
@@ -363,6 +366,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/:id/options",
     authenticateToken,
+    requirePermissions(accessService, "products:options:manage"),
     validate(paramSchemas.id, "params"),
     validate(productOptionSchemas.createAttribute),
     productController.addProductOption,
@@ -375,6 +379,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/options/:attributeId/values",
     authenticateToken,
+    requirePermissions(accessService, "products:options:manage"),
     validate(paramSchemas.attributeId, "params"),
     validate(productOptionSchemas.createValue),
     productController.addProductOptionValue,
@@ -387,6 +392,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/options/:attributeId",
     authenticateToken,
+    requirePermissions(accessService, "products:options:manage"),
     validate(paramSchemas.attributeId, "params"),
     validate(productOptionSchemas.updateAttribute),
     productController.updateProductOption,
@@ -399,6 +405,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/options/values/:valueId",
     authenticateToken,
+    requirePermissions(accessService, "products:options:manage"),
     validate(paramSchemas.valueId, "params"),
     validate(productOptionSchemas.updateValue),
     productController.updateProductOptionValue,
@@ -411,6 +418,7 @@ export default function productRoutes(dependencies = {}) {
   router.delete(
     "/options/:attributeId",
     authenticateToken,
+    requirePermissions(accessService, "products:options:manage"),
     validate(paramSchemas.attributeId, "params"),
     productController.deleteProductOption,
   );
@@ -422,6 +430,7 @@ export default function productRoutes(dependencies = {}) {
   router.delete(
     "/options/values/:valueId",
     authenticateToken,
+    requirePermissions(accessService, "products:options:manage"),
     validate(paramSchemas.valueId, "params"),
     productController.deleteProductOptionValue,
   );
@@ -433,10 +442,11 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/bulk-update",
     authenticateToken,
+    requirePermissions(accessService, "products:manage"),
     productController.bulkUpdateProducts,
   );
 
-  // ============ PRODUCT VARIANT ROUTES (Protected) ============
+  // ─── Product Variant Routes ──────────────────────────────────────────
 
   /**
    * Create product variant
@@ -445,6 +455,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/:id/variants",
     authenticateToken,
+    requirePermissions(accessService, "products:variants:manage"),
     validate(paramSchemas.id, "params"),
     validate(productVariantSchemas.create),
     productController.createVariant,
@@ -453,11 +464,11 @@ export default function productRoutes(dependencies = {}) {
   /**
    * Bulk update variant stocks
    * PUT /api/v1/products/variants/bulk-stock-update
-   * NOTE: Must be defined BEFORE /variants/:variantId to avoid param capture
    */
   router.put(
     "/variants/bulk-stock-update",
     authenticateToken,
+    requirePermissions(accessService, "products:variants:manage"),
     productController.bulkUpdateVariantStocks,
   );
 
@@ -468,6 +479,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/variants/:variantId",
     authenticateToken,
+    requirePermissions(accessService, "products:variants:manage"),
     validate(paramSchemas.variantId, "params"),
     validate(productVariantSchemas.update),
     productController.updateVariant,
@@ -480,6 +492,7 @@ export default function productRoutes(dependencies = {}) {
   router.delete(
     "/variants/:variantId",
     authenticateToken,
+    requirePermissions(accessService, "products:variants:manage"),
     validate(paramSchemas.variantId, "params"),
     productController.deleteVariant,
   );
@@ -491,21 +504,23 @@ export default function productRoutes(dependencies = {}) {
   router.patch(
     "/variants/:variantId/stock",
     authenticateToken,
+    requirePermissions(accessService, "products:variants:manage"),
     validate(paramSchemas.variantId, "params"),
     productController.updateVariantStock,
   );
 
-  // ============ PRODUCT IMAGE MANAGEMENT ROUTES (Protected) ============
+  // ─── Product Image Management Routes ────────────────────────────────
 
   /**
-   * Add product image (supports both file upload and URL)
+   * Add product image
    * POST /api/v1/products/:id/images
    */
   router.post(
     "/:id/images",
     authenticateToken,
+    requirePermissions(accessService, "products:images:manage"),
     validate(paramSchemas.id, "params"),
-    upload.single("image"), // Handle file upload
+    upload.single("image"),
     productController.addProductImage,
   );
 
@@ -516,6 +531,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/:id/images/bulk",
     authenticateToken,
+    requirePermissions(accessService, "products:images:manage"),
     validate(paramSchemas.id, "params"),
     productController.addProductImages,
   );
@@ -527,8 +543,9 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/images/:imageId",
     authenticateToken,
+    requirePermissions(accessService, "products:images:manage"),
     validate(paramSchemas.imageId, "params"),
-    upload.single("image"), // Handle file upload
+    upload.single("image"),
     productController.updateProductImage,
   );
 
@@ -539,6 +556,7 @@ export default function productRoutes(dependencies = {}) {
   router.delete(
     "/images/:imageId",
     authenticateToken,
+    requirePermissions(accessService, "products:images:manage"),
     validate(paramSchemas.imageId, "params"),
     productController.deleteProductImage,
   );
@@ -550,6 +568,7 @@ export default function productRoutes(dependencies = {}) {
   router.patch(
     "/:id/images/:imageId/primary",
     authenticateToken,
+    requirePermissions(accessService, "products:images:manage"),
     validate(paramSchemas.id, "params"),
     validate(paramSchemas.imageId, "params"),
     productController.setPrimaryImage,
@@ -562,11 +581,12 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/:id/variants/images/bulk",
     authenticateToken,
+    requirePermissions(accessService, "products:images:manage"),
     validate(paramSchemas.id, "params"),
     productController.bulkUploadVariantImages,
   );
 
-  // ============ BRAND MANAGEMENT ROUTES (Protected) ============
+  // ─── Brand Management Routes ────────────────────────────────────────
 
   /**
    * Add brand to product
@@ -575,6 +595,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/:id/brands",
     authenticateToken,
+    requirePermissions(accessService, "products:manage"),
     validate(paramSchemas.id, "params"),
     productController.addProductBrand,
   );
@@ -586,11 +607,12 @@ export default function productRoutes(dependencies = {}) {
   router.delete(
     "/:id/brands/:brandId",
     authenticateToken,
+    requirePermissions(accessService, "products:manage"),
     validate(paramSchemas.idAndBrandId, "params"),
     productController.removeProductBrand,
   );
 
-  // ============ RETAILER MANAGEMENT ROUTES (Protected) ============
+  // ─── Retailer Details Routes ────────────────────────────────────────
 
   /**
    * Add retailer details to product
@@ -599,6 +621,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/:id/retailer",
     authenticateToken,
+    requirePermissions(accessService, "retailers:manage"),
     validate(paramSchemas.id, "params"),
     productController.addRetailerDetails,
   );
@@ -610,6 +633,7 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/:id/retailer",
     authenticateToken,
+    requirePermissions(accessService, "retailers:manage"),
     validate(paramSchemas.id, "params"),
     productController.updateRetailerDetails,
   );
@@ -621,11 +645,12 @@ export default function productRoutes(dependencies = {}) {
   router.delete(
     "/:id/retailer",
     authenticateToken,
+    requirePermissions(accessService, "retailers:manage"),
     validate(paramSchemas.id, "params"),
     productController.removeRetailerDetails,
   );
 
-  // ============ VARIANT COMMISSION ROUTES (Protected) ============
+  // ─── Variant Commission Routes ──────────────────────────────────────
 
   /**
    * Get product commissions
@@ -634,6 +659,7 @@ export default function productRoutes(dependencies = {}) {
   router.get(
     "/:id/commissions",
     authenticateToken,
+    requirePermissions(accessService, "products:commissions:read"),
     validate(paramSchemas.id, "params"),
     productController.getProductCommissions,
   );
@@ -645,11 +671,12 @@ export default function productRoutes(dependencies = {}) {
   router.put(
     "/commissions/bulk",
     authenticateToken,
+    requirePermissions(accessService, "products:commissions:manage"),
     validate(variantCommissionSchemas.bulkSetCommission),
     productController.bulkSetCommissions,
   );
 
-  // ============ COMPREHENSIVE DATA ROUTES (Protected) ============
+  // ─── Add-on Management Routes ───────────────────────────────────────
   
   /**
    * Add a variant add-on
@@ -658,6 +685,7 @@ export default function productRoutes(dependencies = {}) {
   router.post(
     "/:id/variants/:variantId/addons",
     authenticateToken,
+    requirePermissions(accessService, "products:addons:manage"),
     productController.addVariantAddon
   );
 
@@ -668,6 +696,7 @@ export default function productRoutes(dependencies = {}) {
   router.delete(
     "/:id/variants/:variantId/addons/:addonId",
     authenticateToken,
+    requirePermissions(accessService, "products:addons:manage"),
     productController.removeVariantAddon
   );
 

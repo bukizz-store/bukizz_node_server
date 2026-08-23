@@ -4,83 +4,91 @@ import { dashboardController } from "../controllers/dashboardController.js";
 import { upload } from "../middleware/upload.js";
 import {
   authenticateToken,
-  requireRoles,
+  requirePermissions,
 } from "../middleware/authMiddleware.js";
 
-const router = express.Router();
-
 /**
- * @route GET /api/v1/retailer/dashboard/overview
- * @desc Get aggregated dashboard overview data (stats, schools, recent orders)
- * @access Private (retailer)
+ * Retailer Routes Factory
+ * @param {Object} dependencies - DI container
+ * @returns {Router} Express router
  */
-router.get(
-  "/dashboard/overview",
-  authenticateToken,
-  requireRoles("retailer", "admin"),
-  dashboardController.getDashboardOverview,
-);
+export default function retailerRoutes(dependencies = {}) {
+  const router = express.Router();
+  const { accessService } = dependencies;
 
-/**
- * @route POST /api/v1/retailer/data
- * @desc Create or update retailer profile with signature
- * @access Private
- */
-router.post(
-  "/data",
-  authenticateToken,
-  requireRoles("retailer"),
-  upload.single("signature"),
-  retailerController.createRetailerProfile,
-);
+  /**
+   * @route GET /api/v1/retailer/dashboard/overview
+   * @desc Get aggregated dashboard overview data
+   * @access Private (retailer / admin)
+   */
+  router.get(
+    "/dashboard/overview",
+    authenticateToken,
+    requirePermissions(accessService, "retailers:read"),
+    dashboardController.getDashboardOverview,
+  );
 
-/**
- * @route PUT /api/v1/retailer/data
- * @desc Update retailer business details (owner name, gstin, pan, signature)
- * @access Private
- */
-router.put(
-  "/data",
-  authenticateToken,
-  requireRoles("retailer"),
-  upload.single("signature"),
-  retailerController.updateRetailerProfile,
-);
+  /**
+   * @route POST /api/v1/retailer/data
+   * @desc Create or update retailer profile with signature
+   * @access Private
+   */
+  router.post(
+    "/data",
+    authenticateToken,
+    requirePermissions(accessService, "retailers:manage"),
+    upload.single("signature"),
+    retailerController.createRetailerProfile,
+  );
 
-/**
- * @route GET /api/v1/retailer/verification-status
- * @desc Check retailer verification/authorization status
- * @access Private (retailer)
- */
-router.get(
-  "/verification-status",
-  authenticateToken,
-  requireRoles("retailer", "admin"),
-  retailerController.checkVerificationStatus,
-);
+  /**
+   * @route PUT /api/v1/retailer/data
+   * @desc Update retailer business details
+   * @access Private
+   */
+  router.put(
+    "/data",
+    authenticateToken,
+    requirePermissions(accessService, "retailers:manage"),
+    upload.single("signature"),
+    retailerController.updateRetailerProfile,
+  );
 
-/**
- * @route GET /api/v1/retailer/data/status
- * @desc Check if retailer profile data exists and is complete
- * @access Private (retailer)
- */
-router.get(
-  "/data/status",
-  authenticateToken,
-  requireRoles("retailer", "admin"),
-  retailerController.checkRetailerDataStatus,
-);
+  /**
+   * @route GET /api/v1/retailer/verification-status
+   * @desc Check retailer verification/authorization status
+   * @access Private
+   */
+  router.get(
+    "/verification-status",
+    authenticateToken,
+    requirePermissions(accessService, "retailers:read"),
+    retailerController.checkVerificationStatus,
+  );
 
-/**
- * @route GET /api/v1/retailer/data
- * @desc Get retailer profile
- * @access Private
- */
-router.get(
-  "/data",
-  authenticateToken,
-  requireRoles("retailer", "admin"),
-  retailerController.getRetailerProfile,
-);
+  /**
+   * @route GET /api/v1/retailer/data/status
+   * @desc Check if retailer profile data exists and is complete
+   * @access Private
+   */
+  router.get(
+    "/data/status",
+    authenticateToken,
+    requirePermissions(accessService, "retailers:read"),
+    retailerController.checkRetailerDataStatus,
+  );
 
-export default router;
+  /**
+   * @route GET /api/v1/retailer/data
+   * @desc Get retailer profile
+   * @access Private
+   */
+  router.get(
+    "/data",
+    authenticateToken,
+    requirePermissions(accessService, "retailers:read"),
+    retailerController.getRetailerProfile,
+  );
+
+  return router;
+}

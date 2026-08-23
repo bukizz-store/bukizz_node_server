@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { config } from "./config/index.js";
 import { logger, createRequestLogger } from "./utils/logger.js";
 import { connectDB } from "./db/index.js";
+import { createDependencies } from "./config/dependencies.js";
 import { setupRoutes } from "./routes/index.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import { setupCronJobs } from "./jobs/cronJobs.js";
@@ -47,8 +48,11 @@ export async function createApp() {
     // Global input sanitization
     app.use(sanitizeMiddleware);
 
-    // Setup routes
-    setupRoutes(app);
+    // Initialize dependencies & warm in-memory caches
+    const dependencies = await createDependencies();
+
+    // Setup routes with dependency injection
+    setupRoutes(app, dependencies);
 
     // Serve sitemap statically
     app.get("/sitemap.xml", (req, res) => {
@@ -123,4 +127,3 @@ export async function startServer() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startServer();
 }
-

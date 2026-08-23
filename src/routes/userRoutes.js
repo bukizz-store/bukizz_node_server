@@ -1,8 +1,7 @@
 import express from "express";
 import {
   authenticateToken,
-  requireOwnership,
-  requireRoles,
+  requirePermissions,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import {
@@ -18,11 +17,8 @@ import {
  */
 export default function userRoutes(dependencies = {}) {
   const router = express.Router();
+  const { userController, accessService } = dependencies;
 
-  // Get the user controller from dependencies
-  const { userController } = dependencies;
-
-  // If no userController is provided, return empty router
   if (!userController) {
     console.error("UserController not found in dependencies");
     return router;
@@ -34,7 +30,7 @@ export default function userRoutes(dependencies = {}) {
   // All user routes require authentication
   router.use(authenticateToken);
 
-  // User profile routes (specific routes first)
+  // ─── Customer Self-Service Profile & Addresses (Exempt from Admin RBAC) ─
   router.get("/profile", userController.getProfile);
   router.put(
     "/profile",
@@ -68,47 +64,53 @@ export default function userRoutes(dependencies = {}) {
   router.post("/verify-email", userController.verifyEmail);
   router.post("/verify-phone", userController.verifyPhone);
 
-  // Admin-only routes with specific paths
-  router.get("/admin/search", requireRoles("admin"), userController.searchUsers);
-  router.get("/admin/export", requireRoles("admin"), userController.exportUsers);
+  // ─── Admin User Management Routes (RBAC Guarded) ─────────────────────
+  router.get(
+    "/admin/search",
+    requirePermissions(accessService, "users:read"),
+    userController.searchUsers
+  );
+  router.get(
+    "/admin/export",
+    requirePermissions(accessService, "users:export:manage"),
+    userController.exportUsers
+  );
   router.get(
     "/admin/:userId",
-    requireRoles("admin"),
+    requirePermissions(accessService, "users:read"),
     validate(paramSchemas.userId, "params"),
     userController.getUserById,
   );
   router.put(
     "/admin/:userId",
-    requireRoles("admin"),
+    requirePermissions(accessService, "users:manage"),
     validate(paramSchemas.userId, "params"),
     userController.updateUserByAdmin,
   );
   router.put(
     "/admin/:userId/role",
-    requireRoles("admin"),
+    requirePermissions(accessService, "users:manage"),
     validate(paramSchemas.userId, "params"),
     userController.updateUserRole,
   );
   router.post(
     "/admin/:userId/reactivate",
-    requireRoles("admin"),
+    requirePermissions(accessService, "users:manage"),
     validate(paramSchemas.userId, "params"),
     userController.reactivateAccount,
   );
 
-  /**
-   * Retailer Approval Routes (Admin only)
-   */
+  // ─── Retailer Onboarding Approvals (Admin RBAC) ─────────────────────
   router.get(
     "/admin/retailers/pending",
-    requireRoles("admin"),
+    requirePermissions(accessService, "approvals:retailers:read"),
     validate(userSchemas.pendingRetailersQuery, "query"),
     userController.getPendingRetailersList,
   );
 
   router.patch(
     "/admin/retailers/:userId/approve",
-    requireRoles("admin"),
+    requirePermissions(accessService, "approvals:retailers:manage"),
     validate(paramSchemas.userId, "params"),
     userController.approveRetailerAccount,
   );

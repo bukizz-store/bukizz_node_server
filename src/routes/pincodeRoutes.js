@@ -1,12 +1,29 @@
 import express from "express";
 import { PincodeController } from "../controllers/pincodeController.js";
-import { authenticateToken } from "../middleware/authMiddleware.js";
+import {
+  authenticateToken,
+  requirePermissions,
+} from "../middleware/authMiddleware.js";
 
+/**
+ * Pincode Routes Factory
+ * @param {Object} dependencies - Dependency injection container
+ * @returns {Router} Express router
+ */
 export default function pincodeRoutes(dependencies = {}) {
-    const router = express.Router();
+  const router = express.Router();
+  const { accessService } = dependencies;
 
-    router.get("/check/:pincode", PincodeController.checkAvailability);
-    router.post("/bulk", authenticateToken, PincodeController.bulkInsert);
+  // Public serviceability check
+  router.get("/check/:pincode", PincodeController.checkAvailability);
 
-    return router;
+  // Protected bulk insert (Admin RBAC)
+  router.post(
+    "/bulk",
+    authenticateToken,
+    requirePermissions(accessService, "pincodes:manage"),
+    PincodeController.bulkInsert
+  );
+
+  return router;
 }

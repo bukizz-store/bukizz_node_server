@@ -5,11 +5,13 @@ import { OrderRepository } from "../repositories/orderRepository.js";
 import { OrderEventRepository } from "../repositories/orderEventRepository.js";
 import { OrderQueryRepository } from "../repositories/orderQueryRepository.js";
 import { WarehouseRepository } from "../repositories/warehouseRepository.js";
+import { AccessRepository } from "../repositories/accessRepository.js";
 import { UserService } from "../services/userService.js";
 import { AuthService } from "../services/authService.js";
 import { ProductService } from "../services/productService.js";
 import { SchoolService } from "../services/schoolService.js";
 import { OrderService } from "../services/orderService.js";
+import { createAccessService } from "../services/accessService.js";
 import { UserController } from "../controllers/userController.js";
 import { AuthController } from "../controllers/authController.js";
 import { ProductController } from "../controllers/productController.js";
@@ -21,6 +23,9 @@ import { SettlementService } from "../services/settlementService.js";
 import { settlementController } from "../controllers/settlementController.js";
 import { dpLedgerRepository } from "../repositories/dpLedgerRepository.js";
 import { deliveryRepository } from "../repositories/deliveryRepository.js";
+import { dpAdminRepository } from "../repositories/dpAdminRepository.js";
+import { dpAdminService } from "../services/dpAdminService.js";
+import { dpAdminController } from "../controllers/dpAdminController.js";
 import deliveryIncentiveService from "../services/deliveryIncentiveService.js";
 import deliveryBankService from "../services/deliveryBankService.js";
 import { verifyBankAccount } from "../services/razorpayVerificationService.js";
@@ -29,11 +34,12 @@ import { getDB } from "../db/index.js";
 
 /**
  * Creates and configures dependency injection container
- * Enables easy testing by allowing mock injection
+ * Enables easy testing by allowing mock injection.
+ * Initializes and warms the in-memory RBAC cache on server start.
  * @param {Object} overrides - Override dependencies for testing
- * @returns {Object} Container with all dependencies
+ * @returns {Promise<Object>} Container with all dependencies
  */
-export function createDependencies(overrides = {}) {
+export async function createDependencies(overrides = {}) {
   const db = overrides.db || getDB();
 
   // Get Supabase client for repositories that need it
@@ -53,6 +59,8 @@ export function createDependencies(overrides = {}) {
     overrides.orderQueryRepository || new OrderQueryRepository(db);
   const warehouseRepository =
     overrides.warehouseRepository || new WarehouseRepository();
+  const accessRepository =
+    overrides.accessRepository || new AccessRepository();
 
   // Services (Business Logic Layer)
   const userService = overrides.userService || new UserService(userRepository);
@@ -71,6 +79,12 @@ export function createDependencies(overrides = {}) {
       orderQueryRepository,
       warehouseRepository,
     );
+  const accessService =
+    overrides.accessService ||
+    createAccessService({ accessRepository });
+
+  // Warm in-memory RBAC role-permission cache on server boot
+  await accessService.initialize();
 
   // Settlement
   const settlementService =
@@ -94,6 +108,15 @@ export function createDependencies(overrides = {}) {
       deliveryRepository: deliveryRepo,
       verifyBankAccountFn: verifyBankAccount,
     });
+
+  // DP Admin
+  const dpAdminRepo = overrides.dpAdminRepository || dpAdminRepository;
+  const dpAdminSvc =
+    overrides.dpAdminService ||
+    dpAdminService({ dpAdminRepository: dpAdminRepo });
+  const dpAdminCtrl =
+    overrides.dpAdminCtrl ||
+    dpAdminController({ dpAdminService: dpAdminSvc });
 
   // Controllers (Request Handling Layer)
   const userController =
@@ -127,10 +150,13 @@ export function createDependencies(overrides = {}) {
     orderRepository,
     orderEventRepository,
     orderQueryRepository,
+    warehouseRepository,
     ledgerRepository,
     settlementRepository,
     dpLedgerRepository: dpLedgerRepo,
     deliveryRepository: deliveryRepo,
+    dpAdminRepository: dpAdminRepo,
+    accessRepository,
 
     // Services
     userService,
@@ -141,6 +167,8 @@ export function createDependencies(overrides = {}) {
     settlementService,
     deliveryIncentiveService: deliveryIncentiveSvc,
     deliveryBankService: deliveryBankSvc,
+    dpAdminService: dpAdminSvc,
+    accessService,
 
     // Controllers
     userController,
@@ -150,5 +178,8 @@ export function createDependencies(overrides = {}) {
     orderController,
     settlementController: settlementCtrl,
     deliveryController: deliveryCtrl,
+    dpAdminCtrl,
   };
 }
+
+export default createDependencies;

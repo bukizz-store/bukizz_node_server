@@ -1,176 +1,118 @@
 import express from "express";
 import { retailerOrderController } from "../controllers/retailerOrderController.js";
-import { authenticateToken, requireRoles } from "../middleware/authMiddleware.js";
+import {
+  authenticateToken,
+  requirePermissions,
+} from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { orderSchemas } from "../models/schemas.js";
 import { createRateLimiter } from "../middleware/rateLimiter.js";
 
-const router = express.Router();
+/**
+ * Retailer Order Routes Factory
+ * @param {Object} dependencies - DI container
+ * @returns {Router} Express router
+ */
+export default function retailerOrderRoutes(dependencies = {}) {
+  const router = express.Router();
+  const { accessService } = dependencies;
 
-// Rate limiting for retailer order queries
-const orderQueryLimiter = createRateLimiter({
+  // Rate limiting for retailer order queries
+  const orderQueryLimiter = createRateLimiter({
     windowMs: 60 * 1000, // 1 minute
     max: 60,
-});
+  });
 
-// All routes require authentication + retailer role
-router.use(authenticateToken);
-router.use(requireRoles("retailer", "admin"));
+  // All routes require authentication
+  router.use(authenticateToken);
 
-// ========================================
-// RETAILER ORDER STATISTICS
-// ========================================
-
-/**
- * @route   GET /api/v1/retailer/orders/stats
- * @desc    Get aggregated order statistics across all retailer warehouses
- * @access  Private (Retailer)
- * @query   startDate, endDate
- */
-router.get(
+  // ─── Retailer Order Statistics ──────────────────────────────────────
+  router.get(
     "/stats",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getRetailerOrderStats
-);
+  );
 
-// ========================================
-// WAREHOUSE-SPECIFIC ORDER ENDPOINTS
-// ========================================
-
-/**
- * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/stats
- * @desc    Get order statistics for a specific warehouse
- * @access  Private (Retailer)
- * @query   startDate, endDate
- */
-router.get(
+  // ─── Warehouse-Specific Order Endpoints ──────────────────────────────
+  router.get(
     "/warehouse/:warehouseId/stats",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getWarehouseOrderStats
-);
+  );
 
-/**
- * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/status/:status
- * @desc    Get orders by status for a specific warehouse
- * @access  Private (Retailer)
- * @query   page, limit, sortBy, sortOrder
- */
-router.get(
+  router.get(
     "/warehouse/:warehouseId/status/:status",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getWarehouseOrdersByStatus
-);
+  );
 
-/**
- * @route   POST /api/v1/retailer/orders/warehouse/:warehouseId/filter
- * @desc    Advanced filtered order query with product type, school, product, student filters
- * @access  Private (Retailer)
- */
-router.post(
+  router.post(
     "/warehouse/:warehouseId/filter",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getFilteredOrders
-);
+  );
 
-/**
- * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/schools
- * @desc    Get schools for filter dropdown
- * @access  Private (Retailer)
- */
-router.get(
+  router.get(
     "/warehouse/:warehouseId/filter-options/schools",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getFilterSchools
-);
+  );
 
-/**
- * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/products
- * @desc    Get products for filter dropdown, optionally filtered by schoolIds
- * @access  Private (Retailer)
- * @query   schoolIds (comma-separated)
- */
-router.get(
+  router.get(
     "/warehouse/:warehouseId/filter-options/products",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getFilterProducts
-);
+  );
 
-/**
- * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/statuses
- * @desc    Get unique item statuses for filter dropdown
- * @access  Private (Retailer)
- */
-router.get(
+  router.get(
     "/warehouse/:warehouseId/filter-options/statuses",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getFilterStatuses
-);
+  );
 
-/**
- * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId
- * @desc    Get all orders for a specific warehouse (with filters)
- * @access  Private (Retailer)
- * @query   status, page, limit, startDate, endDate, sortBy, sortOrder, search, paymentStatus
- */
-router.get(
+  router.get(
     "/warehouse/:warehouseId",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getOrdersByWarehouse
-);
+  );
 
-// ========================================
-// ORDER STATUS MANAGEMENT
-// ========================================
-
-/**
- * @route   PUT /api/v1/retailer/orders/:orderId/items/:itemId/status
- * @desc    Update order item status (retailer can update items in their warehouses)
- * @access  Private (Retailer)
- * @body    { status, note?, metadata? }
- */
-router.put(
+  // ─── Order Status Management ────────────────────────────────────────
+  router.put(
     "/:orderId/items/:itemId/status",
+    requirePermissions(accessService, "orders:warehouse:manage"),
     validate(orderSchemas.updateOrderStatus),
     retailerOrderController.updateOrderItemStatus
-);
+  );
 
-/**
- * @route   PUT /api/v1/retailer/orders/:orderId/status
- * @desc    Update order status (retailer can update orders in their warehouses)
- * @access  Private (Retailer)
- * @body    { status, note?, metadata? }
- */
-router.put(
+  router.put(
     "/:orderId/status",
+    requirePermissions(accessService, "orders:warehouse:manage"),
     validate(orderSchemas.updateOrderStatus),
     retailerOrderController.updateOrderStatus
-);
+  );
 
-// ========================================
-// ORDER DETAIL & LISTING
-// ========================================
-
-/**
- * @route   GET /api/v1/retailer/orders/:orderId
- * @desc    Get a specific order detail (only shows items belonging to retailer's warehouses)
- * @access  Private (Retailer)
- */
-router.get(
+  // ─── Order Detail & Listing ─────────────────────────────────────────
+  router.get(
     "/:orderId",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getOrderDetail
-);
+  );
 
-/**
- * @route   GET /api/v1/retailer/orders
- * @desc    Get all orders across all retailer warehouses (with filters)
- * @access  Private (Retailer)
- * @query   status, page, limit, startDate, endDate, sortBy, sortOrder, search, paymentStatus
- */
-router.get(
+  router.get(
     "/",
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     retailerOrderController.getAllRetailerOrders
-);
+  );
 
-export default router;
+  return router;
+}

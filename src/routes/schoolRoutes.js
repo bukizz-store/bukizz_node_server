@@ -1,6 +1,9 @@
 import express from "express";
 import multer from "multer";
-import { authenticateToken } from "../middleware/authMiddleware.js";
+import {
+  authenticateToken,
+  requirePermissions,
+} from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { schoolSchemas, paramSchemas } from "../models/schemas.js";
 
@@ -11,6 +14,7 @@ import { schoolSchemas, paramSchemas } from "../models/schemas.js";
  */
 export default function schoolRoutes(dependencies = {}) {
   const router = express.Router();
+  const { schoolController, accessService } = dependencies;
 
   // Configure multer for file uploads
   const storage = multer.memoryStorage();
@@ -28,9 +32,6 @@ export default function schoolRoutes(dependencies = {}) {
       }
     },
   });
-
-  // Get the school controller from dependencies
-  const { schoolController } = dependencies;
 
   // If no schoolController is provided, return empty router
   if (!schoolController) {
@@ -56,7 +57,7 @@ export default function schoolRoutes(dependencies = {}) {
     }
   };
 
-  // Public school routes (no authentication required)
+  // ─── Public School Routes (Customer/Guest Exemption) ───────────────
 
   /**
    * Search schools with filtering
@@ -112,7 +113,7 @@ export default function schoolRoutes(dependencies = {}) {
    */
   router.get(
     "/:id",
-    dependencies.optionalAuth || ((req, res, next) => next()), // Fallback if optionalAuth not in dependencies
+    dependencies.optionalAuth || ((req, res, next) => next()),
     validate(paramSchemas.id, "params"),
     schoolController.getSchool
   );
@@ -137,7 +138,7 @@ export default function schoolRoutes(dependencies = {}) {
     schoolController.getSchoolCatalog
   );
 
-  // Protected routes (require authentication)
+  // ─── Protected Routes (Admin RBAC Guarded) ──────────────────────────
 
   /**
    * Create a new school
@@ -146,6 +147,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.post(
     "/",
     authenticateToken,
+    requirePermissions(accessService, "schools:manage"),
     upload.fields([{ name: "image", maxCount: 1 }, { name: "cover_image", maxCount: 1 }]),
     parseMultipartFields,
     validate(schoolSchemas.create),
@@ -159,6 +161,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.put(
     "/sort-order",
     authenticateToken,
+    requirePermissions(accessService, "schools:sort_order:manage"),
     validate(schoolSchemas.updateSortOrders),
     schoolController.updateSortOrders
   );
@@ -170,6 +173,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.put(
     "/:id",
     authenticateToken,
+    requirePermissions(accessService, "schools:manage"),
     upload.fields([{ name: "image", maxCount: 1 }, { name: "cover_image", maxCount: 1 }]),
     parseMultipartFields,
     validate(paramSchemas.id, "params"),
@@ -184,6 +188,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.delete(
     "/:id",
     authenticateToken,
+    requirePermissions(accessService, "schools:manage"),
     validate(paramSchemas.id, "params"),
     schoolController.deactivateSchool
   );
@@ -195,6 +200,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.patch(
     "/:id/reactivate",
     authenticateToken,
+    requirePermissions(accessService, "schools:manage"),
     validate(paramSchemas.id, "params"),
     schoolController.reactivateSchool
   );
@@ -206,6 +212,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.post(
     "/bulk-import",
     authenticateToken,
+    requirePermissions(accessService, "schools:manage"),
     schoolController.bulkImportSchools
   );
 
@@ -216,11 +223,12 @@ export default function schoolRoutes(dependencies = {}) {
   router.post(
     "/upload-image",
     authenticateToken,
+    requirePermissions(accessService, "schools:manage"),
     upload.single("image"),
     schoolController.uploadImage
   );
 
-  // Product association routes
+  // ─── Product Association Routes ──────────────────────────────────────
 
   /**
    * Associate product with school
@@ -229,6 +237,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.post(
     "/:schoolId/products/:productId",
     authenticateToken,
+    requirePermissions(accessService, "schools:products:manage"),
     validate(paramSchemas.schoolId, "params"),
     validate(paramSchemas.productId, "params"),
     validate(schoolSchemas.productAssociation),
@@ -242,6 +251,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.put(
     "/:schoolId/products/:productId/:grade",
     authenticateToken,
+    requirePermissions(accessService, "schools:products:manage"),
     validate(paramSchemas.schoolId, "params"),
     validate(paramSchemas.productId, "params"),
     validate(paramSchemas.grade, "params"),
@@ -256,6 +266,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.delete(
     "/:schoolId/products/:productId",
     authenticateToken,
+    requirePermissions(accessService, "schools:products:manage"),
     validate(paramSchemas.schoolId, "params"),
     validate(paramSchemas.productId, "params"),
     schoolController.removeProductAssociation
@@ -268,6 +279,7 @@ export default function schoolRoutes(dependencies = {}) {
   router.post(
     "/:id/partnerships",
     authenticateToken,
+    requirePermissions(accessService, "schools:partnerships:manage"),
     validate(paramSchemas.id, "params"),
     validate(schoolSchemas.partnership),
     schoolController.createPartnership

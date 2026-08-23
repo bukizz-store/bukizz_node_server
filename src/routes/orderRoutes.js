@@ -1,7 +1,7 @@
 import express from "express";
 import {
   authenticateToken,
-  requireRoles,
+  requirePermissions,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { orderSchemas, orderQuerySchemas } from "../models/schemas.js";
@@ -15,11 +15,12 @@ import { OrderController } from "../controllers/orderController.js";
  */
 export default function orderRoutes(dependencies = {}) {
   const router = express.Router();
+  const { accessService } = dependencies;
 
   // Rate limiting for order operations
   const orderCreationLimiter = createRateLimiter({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 20, // Increased from 5 to 20 orders per 15 minutes per user
+    max: 20,
     message: {
       success: false,
       error: "Too many order attempts. Please try again later.",
@@ -29,15 +30,13 @@ export default function orderRoutes(dependencies = {}) {
 
   const orderQueryLimiter = createRateLimiter({
     windowMs: 60 * 1000, // 1 minute
-    max: 60, // Increased from 30 to 60 requests per minute
+    max: 60,
   });
 
   // Apply authentication to all routes
   router.use(authenticateToken);
 
-  /**
-   * CUSTOMER ORDER ENDPOINTS
-   */
+  // ─── Customer Order Endpoints (Public/Customer Exemption) ───────────
 
   // Create a new order (main endpoint)
   router.post(
@@ -47,7 +46,7 @@ export default function orderRoutes(dependencies = {}) {
     OrderController.placeOrder,
   );
 
-  // Place a new order with comprehensive validation and atomic transaction (alias)
+  // Place a new order with comprehensive validation (alias)
   router.post(
     "/place",
     orderCreationLimiter,
@@ -66,16 +65,13 @@ export default function orderRoutes(dependencies = {}) {
   // Get current user's orders with filtering
   router.get("/my-orders", orderQueryLimiter, OrderController.getUserOrders);
 
-  /**
-   * ADMIN ORDER QUERY / SUPPORT TICKET ENDPOINTS
-   * Base: /admin/queries (mounted at /api/v1/orders)
-   * NOTE: These MUST be defined BEFORE the /:orderId catch-all route.
-   */
+  // ─── Admin Order Query / Support Ticket Endpoints ───────────────────
+  // NOTE: These MUST be defined BEFORE the /:orderId catch-all route.
 
   // List all order queries (admin dashboard)
   router.get(
     "/admin/queries",
-    requireRoles("admin"),
+    requirePermissions(accessService, "support:queries:read"),
     validate(orderQuerySchemas.adminListQuery, "query"),
     async (req, res, next) => {
       try {
@@ -90,7 +86,7 @@ export default function orderRoutes(dependencies = {}) {
   // Get detailed view of a specific query
   router.get(
     "/admin/queries/:queryId",
-    requireRoles("admin"),
+    requirePermissions(accessService, "support:queries:read"),
     async (req, res, next) => {
       try {
         const orderController = new OrderController();
@@ -104,7 +100,7 @@ export default function orderRoutes(dependencies = {}) {
   // Add admin reply to a query thread
   router.post(
     "/admin/queries/:queryId/reply",
-    requireRoles("admin"),
+    requirePermissions(accessService, "support:queries:manage"),
     validate(orderQuerySchemas.adminReply),
     async (req, res, next) => {
       try {
@@ -119,7 +115,7 @@ export default function orderRoutes(dependencies = {}) {
   // Update query status
   router.put(
     "/admin/queries/:queryId/status",
-    requireRoles("admin"),
+    requirePermissions(accessService, "support:queries:manage"),
     validate(orderQuerySchemas.adminStatusUpdate),
     async (req, res, next) => {
       try {
@@ -130,6 +126,8 @@ export default function orderRoutes(dependencies = {}) {
       }
     },
   );
+
+  // ─── Customer / Staff Specific Order Actions ────────────────────────
 
   // Get specific order details by ID
   router.get("/:orderId", orderQueryLimiter, OrderController.getOrderById);
@@ -147,7 +145,7 @@ export default function orderRoutes(dependencies = {}) {
   // Cancel specific order item (customer self-service)
   router.put(
     "/:orderId/items/:itemId/cancel",
-    validate(orderSchemas.cancelOrder), // Reusing strict validation for reason
+    validate(orderSchemas.cancelOrder),
     async (req, res, next) => {
       try {
         const orderController = new OrderController();
@@ -171,7 +169,7 @@ export default function orderRoutes(dependencies = {}) {
     },
   );
 
-  // Create order query/support ticket
+  // Create order query/support ticket (customer)
   router.post(
     "/:orderId/queries",
     validate(orderQuerySchemas.createOrderQuery),
@@ -185,7 +183,7 @@ export default function orderRoutes(dependencies = {}) {
     },
   );
 
-  // Get order queries/support tickets
+  // Get order queries/support tickets for an order
   router.get("/:orderId/queries", async (req, res, next) => {
     try {
       const orderController = new OrderController();
@@ -195,14 +193,12 @@ export default function orderRoutes(dependencies = {}) {
     }
   });
 
-  /**
-   * ADMIN/RETAILER ORDER MANAGEMENT ENDPOINTS
-   */
+  // ─── Admin / Retailer Order Management Endpoints (RBAC) ─────────────
 
   // Get single order item detail for warehouse
   router.get(
     "/warehouse/items/:itemId",
-    requireRoles("admin", "retailer"),
+    requirePermissions(accessService, "orders:warehouse:read"),
     orderQueryLimiter,
     async (req, res, next) => {
       try {
@@ -214,10 +210,10 @@ export default function orderRoutes(dependencies = {}) {
     },
   );
 
-  // Search and filter orders (admin/retailer access)
+  // Search and filter orders (admin/staff access)
   router.get(
     "/admin/search",
-    requireRoles("admin", "retailer"),
+    requirePermissions(accessService, "orders:read"),
     orderQueryLimiter,
     async (req, res, next) => {
       try {
@@ -232,7 +228,7 @@ export default function orderRoutes(dependencies = {}) {
   // Get orders by specific status (admin dashboard)
   router.get(
     "/admin/status/:status",
-    requireRoles("admin", "retailer"),
+    requirePermissions(accessService, "orders:read"),
     orderQueryLimiter,
     async (req, res, next) => {
       try {
@@ -244,10 +240,10 @@ export default function orderRoutes(dependencies = {}) {
     },
   );
 
-  // Update order status (admin/retailer operation)
+  // Update order status (admin/staff operation)
   router.put(
     "/:orderId/status",
-    requireRoles("admin", "retailer"),
+    requirePermissions(accessService, "orders:manage"),
     validate(orderSchemas.updateOrderStatus),
     async (req, res, next) => {
       try {
@@ -259,11 +255,10 @@ export default function orderRoutes(dependencies = {}) {
     },
   );
 
-  // Update order item status (admin/retailer operation)
+  // Update order item status (admin/staff operation)
   router.put(
     "/:orderId/items/:itemId/status",
-    requireRoles("admin", "retailer"),
-    // reusing updateOrderStatus validator as structure is same (status, note)
+    requirePermissions(accessService, "orders:manage"),
     validate(orderSchemas.updateOrderStatus),
     async (req, res, next) => {
       try {
@@ -275,10 +270,10 @@ export default function orderRoutes(dependencies = {}) {
     },
   );
 
-  // Update payment status (payment gateway webhook or admin)
+  // Update payment status (finance/admin operation)
   router.put(
     "/:orderId/payment",
-    requireRoles("admin", "system"),
+    requirePermissions(accessService, "orders:manage"),
     validate(orderSchemas.updatePaymentStatus),
     async (req, res, next) => {
       try {
@@ -293,7 +288,7 @@ export default function orderRoutes(dependencies = {}) {
   // Bulk update orders (admin operation)
   router.put(
     "/admin/bulk-update",
-    requireRoles("admin"),
+    requirePermissions(accessService, "orders:manage"),
     validate(orderSchemas.bulkUpdateOrders),
     async (req, res, next) => {
       try {
@@ -306,19 +301,23 @@ export default function orderRoutes(dependencies = {}) {
   );
 
   // Export orders data (admin reporting)
-  router.get("/admin/export", requireRoles("admin"), async (req, res, next) => {
-    try {
-      const orderController = new OrderController();
-      await orderController.exportOrders(req, res, next);
-    } catch (error) {
-      next(error);
-    }
-  });
+  router.get(
+    "/admin/export",
+    requirePermissions(accessService, "orders:export:manage"),
+    async (req, res, next) => {
+      try {
+        const orderController = new OrderController();
+        await orderController.exportOrders(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   // Get order statistics and analytics
   router.get(
     "/admin/statistics",
-    requireRoles("admin", "retailer"),
+    requirePermissions(accessService, "orders:read"),
     async (req, res, next) => {
       try {
         const orderController = new OrderController();
@@ -329,18 +328,11 @@ export default function orderRoutes(dependencies = {}) {
     },
   );
 
-  /**
-   * LEGACY ENDPOINTS (for backward compatibility)
-   */
-
   // Legacy: Get user orders
   router.get("/", orderQueryLimiter, OrderController.getUserOrders);
 
-  /**
-   * ERROR HANDLING MIDDLEWARE
-   */
+  // Error Handling Middleware
   router.use((error, req, res, next) => {
-    // Log the error with context
     console.error("Order route error:", {
       path: req.path,
       method: req.method,
@@ -349,7 +341,6 @@ export default function orderRoutes(dependencies = {}) {
       stack: error.stack,
     });
 
-    // Handle specific order-related errors
     if (error.code === "INSUFFICIENT_STOCK") {
       return res.status(409).json({
         success: false,
@@ -377,7 +368,6 @@ export default function orderRoutes(dependencies = {}) {
       });
     }
 
-    // Pass to general error handler
     next(error);
   });
 

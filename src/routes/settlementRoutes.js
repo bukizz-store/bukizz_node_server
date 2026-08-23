@@ -1,7 +1,7 @@
 import express from "express";
 import {
   authenticateToken,
-  requireRoles,
+  requirePermissions,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { settlementSchemas } from "../models/schemas.js";
@@ -9,122 +9,114 @@ import Joi from "joi";
 
 /**
  * Settlement Routes Factory
- * @param {Object} controller - settlementController instance from DI.
+ * @param {Object} dependencies - DI container or controller
  * @returns {Router} Express router with settlement routes.
  */
-export default function settlementRoutes(controller) {
+export default function settlementRoutes(dependencies = {}) {
   const router = express.Router();
+  const controller =
+    dependencies.settlementController || dependencies;
+  const accessService = dependencies.accessService;
 
   // All settlement routes require authentication
   router.use(authenticateToken);
 
-  // ── Header Validation for Retailers ──────────────────────────────────
+  // Header Validation for Retailers
   const warehouseHeaderSchema = Joi.object({
     "x-warehouse-id": Joi.string().uuid().required(),
   }).unknown(true);
 
-  // ── Dashboard Summary ────────────────────────────────────────────────
+  // ─── Global Settlement Queries ───────────────────────────────────────
   router.get(
     "/summary",
-    requireRoles("admin", "retailer"),
+    requirePermissions(accessService, "settlements:read"),
     validate(warehouseHeaderSchema, "headers"),
     controller.getSummary,
   );
 
-  // ── Ledger History (admin + retailer) ────────────────────────────────
   router.get(
     "/ledgers",
-    requireRoles("admin", "retailer"),
+    requirePermissions(accessService, "settlements:read"),
     validate(warehouseHeaderSchema, "headers"),
     validate(settlementSchemas.ledgerQuery, "query"),
     controller.getLedgers,
   );
 
-  // ── Settlement / Payout History (admin + retailer) ───────────────────
   router.get(
     "/",
-    requireRoles("admin", "retailer"),
+    requirePermissions(accessService, "settlements:read"),
     validate(warehouseHeaderSchema, "headers"),
     validate(settlementSchemas.settlementQuery, "query"),
     controller.getSettlements,
   );
 
-  // ── Manual Adjustment (admin only) ───────────────────────────────────
+  // ─── Financial Mutations (Admin RBAC) ────────────────────────────────
   router.post(
     "/adjustments",
-    requireRoles("admin"),
+    requirePermissions(accessService, "settlements:manage"),
     validate(settlementSchemas.manualAdjustment),
     controller.addManualAdjustment,
   );
 
-  // ── Execute FIFO Settlement (admin only) ─────────────────────────────
   router.post(
     "/execute",
-    requireRoles("admin"),
+    requirePermissions(accessService, "settlements:manage"),
     validate(settlementSchemas.settlementExecution),
     controller.executeSettlement,
   );
 
-  // ── Admin Settlement Routes ──────────────────────────────────────────
+  // ─── Admin Settlement Endpoints (RBAC Guarded) ───────────────────────
 
-  // Endpoint 1: Financial summary for a retailer
   router.get(
     "/admin/retailers/:retailerId/summary",
-    requireRoles("admin"),
+    requirePermissions(accessService, "settlements:read"),
     controller.getAdminRetailerSummary,
   );
 
-  // Endpoint 2: All unsettled ledger rows (dual-line, FIFO order)
   router.get(
     "/admin/retailers/:retailerId/ledgers/unsettled",
-    requireRoles("admin"),
+    requirePermissions(accessService, "settlements:read"),
     controller.getAdminUnsettledLedgers,
   );
 
-  // Endpoint 3: Full payout history for a retailer
   router.get(
     "/admin/retailers/:retailerId/history",
-    requireRoles("admin"),
+    requirePermissions(accessService, "settlements:read"),
     controller.getAdminSettlementHistory,
   );
 
-  // Endpoint 4: Execute FIFO payout (admin-initiated)
   router.post(
     "/admin/execute",
-    requireRoles("admin"),
+    requirePermissions(accessService, "settlements:manage"),
     validate(settlementSchemas.adminSettlementExecution),
     controller.executeAdminFifoPayout,
   );
 
-  // Endpoint 5: All retailers with outstanding balances (view-backed)
   router.get(
     "/admin/due-today",
-    requireRoles("admin"),
+    requirePermissions(accessService, "settlements:read"),
     controller.getAdminDueSettlements,
   );
 
-  // ── Retailer Settlement Routes ─────────────────────────────────────────
+  // ─── Retailer Settlement Endpoints ───────────────────────────────────
 
-  // Endpoint 1: Get Retailer Ledgers (Tab 1 & 2)
   router.get(
     "/retailer/ledgers",
-    requireRoles("retailer"),
+    requirePermissions(accessService, "retailers:settlements:read"),
     validate(warehouseHeaderSchema, "headers"),
     validate(settlementSchemas.ledgerQuery, "query"),
     controller.getRetailerLedgers,
   );
 
-  // Endpoint 2: Get Settlement History (Tab 3)
   router.get(
     "/retailer/history",
-    requireRoles("retailer"),
+    requirePermissions(accessService, "retailers:settlements:read"),
     controller.getRetailerSettlementHistory,
   );
 
-  // Endpoint 3: Get Settlement Details Breakdown (Razorpay style)
   router.get(
     "/retailer/history/:settlementId",
-    requireRoles("retailer"),
+    requirePermissions(accessService, "retailers:settlements:read"),
     controller.getRetailerSettlementDetails,
   );
 

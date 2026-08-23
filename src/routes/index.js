@@ -22,7 +22,7 @@ import bannerRoutes from "./bannerRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
- * Setup all API routes
+ * Setup all API routes with dependency injection
  * @param {Express} app - Express application instance
  * @param {Object} dependencies - Dependency injection container
  */
@@ -77,14 +77,14 @@ export function setupRoutes(app, dependencies = {}) {
   app.use(`${apiV1}/schools`, schoolRoutes(dependencies));
   app.use(`${apiV1}/orders`, orderRoutes(dependencies));
   app.use(`${apiV1}/pincodes`, pincodeRoutes(dependencies));
-  app.use(`${apiV1}/warehouses`, warehouseRoutes);
+  app.use(`${apiV1}/warehouses`, warehouseRoutes(dependencies));
   app.use(`${apiV1}/categories`, categoryRoutes(dependencies));
   app.use(`${apiV1}/payments`, paymentRoutes(dependencies));
   app.use(`${apiV1}/brands`, brandRoutes(dependencies));
-  app.use(`${apiV1}/retailer`, retailerRoutes);
-  app.use(`${apiV1}/retailer/bank-accounts`, retailerBankAccountRoutes);
-  app.use(`${apiV1}/retailer-schools`, retailerSchoolRoutes);
-  app.use(`${apiV1}/retailer/orders`, retailerOrderRoutes);
+  app.use(`${apiV1}/retailer`, retailerRoutes(dependencies));
+  app.use(`${apiV1}/retailer/bank-accounts`, retailerBankAccountRoutes(dependencies));
+  app.use(`${apiV1}/retailer-schools`, retailerSchoolRoutes(dependencies));
+  app.use(`${apiV1}/retailer/orders`, retailerOrderRoutes(dependencies));
   app.use(`${apiV1}/delivery/auth`, deliveryAuthRoutes(dependencies));
   app.use(`${apiV1}/delivery`, deliveryRoutes(dependencies));
   app.use(`${apiV1}/admin/delivery`, adminDeliveryRoutes(dependencies));
@@ -93,10 +93,7 @@ export function setupRoutes(app, dependencies = {}) {
     dpAdminRoutes(dependencies),
   );
   app.use(`${apiV1}/images`, imageRoutes);
-  app.use(
-    `${apiV1}/settlements`,
-    settlementRoutes(dependencies.settlementController),
-  );
+  app.use(`${apiV1}/settlements`, settlementRoutes(dependencies));
   app.use(`${apiV1}/banners`, bannerRoutes(dependencies));
 
   // Handle 404 for all other routes

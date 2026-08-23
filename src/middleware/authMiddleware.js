@@ -1,4 +1,5 @@
 import authService from "../services/authService.js";
+import { AppError } from "./errorHandler.js";
 import { logger } from "../utils/logger.js";
 
 /**
@@ -99,8 +100,7 @@ export const optionalAuth = async (req, res, next) => {
 };
 
 /**
- * Role-based authorization middleware
- * Note: Role system not implemented in current schema, placeholder for future use
+ * Role-based authorization middleware (Legacy)
  */
 export const requireRoles = (...roles) => {
   return (req, res, next) => {
@@ -112,8 +112,7 @@ export const requireRoles = (...roles) => {
       });
     }
 
-    // TODO: Implement role system when roles are added to user schema
-    const userRoles = req.user.roles || [];
+    const userRoles = req.user.roles || (req.user.role ? [req.user.role] : []);
     const hasRole = roles.some((role) => userRoles.includes(role));
 
     if (!hasRole && roles.length > 0) {
@@ -213,4 +212,173 @@ export const requireActiveUser = (req, res, next) => {
   }
 
   next();
+};
+
+// ============================================================================
+// HYBRID RBAC + ABAC ACCESS CONTROL MIDDLEWARE
+// ============================================================================
+
+/**
+ * Enforces Role-Based Access Control (RBAC).
+ * Performs an O(1) in-memory lookup against the cached role-permission mappings.
+ * @param {Object} accessService - Injected AccessService instance from DI container
+ * @param {string|Array<string>} requiredPermissions - Required permission string(s) (e.g. 'products:manage')
+ * @returns {Function} Express middleware function
+ */
+export const requirePermissions = (accessService, ...requiredPermissions) => {
+  return (req, res, next) => {
+    try {
+      if (!req.user) {
+        throw new AppError("Authentication required. Please login.", 401);
+      }
+
+      if (!accessService) {
+        logger.error("requirePermissions middleware error: accessService not provided");
+        throw new AppError("Access service unavailable", 500);
+      }
+
+      const roles = req.user.roles || (req.user.role ? [req.user.role] : []);
+      
+      // Flatten requiredPermissions in case arrays or comma-separated strings were passed
+      const permissionsList = requiredPermissions.flat();
+
+      // hasPermission evaluates in O(1) time and throws 403 AppError on violation
+      accessService.hasPermission(roles, permissionsList);
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+};
+
+/**
+ * Enforces Attribute-Based Access Control (ABAC) for retailers interacting with school-tagged resources.
+ * Validates retailer-school pairing, allowed grade levels, and allowed product types with LRU micro-caching.
+ * @param {Object} accessService - Injected AccessService instance from DI container
+ * @returns {Function} Express middleware function
+ */
+export const requireRetailerSchoolScope = (accessService) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        throw new AppError("Authentication required. Please login.", 401);
+      }
+
+      if (!accessService) {
+        logger.error("requireRetailerSchoolScope middleware error: accessService not provided");
+        throw new AppError("Access service unavailable", 500);
+      }
+
+      const userId = req.user.id || req.user._id;
+      const roles = req.user.roles || (req.user.role ? [req.user.role] : []);
+
+      // Admins & Managers bypass retailer school scope checks
+      if (roles.includes("superadmin") || roles.includes("manager")) {
+        return next();
+      }
+
+      // Ensure user has retailer role
+      if (!roles.includes("retailer")) {
+        throw new AppError("Access denied: Retailer role required", 403);
+      }
+
+      // Extract schoolId from params, body, or query
+      const schoolId = req.params.schoolId || req.body.schoolId || req.query.schoolId;
+      if (!schoolId) {
+        throw new AppError("School ID is required for school-scoped operations", 400);
+      }
+
+      // Extract optional attributes
+      const grade = req.body?.grade || req.query?.grade || null;
+      const productType = req.body?.productType || req.query?.productType || null;
+
+      // Validate against bounded LRU micro-cache / Supabase
+      await accessService.validateRetailerSchoolScope(userId, schoolId, grade, productType);
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+};
+
+/**
+ * Enforces Attribute-Based Access Control (ABAC) for retailers managing general store categories.
+ * Validates category authorization with LRU micro-caching.
+ * @param {Object} accessService - Injected AccessService instance from DI container
+ * @returns {Function} Express middleware function
+ */
+export const requireRetailerGeneralScope = (accessService) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        throw new AppError("Authentication required. Please login.", 401);
+      }
+
+      if (!accessService) {
+        logger.error("requireRetailerGeneralScope middleware error: accessService not provided");
+        throw new AppError("Access service unavailable", 500);
+      }
+
+      const userId = req.user.id || req.user._id;
+      const roles = req.user.roles || (req.user.role ? [req.user.role] : []);
+
+      if (roles.includes("superadmin") || roles.includes("manager")) {
+        return next();
+      }
+
+      if (!roles.includes("retailer")) {
+        throw new AppError("Access denied: Retailer role required", 403);
+      }
+
+      const categoryId = req.params.categoryId || req.body.categoryId || req.query.categoryId;
+      if (!categoryId) {
+        throw new AppError("Category ID is required for general catalog operations", 400);
+      }
+
+      await accessService.validateRetailerGeneralScope(userId, categoryId);
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+};
+
+/**
+ * Enforces Attribute-Based Access Control (ABAC) for administrative staff with scoped entity constraints.
+ * @param {Object} accessService - Injected AccessService instance from DI container
+ * @param {string} entityType - Entity type ('SCHOOL', 'CATEGORY', 'RETAILER', 'ALL')
+ * @param {string} [idParamName='id'] - Name of req.params or req.body field containing the entity UUID
+ * @returns {Function} Express middleware function
+ */
+export const requireAdminScope = (accessService, entityType, idParamName = "id") => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        throw new AppError("Authentication required. Please login.", 401);
+      }
+
+      if (!accessService) {
+        logger.error("requireAdminScope middleware error: accessService not provided");
+        throw new AppError("Access service unavailable", 500);
+      }
+
+      const userId = req.user.id || req.user._id;
+      const roles = req.user.roles || (req.user.role ? [req.user.role] : []);
+
+      if (roles.includes("superadmin")) {
+        return next();
+      }
+
+      const entityId = req.params[idParamName] || req.body[idParamName] || req.query[idParamName] || null;
+
+      await accessService.validateAdminScope(userId, entityType, entityId);
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
 };

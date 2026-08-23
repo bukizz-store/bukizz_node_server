@@ -5,7 +5,7 @@ import express from "express";
 async function verify() {
   try {
     const app = express();
-    const deps = createDependencies();
+    const deps = await createDependencies();
     setupRoutes(app, deps);
     console.log("App loaded successfully!");
     process.exit(0);

@@ -1,98 +1,103 @@
 import express from "express";
 import multer from "multer";
-import { authenticateToken } from "../middleware/authMiddleware.js";
+import {
+  authenticateToken,
+  requirePermissions,
+} from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import {
-    categorySchemas,
-    paramSchemas
+  categorySchemas,
+  paramSchemas,
 } from "../models/schemas.js";
 import categoryController from "../controllers/categoryController.js";
 
 /**
  * Category Routes
+ * @param {Object} dependencies - Dependency injection container
  * @returns {Router} Express router
  */
-export default function categoryRoutes() {
-    const router = express.Router();
+export default function categoryRoutes(dependencies = {}) {
+  const router = express.Router();
+  const { accessService } = dependencies;
 
-    // Configure multer for file uploads (similar to schoolRoutes)
-    const storage = multer.memoryStorage();
-    const upload = multer({
-        storage,
-        limits: {
-            fileSize: 5 * 1024 * 1024, // 5MB limit
-        },
-        fileFilter: (req, file, cb) => {
-            if (file.mimetype.startsWith("image/")) {
-                cb(null, true);
-            } else {
-                cb(new Error("Only image files are allowed"), false);
-            }
-        },
-    });
+  // Configure multer for file uploads
+  const storage = multer.memoryStorage();
+  const upload = multer({
+    storage,
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5MB limit
+    },
+    fileFilter: (req, file, cb) => {
+      if (file.mimetype.startsWith("image/")) {
+        cb(null, true);
+      } else {
+        cb(new Error("Only image files are allowed"), false);
+      }
+    },
+  });
 
-    // Public Routes
+  // Public Routes
 
-    /**
-     * Search/List categories
-     * GET /api/v1/categories
-     */
-    router.get(
-        "/",
-        validate(categorySchemas.query, "query"),
-        categoryController.searchCategories
-    );
+  /**
+   * Search/List categories
+   * GET /api/v1/categories
+   */
+  router.get(
+    "/",
+    validate(categorySchemas.query, "query"),
+    categoryController.searchCategories
+  );
 
-    /**
-     * Get category by ID
-     * GET /api/v1/categories/:id
-     */
-    router.get(
-        "/:id",
-        validate(paramSchemas.id, "params"),
-        categoryController.getCategory
-    );
+  /**
+   * Get category by ID
+   * GET /api/v1/categories/:id
+   */
+  router.get(
+    "/:id",
+    validate(paramSchemas.id, "params"),
+    categoryController.getCategory
+  );
 
-    // Protected Routes (Create, Update, Delete)
+  // Protected Routes (RBAC Guarded)
 
-    /**
-     * Create category
-     * POST /api/v1/categories
-     */
-    router.post(
-        "/",
-        authenticateToken,
-        upload.single("image"),
-        // Add authorize('admin') if you want to restrict to admins
-        validate(categorySchemas.create),
-        categoryController.createCategory
-    );
+  /**
+   * Create category
+   * POST /api/v1/categories
+   */
+  router.post(
+    "/",
+    authenticateToken,
+    requirePermissions(accessService, "categories:manage"),
+    upload.single("image"),
+    validate(categorySchemas.create),
+    categoryController.createCategory
+  );
 
-    /**
-     * Update category
-     * PUT /api/v1/categories/:id
-     */
-    router.put(
-        "/:id",
-        authenticateToken,
-        upload.single("image"),
-        // Add authorize('admin') if you want to restrict to admins
-        validate(paramSchemas.id, "params"),
-        validate(categorySchemas.update),
-        categoryController.updateCategory
-    );
+  /**
+   * Update category
+   * PUT /api/v1/categories/:id
+   */
+  router.put(
+    "/:id",
+    authenticateToken,
+    requirePermissions(accessService, "categories:manage"),
+    upload.single("image"),
+    validate(paramSchemas.id, "params"),
+    validate(categorySchemas.update),
+    categoryController.updateCategory
+  );
 
-    /**
-     * Delete category
-     * DELETE /api/v1/categories/:id
-     */
-    router.delete(
-        "/:id",
-        authenticateToken,
-        // Add authorize('admin') if you want to restrict to admins
-        validate(paramSchemas.id, "params"),
-        categoryController.deleteCategory
-    );
+  /**
+   * Delete category
+   * DELETE /api/v1/categories/:id
+   */
+  router.delete(
+    "/:id",
+    authenticateToken,
+    requirePermissions(accessService, "categories:manage"),
+    validate(paramSchemas.id, "params"),
+    categoryController.deleteCategory
+  );
 
-    return router;
+  return router;
 }
