@@ -1,4 +1,4 @@
-import authService from "../services/authService.js";
+import defaultAuthService from "../services/authService.js";
 import { logger } from "../utils/logger.js";
 
 // Helper to set cookies and send response
@@ -12,7 +12,7 @@ const sendTokenResponse = (res, result, message, statusCode = 200) => {
       httpOnly: true,
       secure: isProduction,
       sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000 // 24h default
+      maxAge: 24 * 60 * 60 * 1000, // 24h default
     });
   }
 
@@ -21,35 +21,133 @@ const sendTokenResponse = (res, result, message, statusCode = 200) => {
       httpOnly: true,
       secure: isProduction,
       sameSite: "lax",
-      maxAge: (expiresIn || 7 * 24 * 60 * 60) * 1000 
+      maxAge: (expiresIn || 7 * 24 * 60 * 60) * 1000,
     });
   }
 
-  // Include tokens in response body for frontend compatibility
-  // TODO: Update frontend to use cookies exclusively for better security
   const responseData = {
     ...data,
     accessToken,
-    refreshToken
+    refreshToken,
   };
 
   res.status(statusCode).json({
     success: true,
     message,
-    data: responseData
+    data: responseData,
   });
 };
 
 export class AuthController {
+  constructor(deps = {}) {
+    if (deps && (deps.authService || deps.userService || deps.accessService)) {
+      this.authService = deps.authService || defaultAuthService;
+      this.userService = deps.userService || null;
+      this.accessService = deps.accessService || null;
+    } else if (deps && deps.login) {
+      this.authService = deps;
+      this.userService = null;
+      this.accessService = null;
+    } else {
+      this.authService = defaultAuthService;
+      this.userService = null;
+      this.accessService = null;
+    }
+
+    // Bind methods to preserve context
+    this.register = this.register.bind(this);
+    this.registerRetailer = this.registerRetailer.bind(this);
+    this.sendRetailerOtp = this.sendRetailerOtp.bind(this);
+    this.verifyRetailerOtp = this.verifyRetailerOtp.bind(this);
+    this.verifyRetailer = this.verifyRetailer.bind(this);
+    this.loginRetailer = this.loginRetailer.bind(this);
+    this.login = this.login.bind(this);
+    this.googleLogin = this.googleLogin.bind(this);
+    this.appleLogin = this.appleLogin.bind(this);
+    this.refreshToken = this.refreshToken.bind(this);
+    this.logout = this.logout.bind(this);
+    this.deleteAccount = this.deleteAccount.bind(this);
+    this.requestPasswordReset = this.requestPasswordReset.bind(this);
+    this.resetPassword = this.resetPassword.bind(this);
+    this.getProfile = this.getProfile.bind(this);
+    this.verifyToken = this.verifyToken.bind(this);
+    this.sendOtp = this.sendOtp.bind(this);
+    this.verifyOtp = this.verifyOtp.bind(this);
+    this.registerDeliveryPartner = this.registerDeliveryPartner.bind(this);
+    this.approveDeliveryPartner = this.approveDeliveryPartner.bind(this);
+    this.getPendingDeliveryPartnersList = this.getPendingDeliveryPartnersList.bind(this);
+    this.loginDeliveryPartner = this.loginDeliveryPartner.bind(this);
+    this.resendDeliveryPartnerPin = this.resendDeliveryPartnerPin.bind(this);
+    this._attachPermissions = this._attachPermissions.bind(this);
+  }
+
+  /**
+   * Helper to attach live computed roles and permissions from admin_user_roles to a user object
+   * @private
+   */
+  async _attachPermissions(user) {
+    if (!user) return user;
+
+    let permissions = [];
+    let roles = [];
+
+    let accessSvc = this.accessService;
+    if (!accessSvc) {
+      try {
+        const { createDependencies } = await import("../config/dependencies.js");
+        const deps = await createDependencies();
+        accessSvc = deps.accessService;
+        if (!this.accessService && accessSvc) {
+          this.accessService = accessSvc;
+        }
+      } catch (e) {
+        logger.warn("AuthController: Failed to resolve accessService via DI:", e.message);
+      }
+    }
+
+    if (accessSvc && user.id) {
+      // Query live permissions based on admin_user_roles lookup
+      permissions = await accessSvc.getPermissionsForUser(user.id);
+
+      if (accessSvc.accessRepository?.getUserAdminRoles) {
+        roles = await accessSvc.accessRepository.getUserAdminRoles(user.id);
+      }
+    }
+
+    const effectiveRoles =
+      roles.length > 0
+        ? roles
+        : Array.isArray(user.roles) && user.roles.length > 0
+        ? user.roles
+        : user.role
+        ? [user.role]
+        : [];
+
+    if (permissions.length === 0 && effectiveRoles.length > 0 && accessSvc) {
+      permissions = accessSvc.getUserPermissions(effectiveRoles);
+    }
+
+    return {
+      ...user,
+      roles: effectiveRoles,
+      permissions,
+    };
+  }
+
   async register(req, res) {
     try {
       const { fullName, email, password } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.register({
+      const result = await authSvc.register({
         fullName,
         email,
         password,
       });
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, "User registered successfully", 201);
     } catch (error) {
@@ -64,13 +162,18 @@ export class AuthController {
   async registerRetailer(req, res) {
     try {
       const { fullName, email, password, phone } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.registerRetailer({
+      const result = await authSvc.registerRetailer({
         fullName,
         email,
         password,
         phone,
       });
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, result.message, 201);
     } catch (error) {
@@ -85,8 +188,9 @@ export class AuthController {
   async sendRetailerOtp(req, res) {
     try {
       const { email, fullName, password, phone } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.sendRetailerOtp({ email, fullName, password, phone });
+      const result = await authSvc.sendRetailerOtp({ email, fullName, password, phone });
 
       res.status(200).json({
         success: true,
@@ -104,8 +208,13 @@ export class AuthController {
   async verifyRetailerOtp(req, res) {
     try {
       const { email, otp } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.verifyRetailerOtp(email, otp);
+      const result = await authSvc.verifyRetailerOtp(email, otp);
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, result.message, 201);
     } catch (error) {
@@ -120,8 +229,9 @@ export class AuthController {
   async verifyRetailer(req, res) {
     try {
       const { retailerId, action } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.verifyRetailer(retailerId, action);
+      const result = await authSvc.verifyRetailer(retailerId, action);
 
       res.status(200).json({
         success: true,
@@ -140,8 +250,13 @@ export class AuthController {
   async loginRetailer(req, res) {
     try {
       const { email, password } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.loginRetailer(email, password);
+      const result = await authSvc.loginRetailer(email, password);
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, "Retailer login successful", 200);
     } catch (error) {
@@ -157,14 +272,17 @@ export class AuthController {
   async login(req, res) {
     try {
       const { email, password, loginAs } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.login(email, password, loginAs);
+      const result = await authSvc.login(email, password, loginAs);
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, "Login successful", 200);
     } catch (error) {
       logger.error("Login error:", error);
-
-      // Use 403 for role-based rejections, 401 for invalid credentials
       const statusCode = error.message?.startsWith("Unauthorized:") ? 403 : 401;
       res.status(statusCode).json({
         success: false,
@@ -186,8 +304,13 @@ export class AuthController {
         });
       }
 
-      const result = await authService.googleLogin(token);
+      const authSvc = this.authService || defaultAuthService;
+      const result = await authSvc.googleLogin(token);
       logger.info(`Google login successful for user: ${result.user?.email}`);
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, "Google login successful", 200);
     } catch (error) {
@@ -212,8 +335,13 @@ export class AuthController {
         });
       }
 
-      const result = await authService.appleLogin(token);
+      const authSvc = this.authService || defaultAuthService;
+      const result = await authSvc.appleLogin(token);
       logger.info(`Apple login successful for user: ${result.user?.email}`);
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, "Apple login successful", 200);
     } catch (error) {
@@ -228,8 +356,13 @@ export class AuthController {
   async refreshToken(req, res) {
     try {
       const { refreshToken } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.refreshToken(refreshToken);
+      const result = await authSvc.refreshToken(refreshToken);
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, "Token refreshed successfully", 200);
     } catch (error) {
@@ -245,6 +378,7 @@ export class AuthController {
     try {
       const userId = req.user?.id;
       const { refreshToken } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
       if (!userId) {
         return res.status(401).json({
@@ -253,7 +387,7 @@ export class AuthController {
         });
       }
 
-      const result = await authService.logout(userId, refreshToken);
+      const result = await authSvc.logout(userId, refreshToken);
 
       res.clearCookie("accessToken");
       res.clearCookie("refreshToken");
@@ -271,10 +405,10 @@ export class AuthController {
     }
   }
 
-
   async deleteAccount(req, res) {
     try {
       const userId = req.user?.id;
+      const authSvc = this.authService || defaultAuthService;
 
       if (!userId) {
         return res.status(401).json({
@@ -283,7 +417,7 @@ export class AuthController {
         });
       }
 
-      const result = await authService.deleteAccount(userId);
+      const result = await authSvc.deleteAccount(userId);
 
       res.status(200).json({
         success: true,
@@ -301,8 +435,9 @@ export class AuthController {
   async requestPasswordReset(req, res) {
     try {
       const { email } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.requestPasswordReset(email);
+      const result = await authSvc.requestPasswordReset(email);
 
       res.status(200).json({
         success: true,
@@ -324,8 +459,9 @@ export class AuthController {
   async resetPassword(req, res) {
     try {
       const { resetToken, newPassword } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.resetPassword(resetToken, newPassword);
+      const result = await authSvc.resetPassword(resetToken, newPassword);
 
       res.status(200).json({
         success: true,
@@ -340,10 +476,13 @@ export class AuthController {
     }
   }
 
+  /**
+   * Handles GET /api/v1/auth/me
+   * Returns user profile augmented with live roles from admin_user_roles and resolved permissions array.
+   */
   async getProfile(req, res) {
     try {
       const userId = req.user?.id;
-      console.log("userId", userId);
 
       if (!userId) {
         return res.status(401).json({
@@ -352,27 +491,35 @@ export class AuthController {
         });
       }
 
-      // Use UserService for comprehensive profile data if available
       let user = req.user;
 
       // Try to get enhanced profile data from UserService if available
       try {
-        const { createDependencies } = await import(
-          "../config/dependencies.js"
-        );
-        const { userService } = createDependencies();
-        user = await userService.getProfile(userId);
+        if (this.userService) {
+          user = await this.userService.getProfile(userId);
+        } else {
+          const { createDependencies } = await import("../config/dependencies.js");
+          const deps = await createDependencies();
+          if (deps.userService) {
+            user = await deps.userService.getProfile(userId);
+          }
+          if (!this.accessService && deps.accessService) {
+            this.accessService = deps.accessService;
+          }
+        }
       } catch (error) {
-        // Fallback to basic user data from token if UserService fails
         logger.warn(
           "Failed to get enhanced profile, using basic user data:",
           error.message
         );
       }
 
+      // Attach evaluated roles & permissions from admin_user_roles table
+      const userWithPermissions = await this._attachPermissions(user);
+
       res.status(200).json({
         success: true,
-        data: { user },
+        data: { user: userWithPermissions },
         message: "Profile retrieved successfully",
       });
     } catch (error) {
@@ -399,13 +546,18 @@ export class AuthController {
         });
       }
 
-      const result = await authService.verifyToken(token);
+      const authSvc = this.authService || defaultAuthService;
+      const result = await authSvc.verifyToken(token);
 
       if (!result.valid) {
         return res.status(401).json({
           success: false,
           message: result.error || "Invalid token",
         });
+      }
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
       }
 
       res.status(200).json({
@@ -425,8 +577,9 @@ export class AuthController {
   async sendOtp(req, res) {
     try {
       const { email, fullName, password } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.sendOtp({ email, fullName, password });
+      const result = await authSvc.sendOtp({ email, fullName, password });
 
       res.status(200).json({
         success: true,
@@ -444,8 +597,13 @@ export class AuthController {
   async verifyOtp(req, res) {
     try {
       const { email, otp } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.verifyOtp(email, otp);
+      const result = await authSvc.verifyOtp(email, otp);
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, result.message, 200);
     } catch (error) {
@@ -459,7 +617,8 @@ export class AuthController {
 
   async registerDeliveryPartner(req, res) {
     try {
-      const result = await authService.registerDeliveryPartner(req.body, req.files);
+      const authSvc = this.authService || defaultAuthService;
+      const result = await authSvc.registerDeliveryPartner(req.body, req.files);
 
       res.status(201).json({
         success: true,
@@ -479,8 +638,9 @@ export class AuthController {
     try {
       const { id } = req.params;
       const { isCodEligible } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.approveDeliveryPartner(id, isCodEligible);
+      const result = await authSvc.approveDeliveryPartner(id, isCodEligible);
 
       res.status(200).json({
         success: true,
@@ -498,10 +658,16 @@ export class AuthController {
 
   async getPendingDeliveryPartnersList(req, res) {
     try {
-      const { createDependencies } = await import("../config/dependencies.js");
-      const { userService } = createDependencies();
+      const userSvc = this.userService;
+      let result;
 
-      const result = await userService.getPendingDeliveryPartners(req.query);
+      if (userSvc) {
+        result = await userSvc.getPendingDeliveryPartners(req.query);
+      } else {
+        const { createDependencies } = await import("../config/dependencies.js");
+        const deps = await createDependencies();
+        result = await deps.userService.getPendingDeliveryPartners(req.query);
+      }
 
       res.status(200).json({
         success: true,
@@ -520,8 +686,13 @@ export class AuthController {
   async loginDeliveryPartner(req, res) {
     try {
       const { phone, pin } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.loginDeliveryPartner(phone, pin);
+      const result = await authSvc.loginDeliveryPartner(phone, pin);
+
+      if (result.user) {
+        result.user = await this._attachPermissions(result.user);
+      }
 
       sendTokenResponse(res, result, "Delivery partner login successful", 200);
     } catch (error) {
@@ -542,8 +713,9 @@ export class AuthController {
   async resendDeliveryPartnerPin(req, res) {
     try {
       const { phone } = req.body;
+      const authSvc = this.authService || defaultAuthService;
 
-      const result = await authService.resendDeliveryPartnerPin(phone);
+      const result = await authSvc.resendDeliveryPartnerPin(phone);
 
       res.status(200).json({
         success: true,

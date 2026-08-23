@@ -148,7 +148,8 @@ export class AccessService {
 
   /**
    * Returns all resolved permission strings for a given array of roles.
-   * @param {string|Array<string>} roles - User roles
+   * Superadmin role receives the union of all registered permissions.
+   * @param {string|Array<string>} roles - User roles (e.g. ['superadmin'] or ['manager'])
    * @returns {Array<string>} List of distinct permission strings
    */
   getUserPermissions(roles) {
@@ -159,7 +160,7 @@ export class AccessService {
       : [];
 
     if (rolesArray.includes("superadmin")) {
-      // Superadmin has all known permissions in the cache
+      // Superadmin receives all known permissions in the cache
       const allPerms = new Set();
       for (const perms of this.rolePermissionsCache.values()) {
         perms.forEach((p) => allPerms.add(p));
@@ -176,6 +177,29 @@ export class AccessService {
     }
 
     return Array.from(userPerms);
+  }
+
+  /**
+   * Resolves all granted permission strings for a specific user ID by querying their
+   * active roles from admin_user_roles in database and evaluating them against the in-memory RBAC cache.
+   * @param {string} userId - User UUID
+   * @returns {Promise<Array<string>>} Distinct list of permission strings
+   */
+  async getPermissionsForUser(userId) {
+    if (!userId) {
+      return [];
+    }
+
+    try {
+      // Fetch user's assigned admin roles from the database
+      const roles = await this.accessRepository.getUserAdminRoles(userId);
+
+      // Evaluate and return permissions array
+      return this.getUserPermissions(roles);
+    } catch (error) {
+      logger.error("AccessService.getPermissionsForUser error:", { userId, error });
+      return [];
+    }
   }
 
   /**

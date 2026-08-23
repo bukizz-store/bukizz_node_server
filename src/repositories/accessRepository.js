@@ -36,10 +36,12 @@ export class AccessRepository {
         return [];
       }
 
-      return data.map((item) => ({
-        role_name: item.admin_roles?.role_name,
-        action_name: item.permissions?.action_name,
-      })).filter((item) => item.role_name && item.action_name);
+      return data
+        .map((item) => ({
+          role_name: item.admin_roles?.role_name,
+          action_name: item.permissions?.action_name,
+        }))
+        .filter((item) => item.role_name && item.action_name);
     } catch (error) {
       logger.error("AccessRepository.getAllRolePermissions error:", error);
       throw error;
@@ -127,11 +129,11 @@ export class AccessRepository {
   }
 
   /**
-   * Fetches the administrative roles assigned to a user.
+   * Fetches the administrative roles assigned to a user from admin_user_roles.
    * @param {string} userId - User UUID
-   * @returns {Promise<Array<string>>} Array of role names (e.g. ['manager', 'support'])
+   * @returns {Promise<Array<string>>} Array of role names (e.g. ['superadmin', 'manager'])
    */
-  async getUserRoles(userId) {
+  async getUserAdminRoles(userId) {
     try {
       const data = await executeSupabaseQuery(
         this.adminUserRolesTable,
@@ -150,9 +152,18 @@ export class AccessRepository {
         .map((item) => item.admin_roles?.role_name)
         .filter(Boolean);
     } catch (error) {
-      logger.error("AccessRepository.getUserRoles error:", { userId, error });
+      logger.error("AccessRepository.getUserAdminRoles error:", { userId, error });
       throw error;
     }
+  }
+
+  /**
+   * Alias for getUserAdminRoles for backward compatibility.
+   * @param {string} userId - User UUID
+   * @returns {Promise<Array<string>>}
+   */
+  async getUserRoles(userId) {
+    return this.getUserAdminRoles(userId);
   }
 
   /**

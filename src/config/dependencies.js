@@ -122,7 +122,8 @@ export async function createDependencies(overrides = {}) {
   const userController =
     overrides.userController || new UserController(userService);
   const authController =
-    overrides.authController || new AuthController(authService);
+    overrides.authController ||
+    new AuthController({ authService, userService, accessService });
   const productController =
     overrides.productController || new ProductController(productService);
   const schoolController =
