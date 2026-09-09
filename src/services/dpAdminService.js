@@ -56,6 +56,7 @@ export function dpAdminService({ dpAdminRepository }) {
       } else if (query.status === "Inactive") {
         filtered = partners.filter((dp) => dp.computedStatus === "Inactive");
       }
+      // For "active"/"inactive", the DB query already applied is_active filter
 
       return {
         partners: filtered,

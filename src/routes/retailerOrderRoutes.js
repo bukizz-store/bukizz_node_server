@@ -62,6 +62,51 @@ router.get(
 );
 
 /**
+ * @route   POST /api/v1/retailer/orders/warehouse/:warehouseId/filter
+ * @desc    Advanced filtered order query with product type, school, product, student filters
+ * @access  Private (Retailer)
+ */
+router.post(
+    "/warehouse/:warehouseId/filter",
+    orderQueryLimiter,
+    retailerOrderController.getFilteredOrders
+);
+
+/**
+ * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/schools
+ * @desc    Get schools for filter dropdown
+ * @access  Private (Retailer)
+ */
+router.get(
+    "/warehouse/:warehouseId/filter-options/schools",
+    orderQueryLimiter,
+    retailerOrderController.getFilterSchools
+);
+
+/**
+ * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/products
+ * @desc    Get products for filter dropdown, optionally filtered by schoolIds
+ * @access  Private (Retailer)
+ * @query   schoolIds (comma-separated)
+ */
+router.get(
+    "/warehouse/:warehouseId/filter-options/products",
+    orderQueryLimiter,
+    retailerOrderController.getFilterProducts
+);
+
+/**
+ * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId/filter-options/statuses
+ * @desc    Get unique item statuses for filter dropdown
+ * @access  Private (Retailer)
+ */
+router.get(
+    "/warehouse/:warehouseId/filter-options/statuses",
+    orderQueryLimiter,
+    retailerOrderController.getFilterStatuses
+);
+
+/**
  * @route   GET /api/v1/retailer/orders/warehouse/:warehouseId
  * @desc    Get all orders for a specific warehouse (with filters)
  * @access  Private (Retailer)
