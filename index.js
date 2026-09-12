@@ -50,6 +50,10 @@ import { verifyBankAccount } from "./src/services/razorpayVerificationService.js
 import { dpAdminRepository } from "./src/repositories/dpAdminRepository.js";
 import { dpAdminService } from "./src/services/dpAdminService.js";
 import { dpAdminController } from "./src/controllers/dpAdminController.js";
+import { createReviewRepository } from "./src/repositories/reviewRepository.js";
+import { createReviewService } from "./src/services/reviewService.js";
+import { createReviewController } from "./src/controllers/reviewController.js";
+
 
 // Import middleware and utilities
 import { errorHandler } from "./src/middleware/errorHandler.js";
@@ -149,6 +153,14 @@ async function startServer() {
     const dpAdminSvc = dpAdminService({ dpAdminRepository });
     const dpAdminCtrl = dpAdminController({ dpAdminService: dpAdminSvc });
 
+    // Initialize Review layer
+    const reviewRepository = createReviewRepository();
+    const reviewService = createReviewService({
+      reviewRepository,
+      productRepository,
+    });
+    const reviewController = createReviewController({ reviewService });
+
     // Dependency injection container
     const dependencies = {
       supabase,
@@ -160,6 +172,9 @@ async function startServer() {
       settlementController: settlementCtrl,
       deliveryController: deliveryCtrl,
       dpAdminCtrl,
+      reviewController,
+      reviewService,
+      reviewRepository,
       authService,
       userService,
       productService,
