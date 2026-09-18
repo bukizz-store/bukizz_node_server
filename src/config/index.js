@@ -109,6 +109,15 @@ export const config = {
       apiSecret: process.env.PAYMENT_API_SECRET,
     },
   },
+
+  // Cloudflare R2 storage configuration
+  r2: {
+    accountId: process.env.R2_ACCOUNT_ID,
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+    bucketName: process.env.R2_BUCKET_NAME,
+    publicDomain: process.env.R2_PUBLIC_DOMAIN || "https://cdn.bukizz.in",
+  },
 };
 
 /**

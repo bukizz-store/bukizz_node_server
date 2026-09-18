@@ -4,6 +4,7 @@ import { authenticateToken } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { schoolSchemas, paramSchemas } from "../models/schemas.js";
 import { cacheMiddleware } from "../middleware/cacheControl.js";
+import { createRateLimiter } from "../middleware/rateLimiter.js";
 
 /**
  * School Routes Factory
@@ -56,6 +57,26 @@ export default function schoolRoutes(dependencies = {}) {
       });
     }
   };
+
+  // Rate limiter for connect school lead submissions (10 submissions per 15 min per IP)
+  const inquiryRateLimiter = createRateLimiter({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: {
+      error: "Too many inquiries submitted from this IP, please try again after 15 minutes.",
+    },
+  });
+
+  /**
+   * Submit school connect inquiry
+   * POST /api/v1/schools/connect
+   */
+  router.post(
+    "/connect",
+    inquiryRateLimiter,
+    validate(schoolSchemas.connectSchool),
+    schoolController.submitSchoolInquiry
+  );
 
   // Public school routes (no authentication required)
 

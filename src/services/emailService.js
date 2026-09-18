@@ -561,6 +561,106 @@ class EmailService {
       logger.error("📧 Error sending refund processed email:", error);
     }
   }
+
+  /**
+   * Email: School Connect Inquiry → Bukizz Team
+   */
+  async sendSchoolConnectNotificationEmail(inquiryData) {
+    const schoolName = inquiryData.school_name || inquiryData.schoolName || "Unknown School";
+    const city = inquiryData.city || "Not specified";
+    const contactPerson = inquiryData.contact_person || inquiryData.contactPerson || "Not specified";
+    const contactNumber = inquiryData.contact_number || inquiryData.contactNumber || inquiryData.phone || "Not specified";
+    const designation = inquiryData.designation || "Not specified";
+    const query = inquiryData.query || "No specific query provided";
+
+    const adminEmail = process.env.BUKIZZ_CONTACT_EMAIL || process.env.ADMIN_EMAIL || "bukizzstore@gmail.com";
+    const subject = `🏫 New School Connect Inquiry: ${schoolName} (${city})`;
+
+    const htmlContent = `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 620px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+        <div style="background: linear-gradient(135deg, #1e40af, #3b82f6); color: #ffffff; padding: 24px; text-align: center;">
+          <h2 style="margin: 0 0 8px 0; font-size: 22px; font-weight: 700; letter-spacing: -0.5px;">🏫 New School Connect Request</h2>
+          <p style="margin: 0; font-size: 14px; opacity: 0.9;">A school representative has submitted a query via the Bukizz platform</p>
+        </div>
+
+        <div style="padding: 24px;">
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 18px; margin-bottom: 20px;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <tr>
+                <td style="padding: 8px 0; color: #64748b; font-weight: 600; width: 140px;">School Name:</td>
+                <td style="padding: 8px 0; color: #0f172a; font-weight: 700; font-size: 15px;">${schoolName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b; font-weight: 600;">City:</td>
+                <td style="padding: 8px 0; color: #0f172a; font-weight: 600;">${city}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b; font-weight: 600;">Contact Person:</td>
+                <td style="padding: 8px 0; color: #0f172a; font-weight: 600;">${contactPerson}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b; font-weight: 600;">Designation:</td>
+                <td style="padding: 8px 0; color: #0f172a;">${designation}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; color: #64748b; font-weight: 600;">Contact Number:</td>
+                <td style="padding: 8px 0;">
+                  <a href="tel:${contactNumber}" style="color: #2563eb; font-weight: 700; text-decoration: none;">${contactNumber}</a>
+                  &nbsp;
+                  <a href="https://wa.me/91${contactNumber.replace(/[^0-9]/g, "")}" style="color: #16a34a; font-size: 12px; font-weight: 600; text-decoration: none; padding: 2px 6px; background-color: #dcfce7; border-radius: 4px;">WhatsApp</a>
+                </td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="margin-bottom: 24px;">
+            <h4 style="margin: 0 0 8px 0; color: #334155; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px;">Message / Query</h4>
+            <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 14px 16px; border-radius: 4px; color: #1e293b; font-size: 14px; line-height: 1.6; white-space: pre-wrap;">${query}</div>
+          </div>
+
+          <div style="text-align: center; padding-top: 12px; border-top: 1px solid #e2e8f0;">
+            <p style="margin: 0; color: #94a3b8; font-size: 12px;">Submitted on ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} IST</p>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const textContent = `
+NEW SCHOOL CONNECT REQUEST
+--------------------------
+School Name:    ${schoolName}
+City:           ${city}
+Contact Person: ${contactPerson}
+Designation:    ${designation}
+Contact Number: ${contactNumber}
+Query:          ${query}
+Date:           ${new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+    `;
+
+    const mailOptions = {
+      from: `"Bukizz Connect" <${process.env.SMTP_USER || process.env.EMAIL_FROM || "noreply@bukizz.com"}>`,
+      to: adminEmail,
+      subject,
+      html: htmlContent,
+      text: textContent,
+    };
+
+    try {
+      if (this.transporter && typeof this.transporter.sendMail === "function") {
+        const result = await this.transporter.sendMail(mailOptions);
+        logger.info(`📧 School connect notification email sent to ${adminEmail}: ${result?.messageId || "ok"}`);
+        return result;
+      } else {
+        logger.warn("Transporter not initialized or missing sendMail, logging email instead:", {
+          to: adminEmail,
+          subject,
+        });
+      }
+    } catch (error) {
+      logger.error("📧 Error sending school connect notification email:", error);
+      // Non-blocking: Do not re-throw error so submission continues
+    }
+  }
 }
 
 export const emailService = new EmailService();

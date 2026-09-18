@@ -37,7 +37,7 @@ export const authenticateToken = async (req, res, next) => {
         return res.status(401).json({
           success: false,
           error: "Token expired",
-          message: "Please refresh your token",
+          message: "Your session has expired. Please sign in again to continue.",
         });
       }
 

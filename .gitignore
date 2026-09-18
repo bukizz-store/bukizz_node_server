@@ -118,6 +118,7 @@ Thumbs.db
 *.sqlite
 *.db
 *.sql
+!src/db/migrations/migration_create_school_inquiries.sql
 
 # Test outputs
 test-results/

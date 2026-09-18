@@ -613,6 +613,22 @@ export const schoolSchemas = {
       .min(1)
       .required(),
   }),
+
+  connectSchool: Joi.object({
+    schoolName: Joi.string().trim().min(2).max(255).optional(),
+    school_name: Joi.string().trim().min(2).max(255).optional(),
+    city: Joi.string().trim().min(2).max(100).required(),
+    contactPerson: Joi.string().trim().min(2).max(255).optional(),
+    contact_person: Joi.string().trim().min(2).max(255).optional(),
+    contactNumber: Joi.string().trim().pattern(/^[6-9]\d{9}$/).optional(),
+    contact_number: Joi.string().trim().pattern(/^[6-9]\d{9}$/).optional(),
+    phone: Joi.string().trim().pattern(/^[6-9]\d{9}$/).optional(),
+    designation: Joi.string().trim().max(100).allow(null, "").optional(),
+    query: Joi.string().trim().max(3000).allow(null, "").optional(),
+  })
+    .or("schoolName", "school_name")
+    .or("contactPerson", "contact_person")
+    .or("contactNumber", "contact_number", "phone"),
 };
 
 /**
@@ -942,39 +958,6 @@ export const orderQuerySchemas = {
   }),
 };
 
-/**
- * Review validation schemas
- */
-export const reviewSchemas = {
-  create: Joi.object({
-    productId: uuidSchema,
-    orderItemId: optionalUuidSchema,
-    rating: Joi.number().integer().min(1).max(5).required(),
-    title: Joi.string().max(255).optional(),
-    body: Joi.string().optional(),
-    images: Joi.array().items(Joi.string().uri()).optional(),
-  }),
-
-  update: Joi.object({
-    rating: Joi.number().integer().min(1).max(5).optional(),
-    title: Joi.string().max(255).optional(),
-    body: Joi.string().optional(),
-    images: Joi.array().items(Joi.string().uri()).optional(),
-    isPublished: Joi.boolean().optional(),
-  }),
-
-  query: Joi.object({
-    page: Joi.number().integer().min(1).default(1),
-    limit: Joi.number().integer().min(1).max(100).default(20),
-    productId: optionalUuidSchema,
-    userId: optionalUuidSchema,
-    rating: Joi.number().integer().min(1).max(5).optional(),
-    verifiedPurchase: Joi.boolean().optional(),
-    isPublished: Joi.boolean().optional(),
-    sortBy: Joi.string().valid("createdAt", "rating").default("createdAt"),
-    sortOrder: Joi.string().valid("asc", "desc").default("desc"),
-  }),
-};
 
 /**
  * Address validation schemas
@@ -1027,7 +1010,11 @@ export const addressSchemas = {
  */
 export const paramSchemas = {
   id: Joi.object({
-    id: uuidSchema,
+    id: uuidSchema.optional(),
+    reviewId: uuidSchema.optional(),
+  }).or("id", "reviewId"),
+  reviewId: Joi.object({
+    reviewId: uuidSchema,
   }),
   userId: Joi.object({
     userId: uuidSchema,
@@ -1117,6 +1104,65 @@ export const paramSchemas = {
     imageId: uuidSchema,
   }),
 };
+
+/**
+ * Review validation schemas
+ */
+export const reviewSchemas = {
+  createReview: Joi.object({
+    rating: Joi.number().integer().min(1).max(5).required(),
+    title: Joi.string().trim().max(150).allow("", null),
+    comment: Joi.string().trim().max(2000).required(),
+    images: Joi.array().items(Joi.string().uri()).max(5).default([]),
+  }),
+
+  updateReview: Joi.object({
+    rating: Joi.number().integer().min(1).max(5),
+    title: Joi.string().trim().max(150).allow("", null),
+    comment: Joi.string().trim().max(2000),
+    images: Joi.array().items(Joi.string().uri()).max(5),
+  }).min(1),
+
+  reviewQuery: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(50).default(10),
+    rating: Joi.number().integer().min(1).max(5),
+    sortBy: Joi.string()
+      .valid("newest", "highest_rating", "lowest_rating")
+      .default("newest"),
+    verifiedOnly: Joi.boolean().default(false),
+    hasImages: Joi.boolean().default(false),
+  }),
+
+  adminModerateReview: Joi.object({
+    isApproved: Joi.boolean().required(),
+  }),
+
+  productIdParam: paramSchemas.productId,
+
+  // Compatibility aliases
+  create: Joi.object({
+    rating: Joi.number().integer().min(1).max(5).required(),
+    title: Joi.string().trim().max(150).allow("", null),
+    comment: Joi.string().trim().max(2000).required(),
+    images: Joi.array().items(Joi.string().uri()).max(5).default([]),
+  }),
+  update: Joi.object({
+    rating: Joi.number().integer().min(1).max(5),
+    title: Joi.string().trim().max(150).allow("", null),
+    comment: Joi.string().trim().max(2000),
+    images: Joi.array().items(Joi.string().uri()).max(5),
+  }).min(1),
+  query: Joi.object({
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(50).default(10),
+    rating: Joi.number().integer().min(1).max(5),
+    sortBy: Joi.string()
+      .valid("newest", "highest_rating", "lowest_rating")
+      .default("newest"),
+  }),
+};
+
 
 /**
  * Header validation schemas

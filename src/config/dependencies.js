@@ -25,6 +25,9 @@ import deliveryIncentiveService from "../services/deliveryIncentiveService.js";
 import deliveryBankService from "../services/deliveryBankService.js";
 import { verifyBankAccount } from "../services/razorpayVerificationService.js";
 import { DeliveryController } from "../controllers/deliveryController.js";
+import { createReviewRepository } from "../repositories/reviewRepository.js";
+import { createReviewService } from "../services/reviewService.js";
+import { createReviewController } from "../controllers/reviewController.js";
 import { getDB } from "../db/index.js";
 
 /**
@@ -53,6 +56,8 @@ export function createDependencies(overrides = {}) {
     overrides.orderQueryRepository || new OrderQueryRepository(db);
   const warehouseRepository =
     overrides.warehouseRepository || new WarehouseRepository();
+  const reviewRepository =
+    overrides.reviewRepository || createReviewRepository();
 
   // Services (Business Logic Layer)
   const userService = overrides.userService || new UserService(userRepository);
@@ -71,6 +76,12 @@ export function createDependencies(overrides = {}) {
       orderQueryRepository,
       warehouseRepository,
     );
+  const reviewService =
+    overrides.reviewService ||
+    createReviewService({
+      reviewRepository,
+      productRepository,
+    });
 
   // Settlement
   const settlementService =
@@ -115,6 +126,9 @@ export function createDependencies(overrides = {}) {
       deliveryIncentiveService: deliveryIncentiveSvc,
       deliveryBankService: deliveryBankSvc,
     });
+  const reviewController =
+    overrides.reviewController ||
+    createReviewController({ reviewService });
 
   return {
     // Database
@@ -131,6 +145,7 @@ export function createDependencies(overrides = {}) {
     settlementRepository,
     dpLedgerRepository: dpLedgerRepo,
     deliveryRepository: deliveryRepo,
+    reviewRepository,
 
     // Services
     userService,
@@ -141,6 +156,7 @@ export function createDependencies(overrides = {}) {
     settlementService,
     deliveryIncentiveService: deliveryIncentiveSvc,
     deliveryBankService: deliveryBankSvc,
+    reviewService,
 
     // Controllers
     userController,
@@ -150,5 +166,6 @@ export function createDependencies(overrides = {}) {
     orderController,
     settlementController: settlementCtrl,
     deliveryController: deliveryCtrl,
+    reviewController,
   };
 }
