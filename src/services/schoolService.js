@@ -1,5 +1,7 @@
 import { AppError } from "../middleware/errorHandler.js";
 import { logger } from "../utils/logger.js";
+import { schoolInquiryRepository } from "../repositories/schoolInquiryRepository.js";
+import { emailService } from "./emailService.js";
 
 /**
  * School Service
@@ -746,6 +748,56 @@ export class SchoolService {
       return await this.schoolRepository.uploadImage(file, token);
     } catch (error) {
       logger.error("Error uploading school image:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Submit school connect inquiry
+   * @param {Object} inquiryData
+   * @returns {Promise<Object>} Created inquiry
+   */
+  async submitSchoolInquiry(inquiryData) {
+    try {
+      const schoolName = (inquiryData.school_name || inquiryData.schoolName || "").trim();
+      const city = (inquiryData.city || "").trim();
+      const contactPerson = (inquiryData.contact_person || inquiryData.contactPerson || "").trim();
+      const contactNumber = (inquiryData.contact_number || inquiryData.contactNumber || inquiryData.phone || "").trim();
+      const designation = (inquiryData.designation || "").trim() || null;
+      const query = (inquiryData.query || "").trim() || null;
+
+      if (!schoolName) throw new AppError("School name is required", 400);
+      if (!city) throw new AppError("City is required", 400);
+      if (!contactPerson) throw new AppError("Contact person name is required", 400);
+      if (!contactNumber) throw new AppError("Contact number is required", 400);
+
+      // Save inquiry in database
+      const inquiry = await schoolInquiryRepository.create({
+        school_name: schoolName,
+        city,
+        contact_person: contactPerson,
+        contact_number: contactNumber,
+        designation,
+        query,
+      });
+
+      // Send alert email asynchronously to Bukizz
+      emailService
+        .sendSchoolConnectNotificationEmail({
+          school_name: schoolName,
+          city,
+          contact_person: contactPerson,
+          contact_number: contactNumber,
+          designation,
+          query,
+        })
+        .catch((err) => {
+          logger.error("Failed to dispatch school connect notification email:", err);
+        });
+
+      return inquiry;
+    } catch (error) {
+      logger.error("Error in submitSchoolInquiry:", error);
       throw error;
     }
   }

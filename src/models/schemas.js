@@ -613,6 +613,22 @@ export const schoolSchemas = {
       .min(1)
       .required(),
   }),
+
+  connectSchool: Joi.object({
+    schoolName: Joi.string().trim().min(2).max(255).optional(),
+    school_name: Joi.string().trim().min(2).max(255).optional(),
+    city: Joi.string().trim().min(2).max(100).required(),
+    contactPerson: Joi.string().trim().min(2).max(255).optional(),
+    contact_person: Joi.string().trim().min(2).max(255).optional(),
+    contactNumber: Joi.string().trim().pattern(/^[6-9]\d{9}$/).optional(),
+    contact_number: Joi.string().trim().pattern(/^[6-9]\d{9}$/).optional(),
+    phone: Joi.string().trim().pattern(/^[6-9]\d{9}$/).optional(),
+    designation: Joi.string().trim().max(100).allow(null, "").optional(),
+    query: Joi.string().trim().max(3000).allow(null, "").optional(),
+  })
+    .or("schoolName", "school_name")
+    .or("contactPerson", "contact_person")
+    .or("contactNumber", "contact_number", "phone"),
 };
 
 /**

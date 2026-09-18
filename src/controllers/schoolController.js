@@ -547,4 +547,18 @@ export class SchoolController {
       });
     }
   });
+
+  /**
+   * Submit school connect inquiry
+   * POST /api/v1/schools/connect
+   */
+  submitSchoolInquiry = asyncHandler(async (req, res) => {
+    const inquiry = await this.schoolService.submitSchoolInquiry(req.body);
+
+    res.status(201).json({
+      success: true,
+      message: "Thank you for reaching out! Our school partnerships team will get in touch with you shortly.",
+      data: inquiry,
+    });
+  });
 }
