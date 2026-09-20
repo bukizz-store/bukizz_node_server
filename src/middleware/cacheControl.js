@@ -31,6 +31,20 @@ export function cacheControl(maxAge, options = {}) {
       return next();
     }
 
+    // Always preserve and add Vary: Origin and Accept-Encoding
+    // Critical for dynamic CORS so responses are properly cached per-origin
+    res.vary('Origin');
+    res.vary('Accept-Encoding');
+
+    // In development mode, disable caching so changes are immediate
+    // and browser cache does not reuse responses across different frontend ports (CORS error)
+    if (process.env.NODE_ENV === 'development') {
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
+      return next();
+    }
+
     const directives = [];
 
     if (isPublic) {
@@ -51,9 +65,6 @@ export function cacheControl(maxAge, options = {}) {
     }
 
     res.set('Cache-Control', directives.join(', '));
-
-    // Add Vary header to ensure proper caching with different Accept-Encoding
-    res.set('Vary', 'Accept-Encoding');
 
     next();
   };
