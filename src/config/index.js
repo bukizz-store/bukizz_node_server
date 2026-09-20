@@ -71,6 +71,14 @@ export const config = {
         return callback(null, true);
       }
 
+      // In non-production, allow any localhost and 127.0.0.1 port (Vite, Next.js, etc.)
+      if (process.env.NODE_ENV !== "production") {
+        const localhostPattern = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+        if (localhostPattern.test(origin)) {
+          return callback(null, true);
+        }
+      }
+
       // Allow local network IPs for mobile testing (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
       const localNetworkPattern = /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
       if (localNetworkPattern.test(origin)) {
