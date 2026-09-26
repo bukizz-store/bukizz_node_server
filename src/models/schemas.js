@@ -1016,6 +1016,12 @@ export const paramSchemas = {
   reviewId: Joi.object({
     reviewId: uuidSchema,
   }),
+  retailerId: Joi.object({
+    retailerId: Joi.alternatives().try(uuidSchema, Joi.string().valid("me")).required(),
+  }),
+  configKey: Joi.object({
+    configKey: Joi.string().trim().max(50).required(),
+  }),
   userId: Joi.object({
     userId: uuidSchema,
   }),
@@ -1350,5 +1356,157 @@ export const dpAdminSchemas = {
   paginationQuery: Joi.object({
     page: Joi.number().integer().min(1).default(1),
     limit: Joi.number().integer().min(1).max(100).default(20),
+  }),
+};
+
+/**
+ * GST Slab validation schemas
+ */
+export const gstSlabSchemas = {
+  create: Joi.object({
+    ratePercentage: Joi.number().min(0).max(100).precision(2).required(),
+    hsnSacCode: Joi.string().trim().max(20).required(),
+    description: Joi.string().trim().max(100).required(),
+  }),
+
+  update: Joi.object({
+    ratePercentage: Joi.number().min(0).max(100).precision(2).optional(),
+    hsnSacCode: Joi.string().trim().max(20).optional(),
+    description: Joi.string().trim().max(100).optional(),
+    isActive: Joi.boolean().optional(),
+  }).min(1),
+};
+
+/**
+ * Fee Configuration validation schemas
+ */
+export const feeConfigSchemas = {
+  update: Joi.object({
+    amount: Joi.number().min(0).precision(2).required(),
+    feeType: Joi.string().valid("FLAT", "PERCENTAGE").default("FLAT"),
+    gstRate: Joi.number().min(0).max(100).precision(2).default(18.00),
+    isActive: Joi.boolean(),
+  }),
+};
+
+/**
+ * Closing Fee Slab validation schemas
+ */
+export const closingFeeSlabSchemas = {
+  create: Joi.object({
+    minPrice: Joi.number().min(0).precision(2).required(),
+    maxPrice: Joi.number().min(0).precision(2).allow(null).default(null),
+    feeAmount: Joi.number().min(0).precision(2).required(),
+    isActive: Joi.boolean().default(true),
+  }).custom((value, helpers) => {
+    if (value.maxPrice !== null && value.maxPrice !== undefined) {
+      if (Number(value.maxPrice) <= Number(value.minPrice)) {
+        return helpers.message("maxPrice must be greater than minPrice");
+      }
+    }
+    return value;
+  }),
+
+  update: Joi.object({
+    minPrice: Joi.number().min(0).precision(2).optional(),
+    maxPrice: Joi.number().min(0).precision(2).allow(null).optional(),
+    feeAmount: Joi.number().min(0).precision(2).optional(),
+    isActive: Joi.boolean().optional(),
+  })
+    .min(1)
+    .custom((value, helpers) => {
+      if (
+        value.maxPrice !== null &&
+        value.maxPrice !== undefined &&
+        value.minPrice !== undefined
+      ) {
+        if (Number(value.maxPrice) <= Number(value.minPrice)) {
+          return helpers.message("maxPrice must be greater than minPrice");
+        }
+      }
+      return value;
+    }),
+};
+
+/**
+ * Retailer Commission validation schemas
+ */
+export const retailerCommissionSchemas = {
+  upsert: Joi.object({
+    retailerId: Joi.string().uuid().required(),
+    productType: Joi.string()
+      .valid("bookset", "uniform", "stationary", "general")
+      .allow(null)
+      .default(null),
+    categoryId: Joi.string().uuid().allow(null).default(null),
+    commissionPercentage: Joi.number().min(0).max(100).precision(2).required(),
+    isActive: Joi.boolean().default(true),
+  }),
+};
+
+/**
+ * Variant Component validation schemas
+ */
+export const variantComponentSchemas = {
+  setComponents: Joi.object({
+    components: Joi.array()
+      .items(
+        Joi.object({
+          componentTitle: Joi.string().trim().max(255).required(),
+          quantity: Joi.number().integer().min(1).required(),
+          unitPrice: Joi.number().min(0).precision(2).required(),
+          compareAtPrice: Joi.number()
+            .min(Joi.ref("unitPrice"))
+            .precision(2)
+            .required(),
+          gstSlabId: Joi.string().uuid().required(),
+          hsnSacCode: Joi.string().trim().max(20).required(),
+          sortOrder: Joi.number().integer().min(0).default(0),
+        })
+      )
+      .min(1)
+      .required(),
+  }),
+
+  revertToFlatGst: Joi.object({
+    gstSlabId: Joi.string().uuid().required(),
+    price: Joi.number().min(0).precision(2).required(),
+    compareAtPrice: Joi.number()
+      .min(Joi.ref("price"))
+      .precision(2)
+      .required(),
+  }),
+};
+
+/**
+ * Cart Calculation validation schema
+ */
+export const cartCalculationSchema = Joi.object({
+  items: Joi.array()
+    .items(
+      Joi.object({
+        productId: Joi.string().uuid().required(),
+        variantId: Joi.string().uuid().required(),
+        quantity: Joi.number().integer().min(1).required(),
+      })
+    )
+    .min(1)
+    .required(),
+  shippingAddress: Joi.object({
+    state: Joi.string().trim().required(),
+    pincode: Joi.string().trim().length(6).required(),
+  }).required(),
+});
+
+/**
+ * Invoice validation schemas
+ */
+export const invoiceSchemas = {
+  downloadParams: Joi.object({
+    orderId: Joi.string().uuid().required(),
+    invoiceId: Joi.string().uuid().required(),
+  }),
+  orderInvoiceListParams: Joi.object({
+    orderId: Joi.string().uuid().required(),
   }),
 };

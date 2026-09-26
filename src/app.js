@@ -16,6 +16,7 @@ import { isRedisConfigured } from "./queue/connection.js";
 import { startWebhookWorker, stopWebhookWorker } from "./workers/webhookWorker.js";
 import { startEmailWorker, stopEmailWorker } from "./workers/emailWorker.js";
 import { startOrderWorker, stopOrderWorker } from "./workers/orderWorker.js";
+import { createDependencies } from "./config/dependencies.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,7 +25,7 @@ const __dirname = path.dirname(__filename);
  * Main application entry point
  * Sets up Express server with all middleware, routes, and error handling
  */
-export async function createApp() {
+export async function createApp(dependencies = null) {
   const app = express();
   app.set("trust proxy", true);
 
@@ -47,8 +48,9 @@ export async function createApp() {
     // Global input sanitization
     app.use(sanitizeMiddleware);
 
-    // Setup routes
-    setupRoutes(app);
+    // Setup routes with dependency container
+    const deps = dependencies || createDependencies();
+    setupRoutes(app, deps);
 
     // Serve sitemap statically
     app.get("/sitemap.xml", (req, res) => {

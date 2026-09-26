@@ -4,9 +4,10 @@ import {
   requireRoles,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
-import { orderSchemas, orderQuerySchemas } from "../models/schemas.js";
+import { orderSchemas, orderQuerySchemas, invoiceSchemas } from "../models/schemas.js";
 import { createRateLimiter } from "../middleware/rateLimiter.js";
 import { OrderController } from "../controllers/orderController.js";
+import { createInvoiceController } from "../controllers/invoiceController.js";
 
 /**
  * Order Routes Factory
@@ -136,6 +137,54 @@ export default function orderRoutes(dependencies = {}) {
 
   // Track order status and location
   router.get("/:orderId/track", orderQueryLimiter, OrderController.trackOrder);
+
+  // Get invoices for an order
+  router.get(
+    "/:orderId/invoices",
+    orderQueryLimiter,
+    validate(invoiceSchemas.orderInvoiceListParams, "params"),
+    async (req, res, next) => {
+      try {
+        const invoiceController =
+          dependencies.invoiceController || createInvoiceController();
+        await invoiceController.getOrderInvoices(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // Download merged order invoice PDF
+  router.get(
+    "/:orderId/invoices/download",
+    orderQueryLimiter,
+    validate(invoiceSchemas.orderInvoiceListParams, "params"),
+    async (req, res, next) => {
+      try {
+        const invoiceController =
+          dependencies.invoiceController || createInvoiceController();
+        await invoiceController.downloadInvoicePdf(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  // Download invoice PDF
+  router.get(
+    "/:orderId/invoices/:invoiceId/download",
+    orderQueryLimiter,
+    validate(invoiceSchemas.downloadParams, "params"),
+    async (req, res, next) => {
+      try {
+        const invoiceController =
+          dependencies.invoiceController || createInvoiceController();
+        await invoiceController.downloadInvoicePdf(req, res, next);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   // Cancel order (customer self-service)
   router.put(

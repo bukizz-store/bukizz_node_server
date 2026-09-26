@@ -23,6 +23,12 @@ export class ProductVariantRepository {
         option_value_1: variantData.optionValue1,
         option_value_2: variantData.optionValue2,
         option_value_3: variantData.optionValue3,
+        gst_slab_id:
+          variantData.gstSlabId !== undefined
+            ? variantData.gstSlabId
+            : variantData.gst_slab_id !== undefined
+              ? variantData.gst_slab_id
+              : null,
         metadata: variantData.metadata || {},
       };
 
@@ -56,7 +62,12 @@ export class ProductVariantRepository {
           products!inner(title, sku, base_price),
           option_value_1_ref:product_option_values!option_value_1(id, value, product_option_attributes(name)),
           option_value_2_ref:product_option_values!option_value_2(id, value, product_option_attributes(name)),
-          option_value_3_ref:product_option_values!option_value_3(id, value, product_option_attributes(name))
+          option_value_3_ref:product_option_values!option_value_3(id, value, product_option_attributes(name)),
+          variant_components(
+            id, component_title, quantity, unit_price, compare_at_price,
+            gst_slab_id, hsn_sac_code, sort_order, is_active,
+            gst_slabs(id, rate_percentage, hsn_sac_code, description)
+          )
         `
         )
         .eq("id", variantId)
@@ -88,7 +99,12 @@ export class ProductVariantRepository {
           *,
           option_value_1_ref:product_option_values!option_value_1(id, value, product_option_attributes(name)),
           option_value_2_ref:product_option_values!option_value_2(id, value, product_option_attributes(name)),
-          option_value_3_ref:product_option_values!option_value_3(id, value, product_option_attributes(name))
+          option_value_3_ref:product_option_values!option_value_3(id, value, product_option_attributes(name)),
+          variant_components(
+            id, component_title, quantity, unit_price, compare_at_price,
+            gst_slab_id, hsn_sac_code, sort_order, is_active,
+            gst_slabs(id, rate_percentage, hsn_sac_code, description)
+          )
         `
         )
         .eq("product_id", productId)
@@ -107,6 +123,10 @@ export class ProductVariantRepository {
 
   /**
    * Update variant
+   * Supports updating price, compare_at_price, and setting gst_slab_id (including null)
+   * @param {string} variantId - Variant UUID
+   * @param {Object} updateData - Updates payload
+   * @returns {Promise<Object>} Updated variant
    */
   async update(variantId, updateData) {
     try {
@@ -115,10 +135,29 @@ export class ProductVariantRepository {
       const updatePayload = {};
 
       if (updateData.sku !== undefined) updatePayload.sku = updateData.sku;
-      if (updateData.price !== undefined)
-        updatePayload.price = updateData.price;
-      if (updateData.compareAtPrice !== undefined)
-        updatePayload.compare_at_price = updateData.compareAtPrice;
+      if (updateData.price !== undefined) {
+        updatePayload.price =
+          updateData.price !== null ? Number(updateData.price) : null;
+      }
+      if (
+        updateData.compareAtPrice !== undefined ||
+        updateData.compare_at_price !== undefined
+      ) {
+        const val =
+          updateData.compareAtPrice !== undefined
+            ? updateData.compareAtPrice
+            : updateData.compare_at_price;
+        updatePayload.compare_at_price = val !== null ? Number(val) : null;
+      }
+      if (
+        updateData.gstSlabId !== undefined ||
+        updateData.gst_slab_id !== undefined
+      ) {
+        updatePayload.gst_slab_id =
+          updateData.gstSlabId !== undefined
+            ? updateData.gstSlabId
+            : updateData.gst_slab_id;
+      }
       if (updateData.stock !== undefined)
         updatePayload.stock = updateData.stock;
       if (updateData.weight !== undefined)
@@ -148,6 +187,16 @@ export class ProductVariantRepository {
       logger.error("Error updating variant:", error);
       throw error;
     }
+  }
+
+  /**
+   * Update variant alias supporting price, compare_at_price, and setting gst_slab_id: null
+   * @param {string} id - Variant UUID
+   * @param {Object} updates - Updates payload
+   * @returns {Promise<Object>} Updated variant
+   */
+  async updateVariant(id, updates) {
+    return this.update(id, updates);
   }
 
   /**
@@ -288,6 +337,44 @@ export class ProductVariantRepository {
         : null,
       stock: parseInt(row.stock || 0),
       weight: row.weight ? parseFloat(row.weight) : null,
+      gstRate: parseFloat(row.gst_rate ?? row.metadata?.gstRate ?? 0),
+      hsnSacCode: row.hsn_sac_code || row.metadata?.hsnSacCode || "4901",
+      gstSlabId: row.gst_slab_id || null,
+      components: (row.variant_components || []).map((c) => ({
+        id: c.id,
+        componentTitle: c.component_title || c.componentTitle,
+        component_title: c.component_title || c.componentTitle,
+        quantity: c.quantity,
+        unitPrice: Number(c.unit_price ?? 0),
+        unit_price: Number(c.unit_price ?? 0),
+        compareAtPrice: Number(c.compare_at_price ?? c.unit_price ?? 0),
+        compare_at_price: Number(c.compare_at_price ?? c.unit_price ?? 0),
+        gstSlabId: c.gst_slab_id,
+        gst_slab_id: c.gst_slab_id,
+        hsnSacCode: c.hsn_sac_code,
+        hsn_sac_code: c.hsn_sac_code,
+        gstRate: Number(c.gst_slabs?.rate_percentage ?? 0),
+        sortOrder: c.sort_order ?? 0,
+      })),
+      isSplitGst: Boolean(
+        row.is_split_gst ||
+        (row.variant_components && row.variant_components.length > 0) ||
+        row.metadata?.isSplitGst
+      ),
+      name: [
+        row.option_value_1_ref?.value,
+        row.option_value_2_ref?.value,
+        row.option_value_3_ref?.value,
+      ].filter(Boolean).length > 0
+        ? [
+            row.option_value_1_ref?.value,
+            row.option_value_2_ref?.value,
+            row.option_value_3_ref?.value,
+          ].filter(Boolean).join(" / ")
+        : (row.metadata?.name || "Default Variant"),
+      option1: row.option_value_1_ref?.value || null,
+      option2: row.option_value_2_ref?.value || null,
+      option3: row.option_value_3_ref?.value || null,
       optionValues: {
         value1: row.option_value_1_ref
           ? {
@@ -327,4 +414,5 @@ export class ProductVariantRepository {
   }
 }
 
-export default new ProductVariantRepository();
+export const productVariantRepository = new ProductVariantRepository();
+export default productVariantRepository;

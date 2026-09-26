@@ -134,9 +134,9 @@ export class ProductRepository {
             brands(id, name, slug, description, country, logo_url)
           ),
           product_variants(
-            id, sku, price, compare_at_price, stock, weight, 
+            id, sku, price, compare_at_price, stock, weight,
             option_value_1, option_value_2, option_value_3, 
-            metadata, created_at, updated_at,
+            metadata, created_at, updated_at, gst_slab_id,
             option_value_1_ref:product_option_values!option_value_1(
               id, value, price_modifier, attribute_id, image_url,
               product_option_attributes!inner(id, name, position)
@@ -151,6 +151,11 @@ export class ProductRepository {
             ),
             variant_addons!variant_addons_parent_variant_id_fkey(
               id, addon_product_id, addon_variant_id, discount_amount, is_active, is_mandatory
+            ),
+            variant_components(
+              id, component_title, quantity, unit_price, compare_at_price,
+              gst_slab_id, hsn_sac_code, sort_order, is_active,
+              gst_slabs(id, rate_percentage, hsn_sac_code, description)
             )
           ),
           product_images(
@@ -194,6 +199,55 @@ export class ProductRepository {
             compare_at_price: v.compare_at_price,
             stock: Number(v.stock ?? 0),
             weight: v.weight,
+            gst_rate: v.gst_rate ?? v.metadata?.gstRate ?? v.metadata?.gst_rate ?? product.gst_rate ?? 0.0,
+            hsn_sac_code: v.hsn_sac_code || v.metadata?.hsnSacCode || v.metadata?.hsn_sac_code || product.hsn_sac_code || "4901",
+            gstRate: Number(v.gst_rate ?? v.metadata?.gstRate ?? v.metadata?.gst_rate ?? product.gst_rate ?? 0.0),
+            hsnSacCode: v.hsn_sac_code || v.metadata?.hsnSacCode || v.metadata?.hsn_sac_code || product.hsn_sac_code || "4901",
+            gst_slab_id: v.gst_slab_id || null,
+            gstSlabId: v.gst_slab_id || null,
+            components: (v.variant_components || []).map((c) => ({
+              id: c.id,
+              componentTitle: c.component_title || c.componentTitle,
+              component_title: c.component_title || c.componentTitle,
+              quantity: c.quantity,
+              unitPrice: Number(c.unit_price ?? 0),
+              unit_price: Number(c.unit_price ?? 0),
+              compareAtPrice: Number(c.compare_at_price ?? c.unit_price ?? 0),
+              compare_at_price: Number(c.compare_at_price ?? c.unit_price ?? 0),
+              gstSlabId: c.gst_slab_id,
+              gst_slab_id: c.gst_slab_id,
+              hsnSacCode: c.hsn_sac_code,
+              hsn_sac_code: c.hsn_sac_code,
+              gstRate: Number(c.gst_slabs?.rate_percentage ?? 0),
+              sortOrder: c.sort_order ?? 0,
+            })),
+            isSplitGst: Boolean((v.variant_components && v.variant_components.length > 0) || v.is_split_gst || v.isSplitGst),
+            is_split_gst: Boolean((v.variant_components && v.variant_components.length > 0) || v.is_split_gst || v.isSplitGst),
+            name: [
+              v.option_value_1_ref?.value,
+              v.option_value_2_ref?.value,
+              v.option_value_3_ref?.value,
+            ].filter(Boolean).length > 0
+              ? [
+                  v.option_value_1_ref?.value,
+                  v.option_value_2_ref?.value,
+                  v.option_value_3_ref?.value,
+                ].filter(Boolean).join(" / ")
+              : (v.metadata?.name || v.name || "Default Variant"),
+            option1: v.option_value_1_ref?.value || null,
+            option2: v.option_value_2_ref?.value || null,
+            option3: v.option_value_3_ref?.value || null,
+            options: {
+              ...(v.option_value_1_ref?.product_option_attributes?.name && v.option_value_1_ref?.value
+                ? { [v.option_value_1_ref.product_option_attributes.name]: v.option_value_1_ref.value }
+                : {}),
+              ...(v.option_value_2_ref?.product_option_attributes?.name && v.option_value_2_ref?.value
+                ? { [v.option_value_2_ref.product_option_attributes.name]: v.option_value_2_ref.value }
+                : {}),
+              ...(v.option_value_3_ref?.product_option_attributes?.name && v.option_value_3_ref?.value
+                ? { [v.option_value_3_ref.product_option_attributes.name]: v.option_value_3_ref.value }
+                : {}),
+            },
             metadata: v.metadata,
             created_at: v.created_at,
             updated_at: v.updated_at,
@@ -280,6 +334,52 @@ export class ProductRepository {
           }))
         : [];
       delete product.product_schools;
+
+      // 7) Format product options structure
+      try {
+        const { data: optAttrs } = await supabase
+          .from("product_option_attributes")
+          .select(
+            `
+            id,
+            name,
+            position,
+            is_required,
+            product_option_values (
+              id,
+              value,
+              price_modifier,
+              sort_order,
+              image_url
+            )
+          `
+          )
+          .eq("product_id", productId)
+          .order("position");
+
+        product.productOptions = (optAttrs || []).map((attr) => ({
+          id: attr.id,
+          name: attr.name,
+          position: attr.position,
+          isRequired: Boolean(attr.is_required),
+          hasImages: (attr.product_option_values || []).some((v) => v.image_url),
+          values: (attr.product_option_values || [])
+            .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0))
+            .map((val) => ({
+              id: val.id,
+              title: val.value,
+              value: val.value,
+              priceModifier: parseFloat(val.price_modifier || 0),
+              sortOrder: val.sort_order,
+              imageUrl: val.image_url,
+            })),
+        }));
+        product.options = product.productOptions;
+      } catch (optErr) {
+        logger?.warn("Could not load productOptions in getProductWithDetails:", optErr);
+        product.productOptions = [];
+        product.options = [];
+      }
 
       // console.log("Optimized product data:", product);
       return product;
@@ -1198,24 +1298,21 @@ export class ProductRepository {
   /**
    * Activate product
    */
-  async activate(productId, deliveryCharge) {
+  async activate(productId, deliveryCharge, deliveryHours) {
     try {
       const supabase = getSupabase();
 
-      if (deliveryCharge != null || deliveryCharge != undefined) {
-        const { error } = await supabase
-          .from("products")
-          .update({ is_active: true, delivery_charge: deliveryCharge })
-          .eq("id", productId);
-
-        if (error) throw error;
-
-        return true;
+      const updatePayload = { is_active: true };
+      if (deliveryCharge != null && deliveryCharge !== undefined) {
+        updatePayload.delivery_charge = Number(deliveryCharge);
+      }
+      if (deliveryHours != null && deliveryHours !== undefined) {
+        updatePayload.delivery_hours = Number(deliveryHours);
       }
 
       const { error } = await supabase
         .from("products")
-        .update({ is_active: true })
+        .update(updatePayload)
         .eq("id", productId);
 
       if (error) throw error;
@@ -1471,13 +1568,47 @@ export class ProductRepository {
    */
   async addProductImages(productId, imagesData) {
     try {
-      const results = [];
+      if (!imagesData || !Array.isArray(imagesData) || imagesData.length === 0) {
+        return [];
+      }
 
+      const allHaveUrls = imagesData.every((img) => img.url);
+      if (allHaveUrls) {
+        const supabase = getSupabase();
+        const payloads = imagesData.map((imageData, idx) => ({
+          product_id: productId,
+          variant_id: imageData.variantId || null,
+          url: imageData.url,
+          alt_text: imageData.altText || imageData.alt_text || null,
+          sort_order:
+            imageData.sortOrder !== undefined
+              ? imageData.sortOrder
+              : imageData.sort_order !== undefined
+              ? imageData.sort_order
+              : idx,
+          is_primary: Boolean(
+            imageData.isPrimary !== undefined
+              ? imageData.isPrimary
+              : imageData.is_primary !== undefined
+              ? imageData.is_primary
+              : idx === 0
+          ),
+        }));
+
+        const { data, error } = await supabase
+          .from("product_images")
+          .insert(payloads)
+          .select();
+
+        if (error) throw error;
+        return (data || []).map((img) => ProductImageRepository.formatImage(img));
+      }
+
+      const results = [];
       for (const imageData of imagesData) {
         const result = await this.addProductImage(productId, imageData);
         results.push(result);
       }
-
       return results;
     } catch (error) {
       logger.error("Error adding multiple product images:", error);

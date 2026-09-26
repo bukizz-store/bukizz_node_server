@@ -181,6 +181,25 @@ export function createServiceClient() {
 export async function executeSupabaseQuery(table, operation, options = {}) {
   try {
     const supabase = getSupabase();
+
+    // Support query callback pattern: executeSupabaseQuery((supabase) => supabase.from(...))
+    if (typeof table === "function") {
+      const result = await table(supabase);
+      if (result && typeof result === "object" && ("data" in result || "error" in result)) {
+        if (result.error) {
+          logger.error("Supabase query error:", {
+            error: result.error.message,
+            details: result.error.details,
+            hint: result.error.hint,
+            code: result.error.code,
+          });
+          throw result.error;
+        }
+        return result.data;
+      }
+      return result;
+    }
+
     let query = supabase.from(table);
 
     switch (operation) {
@@ -209,10 +228,26 @@ export async function executeSupabaseQuery(table, operation, options = {}) {
         if (options.range) {
           query = query.range(options.range.from, options.range.to);
         }
+        if (options.limit) {
+          query = query.limit(options.limit);
+        }
+        if (options.single) {
+          query = query.single();
+        }
         break;
 
       case "insert":
         query = query.insert(options.data);
+        if (options.select) {
+          query = query.select(options.select);
+        }
+        break;
+
+      case "upsert":
+        query = query.upsert(
+          options.data,
+          options.onConflict ? { onConflict: options.onConflict } : undefined
+        );
         if (options.select) {
           query = query.select(options.select);
         }
@@ -225,16 +260,30 @@ export async function executeSupabaseQuery(table, operation, options = {}) {
             query = query.eq(key, value);
           });
         }
+        if (options.in) {
+          Object.entries(options.in).forEach(([key, values]) => {
+            query = query.in(key, values);
+          });
+        }
         if (options.select) {
           query = query.select(options.select);
         }
         break;
 
       case "delete":
+        query = query.delete();
         if (options.eq) {
           Object.entries(options.eq).forEach(([key, value]) => {
             query = query.eq(key, value);
           });
+        }
+        if (options.in) {
+          Object.entries(options.in).forEach(([key, values]) => {
+            query = query.in(key, values);
+          });
+        }
+        if (options.select) {
+          query = query.select(options.select);
         }
         break;
 

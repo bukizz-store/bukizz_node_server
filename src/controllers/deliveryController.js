@@ -21,12 +21,14 @@ function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
 export class DeliveryController {
   /**
    * @param {Object} deps - Injected dependencies
-   * @param {Object} deps.deliveryIncentiveService
-   * @param {Object} deps.deliveryBankService
+   * @param {Object} [deps.deliveryIncentiveService]
+   * @param {Object} [deps.deliveryBankService]
+   * @param {Object} [deps.invoiceService]
    */
   constructor(deps = {}) {
     this.deliveryIncentiveService = deps.deliveryIncentiveService || null;
     this.deliveryBankService = deps.deliveryBankService || null;
+    this.invoiceService = deps.invoiceService || null;
   }
 
   /**
@@ -515,8 +517,32 @@ export class DeliveryController {
       }
     }
 
+    if (orderId) {
+      try {
+        let invoiceService = this.invoiceService;
+        if (!invoiceService) {
+          const { createInvoiceService } = await import("../services/invoiceService.js");
+          const { invoiceRepository } = await import("../repositories/invoiceRepository.js");
+          const { ProductRepository } = await import("../repositories/productRepository.js");
+          invoiceService = createInvoiceService({
+            invoiceRepository,
+            orderRepository,
+            productRepository: new ProductRepository(),
+          });
+        }
+        await invoiceService.generateInvoicesOnDelivery(orderId, itemId);
+      } catch (invErr) {
+        logger.error("Failed to generate invoices on delivery completion:", {
+          orderId,
+          itemId,
+          error: invErr.message,
+        });
+      }
+    }
+
     return {
       ...updatedItem,
+      orderId,
       ...(incentiveData && {
         deliveryDistanceKm: incentiveData.distanceKm,
         deliveryIncentiveAmount: incentiveData.incentiveAmount,
@@ -1057,6 +1083,31 @@ export class DeliveryController {
       paymentCollectionMethod: paymentCollectionMethod || null,
     });
     delete DeliveryController.deliveryOtpVerifiedCache[cacheKey];
+
+    const orderId = item.orders?.id || data?.orderId || data?.order_id;
+    if (orderId) {
+      try {
+        let invoiceService = this.invoiceService;
+        if (!invoiceService) {
+          const { createInvoiceService } = await import("../services/invoiceService.js");
+          const { invoiceRepository } = await import("../repositories/invoiceRepository.js");
+          const { OrderRepository } = await import("../repositories/orderRepository.js");
+          const { ProductRepository } = await import("../repositories/productRepository.js");
+          invoiceService = createInvoiceService({
+            invoiceRepository,
+            orderRepository: new OrderRepository(supabase),
+            productRepository: new ProductRepository(),
+          });
+        }
+        await invoiceService.generateInvoicesOnDelivery(orderId, itemId);
+      } catch (invErr) {
+        logger.error("Failed to generate invoices on delivery in markDelivered:", {
+          orderId,
+          itemId,
+          error: invErr.message,
+        });
+      }
+    }
 
     res.json({
       success: true,

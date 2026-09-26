@@ -1,3 +1,4 @@
+import express from "express";
 import authRoutes from "./authRoutes.js";
 import userRoutes from "./userRoutes.js";
 import productRoutes from "./productRoutes.js";
@@ -20,88 +21,155 @@ import deliveryRoutes from "./deliveryRoutes.js";
 import dpAdminRoutes from "./dpAdminRoutes.js";
 import bannerRoutes from "./bannerRoutes.js";
 import createReviewRoutes from "./reviewRoutes.js";
+import createFeeConfigRoutes from "./feeConfigRoutes.js";
+import createClosingFeeRoutes from "./closingFeeRoutes.js";
+import createRetailerCommissionRoutes from "./retailerCommissionRoutes.js";
+import createVariantComponentRoutes from "./variantComponentRoutes.js";
+import { createInvoiceRoutes } from "./invoiceRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
  * Setup all API routes
- * @param {Express} app - Express application instance
- * @param {Object} dependencies - Dependency injection container
+ * @param {Express|Object} appOrDependencies - Express application instance or dependencies container
+ * @param {Object} [maybeDependencies] - Dependency injection container if app is passed first
+ * @returns {express.Router} Configured API router
  */
-export function setupRoutes(app, dependencies = {}) {
-  // API version prefix
-  const apiV1 = "/api/v1";
+export function setupRoutes(appOrDependencies, maybeDependencies = {}) {
+  let app;
+  let dependencies;
 
-  // Health check endpoint
-  app.get("/health", (req, res) => {
-    res.json({
-      status: "ok",
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      version: "1.0.0",
-    });
-  });
+  if (
+    appOrDependencies &&
+    typeof appOrDependencies.use === "function" &&
+    !(
+      appOrDependencies.feeConfigController ||
+      appOrDependencies.closingFeeController ||
+      appOrDependencies.retailerCommissionController ||
+      appOrDependencies.variantComponentController
+    )
+  ) {
+    app = appOrDependencies;
+    dependencies = maybeDependencies || {};
+  } else {
+    dependencies = appOrDependencies || {};
+    app = null;
+  }
 
-  // API documentation endpoint
-  app.get("/api", (req, res) => {
-    res.json({
-      message: "Bukizz School E-commerce API",
-      version: "1.0.0",
-      documentation: "/api/docs",
-      endpoints: {
-        auth: `${apiV1}/auth`,
-        users: `${apiV1}/users`,
-        products: `${apiV1}/products`,
-        schools: `${apiV1}/schools`,
-        orders: `${apiV1}/orders`,
-        pincodes: `${apiV1}/pincodes`,
-        warehouses: `${apiV1}/warehouses`,
-        categories: `${apiV1}/categories`,
-        payments: `${apiV1}/payments`,
-        brands: `${apiV1}/brands`,
-        retailerSchools: `${apiV1}/retailer-schools`,
-        retailerOrders: `${apiV1}/retailer/orders`,
-        retailerBankAccounts: `${apiV1}/retailer/bank-accounts`,
-        settlements: `${apiV1}/settlements`,
-        deliveryAuth: `${apiV1}/delivery/auth`,
-        adminDelivery: `${apiV1}/admin/delivery`,
-        adminDeliveryPartners: `${apiV1}/admin/delivery-partners`,
-        deliveryBankDetails: `${apiV1}/delivery/bank-details`,
-        banners: `${apiV1}/banners`,
-        reviews: `${apiV1}/reviews`,
-      },
-    });
-  });
+  // Central API Router
+  const apiRouter = express.Router();
 
-  // Setup route modules with dependency injection
-  app.use(`${apiV1}/auth`, authRoutes(dependencies));
-  app.use(`${apiV1}/users`, userRoutes(dependencies));
-  app.use(`${apiV1}/products`, productRoutes(dependencies));
-  app.use(`${apiV1}/schools`, schoolRoutes(dependencies));
-  app.use(`${apiV1}/orders`, orderRoutes(dependencies));
-  app.use(`${apiV1}/pincodes`, pincodeRoutes(dependencies));
-  app.use(`${apiV1}/warehouses`, warehouseRoutes);
-  app.use(`${apiV1}/categories`, categoryRoutes(dependencies));
-  app.use(`${apiV1}/payments`, paymentRoutes(dependencies));
-  app.use(`${apiV1}/brands`, brandRoutes(dependencies));
-  app.use(`${apiV1}/retailer`, retailerRoutes);
-  app.use(`${apiV1}/retailer/bank-accounts`, retailerBankAccountRoutes);
-  app.use(`${apiV1}/retailer-schools`, retailerSchoolRoutes);
-  app.use(`${apiV1}/retailer/orders`, retailerOrderRoutes);
-  app.use(`${apiV1}/delivery/auth`, deliveryAuthRoutes(dependencies));
-  app.use(`${apiV1}/delivery`, deliveryRoutes(dependencies));
-  app.use(`${apiV1}/admin/delivery`, adminDeliveryRoutes(dependencies));
-  app.use(
-    `${apiV1}/admin/delivery-partners`,
-    dpAdminRoutes(dependencies),
+  // Wire all new routes into apiRouter
+  apiRouter.use(
+    "/finance",
+    createFeeConfigRoutes(dependencies.feeConfigController)
   );
-  app.use(`${apiV1}/images`, imageRoutes);
-  app.use(
-    `${apiV1}/settlements`,
-    settlementRoutes(dependencies.settlementController),
+  apiRouter.use(
+    "/admin/closing-fees",
+    createClosingFeeRoutes(dependencies.closingFeeController)
   );
-  app.use(`${apiV1}/banners`, bannerRoutes(dependencies));
-  app.use(`${apiV1}/reviews`, createReviewRoutes(dependencies));
+  apiRouter.use(
+    "/commissions/retailers",
+    createRetailerCommissionRoutes(dependencies.retailerCommissionController)
+  );
+  apiRouter.use(
+    "/kits",
+    createVariantComponentRoutes(dependencies.variantComponentController)
+  );
+  apiRouter.use(
+    createVariantComponentRoutes(dependencies.variantComponentController)
+  );
+  apiRouter.use(
+    "/orders",
+    createInvoiceRoutes(dependencies.invoiceController)
+  );
 
-  // Handle 404 for all other routes
-  app.use("*", notFoundHandler);
+  if (app) {
+    // API version prefix
+    const apiV1 = "/api/v1";
+
+    // Health check endpoint
+    app.get("/health", (req, res) => {
+      res.json({
+        status: "ok",
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        version: "1.0.0",
+      });
+    });
+
+    // API documentation endpoint
+    app.get("/api", (req, res) => {
+      res.json({
+        message: "Bukizz School E-commerce API",
+        version: "1.0.0",
+        documentation: "/api/docs",
+        endpoints: {
+          auth: `${apiV1}/auth`,
+          users: `${apiV1}/users`,
+          products: `${apiV1}/products`,
+          schools: `${apiV1}/schools`,
+          orders: `${apiV1}/orders`,
+          pincodes: `${apiV1}/pincodes`,
+          warehouses: `${apiV1}/warehouses`,
+          categories: `${apiV1}/categories`,
+          payments: `${apiV1}/payments`,
+          brands: `${apiV1}/brands`,
+          retailerSchools: `${apiV1}/retailer-schools`,
+          retailerOrders: `${apiV1}/retailer/orders`,
+          retailerBankAccounts: `${apiV1}/retailer/bank-accounts`,
+          settlements: `${apiV1}/settlements`,
+          deliveryAuth: `${apiV1}/delivery/auth`,
+          adminDelivery: `${apiV1}/admin/delivery`,
+          adminDeliveryPartners: `${apiV1}/admin/delivery-partners`,
+          deliveryBankDetails: `${apiV1}/delivery/bank-details`,
+          banners: `${apiV1}/banners`,
+          reviews: `${apiV1}/reviews`,
+          finance: `${apiV1}/finance`,
+          closingFees: `${apiV1}/admin/closing-fees`,
+          retailerCommissions: `${apiV1}/commissions/retailers`,
+          kits: `${apiV1}/kits`,
+        },
+      });
+    });
+
+    // Setup route modules with dependency injection
+    app.use(`${apiV1}/auth`, authRoutes(dependencies));
+    app.use(`${apiV1}/users`, userRoutes(dependencies));
+    app.use(`${apiV1}/products`, productRoutes(dependencies));
+    app.use(`${apiV1}/schools`, schoolRoutes(dependencies));
+    app.use(`${apiV1}/orders`, orderRoutes(dependencies));
+    app.use(`${apiV1}/pincodes`, pincodeRoutes(dependencies));
+    app.use(`${apiV1}/warehouses`, warehouseRoutes);
+    app.use(`${apiV1}/categories`, categoryRoutes(dependencies));
+    app.use(`${apiV1}/payments`, paymentRoutes(dependencies));
+    app.use(`${apiV1}/brands`, brandRoutes(dependencies));
+    app.use(`${apiV1}/retailer`, retailerRoutes);
+    app.use(`${apiV1}/retailer/bank-accounts`, retailerBankAccountRoutes);
+    app.use(`${apiV1}/retailer-schools`, retailerSchoolRoutes);
+    app.use(`${apiV1}/retailer/orders`, retailerOrderRoutes);
+    app.use(`${apiV1}/delivery/auth`, deliveryAuthRoutes(dependencies));
+    app.use(`${apiV1}/delivery`, deliveryRoutes(dependencies));
+    app.use(`${apiV1}/admin/delivery`, adminDeliveryRoutes(dependencies));
+    app.use(
+      `${apiV1}/admin/delivery-partners`,
+      dpAdminRoutes(dependencies),
+    );
+    app.use(`${apiV1}/images`, imageRoutes);
+    app.use(
+      `${apiV1}/settlements`,
+      settlementRoutes(dependencies.settlementController),
+    );
+    app.use(`${apiV1}/banners`, bannerRoutes(dependencies));
+    app.use(`${apiV1}/reviews`, createReviewRoutes(dependencies));
+
+    // Mount apiRouter under apiV1
+    app.use(apiV1, apiRouter);
+
+    // Handle 404 for all other routes
+    app.use("*", notFoundHandler);
+  }
+
+  return apiRouter;
 }
+
+export default setupRoutes;

@@ -37,6 +37,12 @@ import BrandRepository from "./src/repositories/brandRepository.js";
 import ProductOptionRepository from "./src/repositories/productOptionRepository.js";
 import { SchoolRepository } from "./src/repositories/schoolRepository.js";
 import { UserRepository } from "./src/repositories/userRepository.js";
+import { OrderRepository } from "./src/repositories/orderRepository.js";
+import { OrderEventRepository } from "./src/repositories/orderEventRepository.js";
+import { OrderQueryRepository } from "./src/repositories/orderQueryRepository.js";
+import { WarehouseRepository } from "./src/repositories/warehouseRepository.js";
+import { productPaymentMethodRepository } from "./src/repositories/productPaymentMethodRepository.js";
+import { variantCommissionRepository } from "./src/repositories/variantCommissionRepository.js";
 import { ledgerRepository } from "./src/repositories/ledgerRepository.js";
 import { settlementRepository } from "./src/repositories/settlementRepository.js";
 import { SettlementService } from "./src/services/settlementService.js";
@@ -53,6 +59,13 @@ import { dpAdminController } from "./src/controllers/dpAdminController.js";
 import { createReviewRepository } from "./src/repositories/reviewRepository.js";
 import { createReviewService } from "./src/services/reviewService.js";
 import { createReviewController } from "./src/controllers/reviewController.js";
+import { invoiceRepository } from "./src/repositories/invoiceRepository.js";
+import { createInvoiceService } from "./src/services/invoiceService.js";
+import { createInvoiceController } from "./src/controllers/invoiceController.js";
+import { createFeeConfigController } from "./src/controllers/feeConfigController.js";
+import { createClosingFeeController } from "./src/controllers/closingFeeController.js";
+import { createRetailerCommissionController } from "./src/controllers/retailerCommissionController.js";
+import { createVariantComponentController } from "./src/controllers/variantComponentController.js";
 
 
 // Import middleware and utilities
@@ -110,6 +123,10 @@ async function startServer() {
     const productOptionRepository = ProductOptionRepository;
     const schoolRepository = new SchoolRepository();
     const userRepository = new UserRepository(supabase);
+    const orderRepository = new OrderRepository(supabase);
+    const orderEventRepository = new OrderEventRepository(supabase);
+    const orderQueryRepository = new OrderQueryRepository();
+    const warehouseRepository = new WarehouseRepository();
 
     // Initialize services with repositories
     const productService = new ProductService(
@@ -118,14 +135,23 @@ async function startServer() {
       productOptionRepository
     );
     const schoolService = new SchoolService(schoolRepository);
-    const orderService = new OrderService(); // Lazy-initialized via getOrderService() in controller
+    const orderService = new OrderService(
+      orderRepository,
+      productRepository,
+      userRepository,
+      orderEventRepository,
+      orderQueryRepository,
+      warehouseRepository,
+      productPaymentMethodRepository,
+      variantCommissionRepository
+    );
     const userService = new UserService(userRepository);
     const authService = new AuthService();
 
     // Initialize controllers with services
     const productController = new ProductController(productService);
     const schoolController = new SchoolController(schoolService);
-    const orderController = new OrderController(orderService);
+    const orderController = new OrderController(orderService, invoiceRepository);
     const userController = new UserController(userService);
     const authController = new AuthController(authService);
 
@@ -135,6 +161,17 @@ async function startServer() {
       settlementRepository,
     );
     const settlementCtrl = settlementController({ settlementService });
+
+    // Initialize Invoice layer
+    const invoiceService = createInvoiceService({
+      invoiceRepository,
+      orderRepository,
+      productRepository,
+    });
+    const invoiceController = createInvoiceController({
+      invoiceService,
+      invoiceRepository,
+    });
 
     // Initialize delivery incentive layer
     const deliveryIncentiveSvc = deliveryIncentiveService({
@@ -147,6 +184,7 @@ async function startServer() {
     const deliveryCtrl = new DeliveryController({
       deliveryIncentiveService: deliveryIncentiveSvc,
       deliveryBankService: deliveryBankSvc,
+      invoiceService,
     });
 
     // Initialize DP Admin layer
@@ -160,6 +198,12 @@ async function startServer() {
       productRepository,
     });
     const reviewController = createReviewController({ reviewService });
+
+    // Initialize Finance & Slabs layer
+    const feeConfigController = createFeeConfigController();
+    const closingFeeController = createClosingFeeController();
+    const retailerCommissionController = createRetailerCommissionController();
+    const variantComponentController = createVariantComponentController();
 
     // Dependency injection container
     const dependencies = {
@@ -175,6 +219,13 @@ async function startServer() {
       reviewController,
       reviewService,
       reviewRepository,
+      invoiceRepository,
+      invoiceService,
+      invoiceController,
+      feeConfigController,
+      closingFeeController,
+      retailerCommissionController,
+      variantComponentController,
       authService,
       userService,
       productService,
@@ -187,6 +238,12 @@ async function startServer() {
       productOptionRepository,
       schoolRepository,
       userRepository,
+      orderRepository,
+      orderEventRepository,
+      orderQueryRepository,
+      warehouseRepository,
+      productPaymentMethodRepository,
+      variantCommissionRepository,
       ledgerRepository,
       settlementRepository,
     };
