@@ -1,6 +1,8 @@
 import { getSupabase } from "../db/index.js";
 import { v4 as uuidv4 } from "uuid";
 import { logger } from "../utils/logger.js";
+import { orderItemComponentRepository } from "./orderItemComponentRepository.js";
+import { orderItemFeeRepository } from "./orderItemFeeRepository.js";
 
 /**
  * Order Repository for Supabase (PostgreSQL)
@@ -8,7 +10,7 @@ import { logger } from "../utils/logger.js";
  */
 export class OrderRepository {
   constructor(supabase) {
-    this.supabase = supabase || getSupabase();
+    this.supabase = (supabase && typeof supabase.from === 'function') ? supabase : getSupabase();
     this.LOCK_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes soft-lock
   }
 
@@ -44,6 +46,10 @@ export class OrderRepository {
       paymentStatus = "pending",
       status = "initialized",
       metadata = {},
+      cartPlatformFee,
+      cart_platform_fee,
+      cartPlatformFeeGst,
+      cart_platform_fee_gst,
     } = orderData;
 
     const orderId = uuidv4();
@@ -56,8 +62,15 @@ export class OrderRepository {
       const orderWarehouseId =
         items.find((item) => item.warehouseId)?.warehouseId || null;
 
+      const resolvedCartPlatformFee = Number(
+        cartPlatformFee ?? cart_platform_fee ?? metadata?.orderSummary?.cartPlatformFee ?? 0
+      );
+      const resolvedCartPlatformFeeGst = Number(
+        cartPlatformFeeGst ?? cart_platform_fee_gst ?? metadata?.orderSummary?.cartPlatformFeeGst ?? 0
+      );
+
       // Create main order record using Supabase
-      const { data: orderData, error: orderError } = await this.supabase
+      const { data: createdOrderData, error: orderError } = await (connection || this.supabase)
         .from("orders")
         .insert({
           id: orderId,
@@ -74,6 +87,8 @@ export class OrderRepository {
           payment_status: paymentStatus,
           warehouse_id: orderWarehouseId,
           metadata,
+          cart_platform_fee: resolvedCartPlatformFee,
+          cart_platform_fee_gst: resolvedCartPlatformFeeGst,
         })
         .select()
         .single();
@@ -90,10 +105,11 @@ export class OrderRepository {
         }
       });
 
-      // Create order items
+      // Create order items (Physical order line items)
       const orderItems = items.map((item) => {
-        const itemId = item.clientId && idMap.has(item.clientId) ? idMap.get(item.clientId) : uuidv4();
-        const parentId = item.parentClientId && idMap.has(item.parentClientId) ? idMap.get(item.parentClientId) : null;
+        const itemId = item.clientId && idMap.has(item.clientId) ? idMap.get(item.clientId) : (item.id || uuidv4());
+        item.id = itemId; // Ensure item has its persistent ID
+        const parentId = item.parentClientId && idMap.has(item.parentClientId) ? idMap.get(item.parentClientId) : (item.parent_item_id || null);
 
         return {
           id: itemId,
@@ -106,22 +122,128 @@ export class OrderRepository {
           quantity: item.quantity,
           unit_price: item.unitPrice,
           total_price: item.totalPrice,
-          delivery_fee: item.itemDeliveryFee || 0,
-          platform_fee: item.itemPlatformFee || 0,
+          delivery_fee: item.itemDeliveryFee ?? item.deliveryFee ?? item.delivery_fee ?? 0,
+          platform_fee: item.itemPlatformFee ?? item.platformFee ?? item.platform_fee ?? 0,
+          taxable_amount: item.taxableAmount ?? item.basePrice ?? 0,
+          total_vendor_fees: item.totalVendorFees ?? 0,
+          vendor_net_payout: item.vendorNetPayout ?? 0,
           product_snapshot: item.productSnapshot,
           warehouse_id: item.warehouseId,
           status: status, // Initialize with order status or defaults
         };
       });
 
-      const { error: itemsError } = await this.supabase
-        .from("order_items")
-        .insert(orderItems);
+      let itemsError = null;
+      try {
+        const res = await (connection || this.supabase)
+          .from("order_items")
+          .insert(orderItems);
+        itemsError = res.error;
+      } catch (err) {
+        itemsError = err;
+      }
+
+      // If database lacks the new rollup columns, fall back gracefully to standard columns
+      if (itemsError && itemsError.message && (
+        itemsError.message.includes("taxable_amount") ||
+        itemsError.message.includes("total_vendor_fees") ||
+        itemsError.message.includes("vendor_net_payout")
+      )) {
+        logger.warn("order_items table lacks financial rollup columns, falling back to standard columns:", itemsError.message);
+        const fallbackOrderItems = orderItems.map(({ taxable_amount, total_vendor_fees, vendor_net_payout, ...rest }) => rest);
+        const retryRes = await (connection || this.supabase)
+          .from("order_items")
+          .insert(fallbackOrderItems);
+        itemsError = retryRes.error;
+      }
 
       if (itemsError) {
         // Rollback: delete the order if items creation failed
-        await this.supabase.from("orders").delete().eq("id", orderId);
+        await (connection || this.supabase).from("orders").delete().eq("id", orderId);
         throw new Error(`Failed to create order items: ${itemsError.message}`);
+      }
+
+      // ─── Insert Order Item Components (Tax Bifurcation Snapshot) ───
+      try {
+        const allComponents = [];
+        items.forEach((item) => {
+          const itemId = item.id;
+          if (Array.isArray(item.components) && item.components.length > 0) {
+            item.components.forEach((c, idx) => {
+              allComponents.push({
+                orderItemId: itemId,
+                componentTitle: c.componentTitle || c.title || c.component_title || item.title,
+                quantity: Number(c.quantity || 1),
+                unitPrice: Number(c.unitPrice ?? c.unit_price ?? 0),
+                totalPrice: Number(c.totalPrice ?? c.total_price ?? 0),
+                hsnSacCode: c.hsnSacCode || c.hsn_sac_code || "4901",
+                gstRate: Number(c.gstRate ?? c.gst_rate ?? 0),
+                basePrice: Number(c.basePrice ?? c.base_price ?? 0),
+                cgstAmount: Number(c.cgstAmount ?? c.cgst_amount ?? 0),
+                sgstAmount: Number(c.sgstAmount ?? c.sgst_amount ?? 0),
+                igstAmount: Number(c.igstAmount ?? c.igst_amount ?? 0),
+                sortOrder: c.sortOrder ?? c.sort_order ?? idx,
+              });
+            });
+          } else {
+            // Standalone single item component fallback
+            allComponents.push({
+              orderItemId: itemId,
+              componentTitle: item.title,
+              quantity: Number(item.quantity || 1),
+              unitPrice: Number(item.unitPrice || 0),
+              totalPrice: Number(item.totalPrice || 0),
+              hsnSacCode: item.hsnSacCode || item.hsn_sac_code || "4901",
+              gstRate: Number(item.gstRate ?? item.gst_rate ?? 0),
+              basePrice: Number(item.taxableAmount ?? item.basePrice ?? item.base_price ?? 0),
+              cgstAmount: Number(item.cgstAmount ?? item.cgst_amount ?? 0),
+              sgstAmount: Number(item.sgstAmount ?? item.sgst_amount ?? 0),
+              igstAmount: Number(item.igstAmount ?? item.igst_amount ?? 0),
+              sortOrder: 0,
+            });
+          }
+        });
+
+        if (allComponents.length > 0) {
+          await orderItemComponentRepository.bulkCreate(allComponents, connection || this.supabase);
+        }
+      } catch (compErr) {
+        logger.warn("Could not insert order_item_components (table may not exist yet):", compErr.message);
+      }
+
+      // ─── Insert Order Item Fees (Itemized Fee Ledger) ───
+      try {
+        const allFees = [];
+        items.forEach((item) => {
+          const itemId = item.id;
+          const retId = item.retailerId || item.retailer_id || null;
+          if (Array.isArray(item.itemFees) && item.itemFees.length > 0) {
+            item.itemFees.forEach((fee) => {
+              allFees.push({
+                orderItemId: itemId,
+                retailerId: retId,
+                payerParty: fee.payerParty || fee.payer_party || "VENDOR",
+                feeCode: fee.feeCode || fee.fee_code,
+                feeName: fee.feeName || fee.fee_name || fee.name,
+                calculationType: fee.calculationType || fee.calculation_type || "FLAT",
+                appliedRate: fee.appliedRate !== undefined ? Number(fee.appliedRate) : null,
+                taxableAmount: Number(fee.taxableAmount ?? fee.taxable_amount ?? 0),
+                gstRate: Number(fee.gstRate ?? fee.gst_rate ?? 18.0),
+                hsnSacCode: fee.hsnSacCode || fee.hsn_sac_code || "9983",
+                cgstAmount: Number(fee.cgstAmount ?? fee.cgst_amount ?? 0),
+                sgstAmount: Number(fee.sgstAmount ?? fee.sgst_amount ?? 0),
+                igstAmount: Number(fee.igstAmount ?? fee.igst_amount ?? 0),
+                totalFeeAmount: Number(fee.totalFeeAmount ?? fee.total_fee_amount ?? 0),
+              });
+            });
+          }
+        });
+
+        if (allFees.length > 0) {
+          await orderItemFeeRepository.bulkCreate(allFees, connection || this.supabase);
+        }
+      } catch (feeErr) {
+        logger.warn("Could not insert order_item_fees (table may not exist yet):", feeErr.message);
       }
 
       // Return the created order
@@ -849,6 +971,38 @@ export class OrderRepository {
       }
 
       const formatted = (items || []).map(this._formatOrderItem.bind(this));
+
+      if (formatted.length > 0) {
+        try {
+          const itemIds = formatted.map((i) => i.id).filter(Boolean);
+          const [components, fees] = await Promise.all([
+            orderItemComponentRepository.getByOrderItemIds(itemIds, this.supabase),
+            orderItemFeeRepository.getByOrderItemIds(itemIds, null, this.supabase),
+          ]);
+
+          const compMap = new Map();
+          (components || []).forEach((c) => {
+            const list = compMap.get(c.order_item_id) || [];
+            list.push(c);
+            compMap.set(c.order_item_id, list);
+          });
+
+          const feeMap = new Map();
+          (fees || []).forEach((f) => {
+            const list = feeMap.get(f.order_item_id) || [];
+            list.push(f);
+            feeMap.set(f.order_item_id, list);
+          });
+
+          formatted.forEach((item) => {
+            item.components = compMap.get(item.id) || [];
+            item.itemFees = feeMap.get(item.id) || [];
+          });
+        } catch (enrichErr) {
+          logger.warn("Could not enrich order items with components/fees:", enrichErr.message);
+        }
+      }
+
       const enrichedWithVariants =
         await this.enrichItemsWithVariantData(formatted);
       return await this._enrichItemsWithSchoolData(enrichedWithVariants);
@@ -2674,6 +2828,9 @@ export class OrderRepository {
       totalPrice: parseFloat(row.total_price || 0),
       deliveryFee: parseFloat(row.delivery_fee || 0),
       platformFee: parseFloat(row.platform_fee || 0),
+      taxableAmount: parseFloat(row.taxable_amount || 0),
+      totalVendorFees: parseFloat(row.total_vendor_fees || 0),
+      vendorNetPayout: parseFloat(row.vendor_net_payout || 0),
       productSnapshot: row.product_snapshot || {},
       warehouseId: row.warehouse_id,
       status: row.status || "initialized", // Default for backward compatibility

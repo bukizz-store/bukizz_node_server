@@ -10,6 +10,8 @@ import WarehouseRepository from "../repositories/warehouseRepository.js";
 import { SchoolRepository } from "../repositories/schoolRepository.js";
 import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
 import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
+import { productFeeRepository } from "../repositories/productFeeRepository.js";
+import { variantComponentRepository } from "../repositories/variantComponentRepository.js";
 
 /**
  * Product Service
@@ -23,6 +25,7 @@ export class ProductService {
     productVariantRepository,
     schoolRepository,
     paymentMethodRepo,
+    variantCompRepo,
   ) {
     this.productRepository = productRepository || ProductRepository;
     this.brandRepository = brandRepository || BrandRepository;
@@ -33,6 +36,8 @@ export class ProductService {
     this.schoolRepository = schoolRepository || new SchoolRepository();
     this.productPaymentMethodRepository = paymentMethodRepo || productPaymentMethodRepository;
     this.variantCommissionRepository = variantCommissionRepository;
+    this.productFeeRepository = productFeeRepository;
+    this.variantComponentRepository = variantCompRepo || variantComponentRepository;
   }
 
   /**
@@ -180,7 +185,41 @@ export class ProductService {
         }
       }
 
-      // Step 4: Fetch the fully created product to return consistent response format
+      // Step 4: Save variant kit components if provided
+      if (data.variants && Array.isArray(data.variants) && data.variants.length > 0) {
+        try {
+          const createdVariants =
+            await this.productVariantRepository.findByProductId(productId);
+          for (let i = 0; i < data.variants.length; i++) {
+            const inputVar = data.variants[i];
+            const comps = inputVar.components || inputVar.variant_components || [];
+            if (comps && Array.isArray(comps) && comps.length > 0) {
+              const targetVariant =
+                createdVariants.find(
+                  (cv) =>
+                    (inputVar.sku && cv.sku === inputVar.sku) ||
+                    (inputVar.name && cv.name === inputVar.name)
+                ) || createdVariants[i];
+
+              if (targetVariant) {
+                await this.variantComponentRepository.replaceComponentsForVariant(
+                  targetVariant.id,
+                  comps
+                );
+                logger.info("Saved kit components for new product variant", {
+                  productId,
+                  variantId: targetVariant.id,
+                  count: comps.length,
+                });
+              }
+            }
+          }
+        } catch (compErr) {
+          logger.error("Error saving kit components after RPC:", compErr);
+        }
+      }
+
+      // Step 5: Fetch the fully created product to return consistent response format
       return await this.productRepository.getProductWithDetails(productId, {
         includeImages: true,
         includeVariantImages: true,
@@ -217,11 +256,15 @@ export class ProductService {
       "general",
       "addon"
     ];
-    if (!validTypes.includes(productData.productType)) {
+    const effectiveProductType = productData.productType || data.productType;
+    if (!validTypes.includes(effectiveProductType)) {
       throw new AppError(
         `Invalid product type. Must be one of: ${validTypes.join(", ")}`,
         400,
       );
+    }
+    if (!productData.productType && effectiveProductType) {
+      productData.productType = effectiveProductType;
     }
 
     if (!productData.city) {
@@ -399,6 +442,7 @@ export class ProductService {
         productData: {
           title: product.title || "",
           sku: product.sku || "",
+          productType: product.product_type || "general",
           basePrice: product.base_price || 0,
           compareAtPrice:
             product.compare_at_price || product.metadata?.compare_price || "",
@@ -557,7 +601,7 @@ export class ProductService {
 
         result.productOptions = reconstructedOptions;
 
-        // Map variants
+        // Map variants with kit component bifurcation & tax fields
         result.variants = product.variants.map((v) => ({
           id: v.id,
           name: [
@@ -575,6 +619,24 @@ export class ProductService {
             v.metadata?.compare_price ||
             "",
           stock: v.stock || 0,
+          weight: v.weight ?? 0.2,
+          gstRate: Number(v.gstRate ?? v.gst_rate ?? 0),
+          gst_rate: Number(v.gst_rate ?? v.gstRate ?? 0),
+          hsnSacCode: v.hsnSacCode || v.hsn_sac_code || "4901",
+          hsn_sac_code: v.hsn_sac_code || v.hsnSacCode || "4901",
+          gstSlabId: v.gstSlabId || v.gst_slab_id || null,
+          gst_slab_id: v.gst_slab_id || v.gstSlabId || null,
+          isSplitGst: Boolean(
+            v.isSplitGst ||
+            v.is_split_gst ||
+            (v.components && v.components.length > 0)
+          ),
+          is_split_gst: Boolean(
+            v.isSplitGst ||
+            v.is_split_gst ||
+            (v.components && v.components.length > 0)
+          ),
+          components: v.components || [],
           options: {
             [v.option_value_1_ref?.attribute_name]: v.option_value_1_ref?.value,
             [v.option_value_2_ref?.attribute_name]: v.option_value_2_ref?.value,
@@ -1001,67 +1063,117 @@ export class ProductService {
       if (variants && variants.length > 0) {
         // Option to clear existing variants first - we do this ALWAYS now due to UI generating new variations
         try {
-          // Delete existing variants
+          // Back up existing kit components before deleting variants (prevents CASCADE deletion data loss)
           const existingVariants =
             await this.productVariantRepository.findByProductId(productId);
+          const existingComponentsBySku = new Map();
+          for (const ev of existingVariants) {
+            try {
+              const comps =
+                (ev.components && ev.components.length > 0)
+                  ? ev.components
+                  : await this.variantComponentRepository.getByParentVariantId(ev.id);
+              if (comps && comps.length > 0) {
+                if (ev.sku) existingComponentsBySku.set(ev.sku, comps);
+                if (ev.name) existingComponentsBySku.set(ev.name, comps);
+              }
+            } catch (backupErr) {
+              logger.warn("Could not backup components for variant:", ev.id, backupErr.message);
+            }
+          }
+
+          // Delete existing variants
           for (const variant of existingVariants) {
             await this.productVariantRepository.delete(variant.id);
           }
           logger.info("Existing variants cleared for update", { productId });
-        } catch (variantDeleteError) {
-          logger.error("Error clearing existing variants:", variantDeleteError);
-          result.errors.push(
-            `Failed to clear existing variants: ${variantDeleteError.message}`,
-          );
-        }
 
-        // Create or update variants
-        for (const variantData of variants) {
-          try {
-            // We need to resolve the option values from strings to IDs
-            const getOptionValueId = (optName, valString) => {
-              if (!valString || !optName) return null;
-              const attr = createdOptions.find((o) => o.name === optName);
-              if (!attr) return null;
-              const val = attr.values.find((v) => v.value === valString);
-              return val ? val.id : null;
-            };
+          // Create or update variants
+          for (const variantData of variants) {
+            try {
+              // We need to resolve the option values from strings to IDs
+              const getOptionValueId = (optName, valString) => {
+                if (!valString || !optName) return null;
+                const attr = createdOptions.find((o) => o.name === optName);
+                if (!attr) return null;
+                const val = attr.values.find((v) => v.value === valString);
+                return val ? val.id : null;
+              };
 
-            const optionValue1 = getOptionValueId(
-              productOptions[0]?.name,
-              variantData.option1,
-            );
-            const optionValue2 = getOptionValueId(
-              productOptions[1]?.name,
-              variantData.option2,
-            );
-            const optionValue3 = getOptionValueId(
-              productOptions[2]?.name,
-              variantData.option3,
-            );
+              const optionValue1 = getOptionValueId(
+                productOptions[0]?.name,
+                variantData.option1,
+              );
+              const optionValue2 = getOptionValueId(
+                productOptions[1]?.name,
+                variantData.option2,
+              );
+              const optionValue3 = getOptionValueId(
+                productOptions[2]?.name,
+                variantData.option3,
+              );
 
-            // Always create new variant as they are regenerated
-            let variant = await this.productVariantRepository.create({
-              productId,
-              ...variantData,
-              optionValue1,
-              optionValue2,
-              optionValue3,
-            });
-            logger.info("Variant created in update", {
-              variantId: variant.id,
-              productId,
-            });
-            result.variants.push(variant);
-          } catch (variantError) {
-            logger.error(
-              "Error handling variant in comprehensive product update:",
-              variantError,
-            );
-            result.errors.push(
-              `Variant operation failed: ${variantError.message}`,
-            );
+              // Always create new variant as they are regenerated
+              let variant = await this.productVariantRepository.create({
+                productId,
+                ...variantData,
+                optionValue1,
+                optionValue2,
+                optionValue3,
+              });
+
+              // Preserve or save kit components
+              const incomingComps =
+                variantData.components &&
+                Array.isArray(variantData.components) &&
+                variantData.components.length > 0
+                  ? variantData.components
+                  : existingComponentsBySku.get(variantData.sku) ||
+                    existingComponentsBySku.get(variantData.name) ||
+                    [];
+
+              if (incomingComps && incomingComps.length > 0) {
+                try {
+                  await this.variantComponentRepository.replaceComponentsForVariant(
+                    variant.id,
+                    incomingComps
+                  );
+                  variant.components = incomingComps;
+                  variant.isSplitGst = true;
+                  variant.is_split_gst = true;
+                  logger.info("Saved kit components for variant in update", {
+                    productId,
+                    variantId: variant.id,
+                    count: incomingComps.length,
+                  });
+                } catch (compErr) {
+                  logger.error(
+                    "Error saving kit components during variant update:",
+                    compErr
+                  );
+                }
+              }
+
+              logger.info("Variant created in update", {
+                variantId: variant.id,
+                productId,
+              });
+              result.variants.push(variant);
+            } catch (variantError) {
+              logger.error(
+                "Error handling variant in comprehensive product update:",
+                variantError,
+              );
+              result.errors.push(
+                `Variant operation failed: ${variantError.message}`,
+              );
+            }
           }
+        } catch (variantDeleteError) {
+          logger.error("Error updating variants:", variantDeleteError);
+          result.errors.push(
+            `Failed to update variants: ${variantDeleteError.message}`,
+          );
         }
       }
 
@@ -1236,7 +1348,7 @@ export class ProductService {
   /**
    * Activate product
    */
-  async activateProduct(productId, deliveryCharge, variantCommissions, paymentMethods) {
+  async activateProduct(productId, deliveryCharge, variantCommissions, paymentMethods, productFees = []) {
     try {
       const existingProduct = await this.productRepository.findById(productId);
       if (!existingProduct) {
@@ -1265,11 +1377,78 @@ export class ProductService {
       // 3. Set payment methods if provided
       if (paymentMethods && Array.isArray(paymentMethods) && paymentMethods.length > 0) {
         try {
-          await this.productPaymentMethodRepository.setPaymentMethods(productId, paymentMethods);
-          logger.info("Payment methods set during activation", { productId, methods: paymentMethods });
+          const sanitizedMethods = paymentMethods.map(m => typeof m === "string" ? m.toLowerCase() : m);
+          await this.productPaymentMethodRepository.setPaymentMethods(productId, sanitizedMethods);
+          logger.info("Payment methods set during activation", { productId, methods: sanitizedMethods });
         } catch (pmError) {
           logger.error("Error setting payment methods during activation:", pmError);
         }
+      }
+
+      // 4. Save product-level fee configurations in product_fees table
+      try {
+        const feesToSave = [];
+
+        // Customer Delivery Charge (18% GST, SAC 9968, Payer: USER)
+        if (deliveryCharge !== undefined && deliveryCharge !== null) {
+          feesToSave.push({
+            productId,
+            variantId: null,
+            feeCode: "DELIVERY_CHARGE",
+            feeName: "Customer Delivery Charge",
+            payerParty: "USER",
+            calculationType: "FLAT",
+            amountOrRate: Number(deliveryCharge),
+            gstRate: 18.00,
+            hsnSacCode: "9968",
+            isEnabled: true,
+          });
+        }
+
+        // Variant Commissions (18% GST, SAC 9983, Payer: VENDOR)
+        if (variantCommissions && Array.isArray(variantCommissions) && variantCommissions.length > 0) {
+          variantCommissions.forEach((vc) => {
+            feesToSave.push({
+              productId,
+              variantId: vc.variantId,
+              feeCode: "COMMISSION",
+              feeName: `Marketplace Referral Commission (${vc.commissionType === "percentage" ? `${vc.commissionValue}%` : `₹${vc.commissionValue}`})`,
+              payerParty: "VENDOR",
+              calculationType: vc.commissionType === "percentage" ? "PERCENTAGE" : "FLAT",
+              amountOrRate: Number(vc.commissionValue),
+              gstRate: 18.00,
+              hsnSacCode: "9983",
+              isEnabled: true,
+            });
+          });
+        }
+
+        // Any explicitly configured extra product fees (e.g. custom closing fee or platform fee overrides)
+        if (productFees && Array.isArray(productFees) && productFees.length > 0) {
+          productFees.forEach((pf) => {
+            if (pf.feeCode !== "DELIVERY_CHARGE" && pf.feeCode !== "COMMISSION") {
+              feesToSave.push({
+                productId,
+                variantId: pf.variantId || null,
+                feeCode: pf.feeCode,
+                feeName: pf.feeName || pf.name || pf.feeCode,
+                payerParty: pf.payerParty || "VENDOR",
+                calculationType: pf.calculationType || "FLAT",
+                amountOrRate: Number(pf.amountOrRate ?? pf.amount ?? 0),
+                gstRate: Number(pf.gstRate ?? 18.00),
+                hsnSacCode: pf.hsnSacCode || "9983",
+                isEnabled: pf.isEnabled !== undefined ? Boolean(pf.isEnabled) : true,
+              });
+            }
+          });
+        }
+
+        if (feesToSave.length > 0) {
+          await productFeeRepository.saveProductFees(productId, feesToSave);
+          logger.info("Product fees saved during activation", { productId, count: feesToSave.length });
+        }
+      } catch (feeErr) {
+        logger.warn("Could not save product_fees during activation (table may not exist yet):", feeErr.message);
       }
 
       return true;
@@ -1411,40 +1590,83 @@ export class ProductService {
     try {
       const product = await this.productRepository.findById(productId);
       if (!product) {
-        throw new AppError("Product not found", 404);
+        return {
+          available: false,
+          reason: "Product not found",
+          availableQuantity: 0,
+          stock: 0,
+          variant: null,
+        };
       }
 
-      console.log("Checking availability for product:", product);
+      console.log("Checking availability for product:", product.title || productId);
 
       if (!product.is_active) {
         return {
           available: false,
           reason: "Product is not active",
           availableQuantity: 0,
+          stock: 0,
+          variant: null,
         };
       }
 
       // If variant specified, check variant stock
       if (variantId) {
-        const variant = product.variants.find((v) => v.id === variantId);
-        if (!variant) {
-          throw new AppError("Product variant not found", 404);
+        let variant = product.variants?.find((v) => v.id === variantId);
+
+        // Fallback: Check if variant was regenerated by matching historical SKU
+        if (!variant && product.variants && product.variants.length > 0) {
+          try {
+            const supabase = getSupabase();
+            const { data: pastItems } = await supabase
+              .from("order_items")
+              .select("sku")
+              .eq("variant_id", variantId)
+              .limit(1);
+
+            if (pastItems && pastItems.length > 0 && pastItems[0].sku) {
+              const matchedVariant = product.variants.find(
+                (v) => v.sku === pastItems[0].sku
+              );
+              if (matchedVariant) {
+                logger.info("checkAvailability: matched variant by historical SKU", {
+                  oldVariantId: variantId,
+                  newVariantId: matchedVariant.id,
+                  sku: matchedVariant.sku,
+                });
+                variant = matchedVariant;
+              }
+            }
+          } catch (lookupErr) {
+            logger.warn("Historical variant lookup error:", lookupErr.message);
+          }
         }
 
-        const isAvailable = variant.stock >= quantity;
+        if (!variant) {
+          return {
+            available: false,
+            reason: "Product variant not found or no longer available",
+            availableQuantity: 0,
+            stock: 0,
+            variant: null,
+          };
+        }
+
+        const isAvailable = Number(variant.stock || 0) >= quantity;
 
         return {
           available: isAvailable,
           reason: isAvailable
             ? "Product variant is available"
             : "Insufficient stock",
-          availableQuantity: variant.stock,
-          stock: variant.stock, // Add both for compatibility
+          availableQuantity: variant.stock || 0,
+          stock: variant.stock || 0, // Add both for compatibility
           variant: {
             id: variant.id,
             sku: variant.sku,
             price: variant.price || product.basePrice,
-            availableQuantity: variant.stock,
+            availableQuantity: variant.stock || 0,
           },
         };
       }

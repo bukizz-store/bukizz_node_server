@@ -3,6 +3,8 @@ import { v4 as uuidv4 } from "uuid";
 import { logger } from "../utils/logger.js";
 import { productPaymentMethodRepository } from "../repositories/productPaymentMethodRepository.js";
 import { variantCommissionRepository } from "../repositories/variantCommissionRepository.js";
+import { VariantComponentRepository } from "../repositories/variantComponentRepository.js";
+import { taxFeeService as defaultTaxFeeService } from "./taxFeeService.js";
 // import { smsService } from "./smsService.js";
 import {
   queueOrderConfirmationEmail,
@@ -28,6 +30,8 @@ export class OrderService {
     warehouseRepository,
     productPaymentMethodRepository,
     variantCommissionRepository,
+    taxFeeService,
+    variantComponentRepository,
   ) {
     this.orderRepository = orderRepository;
     this.productRepository = productRepository;
@@ -37,6 +41,9 @@ export class OrderService {
     this.warehouseRepository = warehouseRepository;
     this.productPaymentMethodRepository = productPaymentMethodRepository;
     this.variantCommissionRepository = variantCommissionRepository;
+    this.taxFeeService = taxFeeService || defaultTaxFeeService;
+    this.variantComponentRepository =
+      variantComponentRepository || new VariantComponentRepository();
   }
 
   /**
@@ -319,10 +326,12 @@ export class OrderService {
           warehouseMap,
         );
 
-        // Step 2: Calculate final pricing with current rates
+        // Step 2: Calculate final pricing with current rates and taxFeeService
+        const customerState = shippingAddress?.state || "Haryana";
         const orderSummary = await this._calculateAtomicOrderSummary(
           connection,
           validatedItems,
+          { customerState }
         );
 
         // Step 3: Create order record
@@ -341,6 +350,8 @@ export class OrderService {
           paymentMethod,
           paymentStatus: paymentMethod === "cod" ? "pending" : "pending",
           status: orderStatus,
+          cartPlatformFee: orderSummary.cartPlatformFee || 0.0,
+          cartPlatformFeeGst: orderSummary.cartPlatformFeeGst || 0.0,
           metadata: {
             ...metadata,
             orderSummary,
@@ -433,7 +444,7 @@ export class OrderService {
         // Get current product/variant information using Supabase client methods
         if (item.variantId) {
           // Get product with variant data and images
-          const { data: productData, error: productError } = await connection
+          let { data: productData, error: productError } = await connection
             .from("products")
             .select(
               `
@@ -453,6 +464,54 @@ export class OrderService {
             .eq("product_variants.id", item.variantId)
             .eq("is_active", true)
             .single();
+
+          // Fallback: If variant was regenerated on update, match historical SKU
+          if (productError || !productData) {
+            try {
+              const { data: pastItems } = await connection
+                .from("order_items")
+                .select("sku")
+                .eq("variant_id", item.variantId)
+                .limit(1);
+
+              if (pastItems && pastItems.length > 0 && pastItems[0].sku) {
+                const { data: fallbackData, error: fallbackError } = await connection
+                  .from("products")
+                  .select(
+                    `
+                    *,
+                    product_variants!inner(
+                      id,
+                      price,
+                      stock,
+                      sku,
+                      metadata,
+                      compare_at_price
+                    ),
+                    product_images(url, is_primary, sort_order)
+                  `,
+                  )
+                  .eq("id", item.productId)
+                  .eq("product_variants.sku", pastItems[0].sku)
+                  .eq("is_active", true)
+                  .single();
+
+                if (!fallbackError && fallbackData && fallbackData.product_variants?.length > 0) {
+                  const newVariant = fallbackData.product_variants[0];
+                  logger.info("OrderService._validateAndReserveStock: matched variant by historical SKU", {
+                    oldVariantId: item.variantId,
+                    newVariantId: newVariant.id,
+                    sku: pastItems[0].sku,
+                  });
+                  item.variantId = newVariant.id;
+                  productData = fallbackData;
+                  productError = null;
+                }
+              }
+            } catch (fallbackErr) {
+              logger.warn("Historical variant fallback lookup failed in orderService:", fallbackErr.message);
+            }
+          }
 
           if (productError || !productData) {
             stockErrors.push(
@@ -567,6 +626,12 @@ export class OrderService {
             : product.sku,
           title: product.title,
           deliveryCharge: parseFloat(product.delivery_charge) || 0,
+          retailerId: product.retailer_id || item.retailerId || null,
+          productType: product.product_type || item.productType || "general",
+          categoryId: product.category_id || product.category || item.categoryId || null,
+          hsnSacCode: item.hsnSacCode || item.hsn_sac_code || product.hsn_sac_code || null,
+          gstRate: item.gstRate !== undefined ? item.gstRate : product.gst_rate !== undefined ? product.gst_rate : null,
+          vendorState: product.warehouse?.state || product.retailer?.state || "UTTAR PRADESH",
           productSnapshot: {
             title: product.title,
             description: product.description || product.short_description,
@@ -629,7 +694,8 @@ export class OrderService {
   /**
    * Calculate order summary with current pricing atomically
    */
-  async _calculateAtomicOrderSummary(connection, validatedItems) {
+  async _calculateAtomicOrderSummary(connection, validatedItems, options = {}) {
+    const customerState = options.customerState || "Haryana";
     let subtotal = 0;
     const itemDetails = [];
     const warehouseGroups = new Map();
@@ -648,45 +714,66 @@ export class OrderService {
       warehouseGroups.get(warehouseId).push(item);
     }
 
-    // Calculate order-level fees
-    const deliveryFee = this._calculateDeliveryFee(
-      subtotal,
-      totalDeliveryCharge,
-    );
-    const platformFee = this._calculatePlatformFee(subtotal);
-    const tax = this._calculateTax(subtotal);
+    // Comprehensive tax & fee evaluation via TaxFeeService
+    let financialEvaluation = null;
+    try {
+      financialEvaluation = await this.taxFeeService.evaluateOrderFinancials(
+        validatedItems,
+        { customerState }
+      );
 
-    // --- Bifurcate fees across items proportionally ---
-    const baseFee = subtotal >= 399 ? 0 : 50; // Base delivery fee (same logic as _calculateDeliveryFee)
+      // Snapshot evaluated financial rollups and decomposed components onto validatedItems
+      if (financialEvaluation && financialEvaluation.items) {
+        financialEvaluation.items.forEach((evItem, idx) => {
+          const target = validatedItems[idx] || validatedItems.find(
+            (v) => (v.clientId && v.clientId === evItem.clientId) || (v.variantId && v.variantId === evItem.variantId)
+          );
+          if (target) {
+            target.gstRate = evItem.gstRate;
+            target.basePrice = evItem.basePrice;
+            target.taxableAmount = evItem.basePrice;
+            target.cgstAmount = evItem.cgstAmount;
+            target.sgstAmount = evItem.sgstAmount;
+            target.igstAmount = evItem.igstAmount;
+            target.deliveryFee = evItem.deliveryFee;
+            target.itemDeliveryFee = evItem.deliveryFee;
+            target.totalVendorFees = evItem.totalVendorFees;
+            target.vendorNetPayout = evItem.vendorNetPayout;
+            target.vendorCommissionFee = evItem.vendorCommissionFee;
+            target.vendorClosingFee = evItem.vendorClosingFee;
+            target.vendorPlatformFee = evItem.vendorPlatformFee;
+            target.vendorCollectionFee = evItem.vendorCollectionFee;
+            target.vendorShippingFee = evItem.vendorShippingFee;
+            target.vendorFeeGst = evItem.vendorFeeGst;
+            target.vendorTcsAmount = evItem.vendorTcsAmount;
+            target.components = evItem.components || [];
+            target.itemFees = evItem.itemFees || [];
+          }
+        });
+      }
+    } catch (taxErr) {
+      logger.warn("taxFeeService.evaluateOrderFinancials error during order summary calculation:", taxErr);
+    }
 
-    let runningDeliveryTotal = 0;
+    // Delivery fee and platform fee resolution
+    const deliveryFee = financialEvaluation?.summary?.totalDeliveryFee ?? this._calculateDeliveryFee(subtotal, totalDeliveryCharge);
+    const cartPlatformFee = financialEvaluation?.summary?.cartPlatformFee ?? 15.0;
+    const cartPlatformFeeGst = financialEvaluation?.summary?.cartPlatformFeeGst ?? 2.7;
+    const platformFee = financialEvaluation?.summary?.totalCartPlatformFee ?? (cartPlatformFee + cartPlatformFeeGst);
+    const tax = financialEvaluation?.summary?.totalGst ?? this._calculateTax(subtotal);
+
+    // Bifurcate customer platform fee across items proportionally for warehouse item records
     let runningPlatformTotal = 0;
-
     for (let i = 0; i < itemDetails.length; i++) {
       const item = itemDetails[i];
       const proportion = subtotal > 0 ? item.totalPrice / subtotal : 1 / itemDetails.length;
-
-      // Product-specific delivery charge + proportional share of base fee
-      const itemProductDelivery = (item.deliveryCharge || 0) * item.quantity;
-      const itemBaseFeeShare = parseFloat((proportion * baseFee).toFixed(2));
       const itemPlatformShare = parseFloat((proportion * platformFee).toFixed(2));
 
       if (i === itemDetails.length - 1) {
-        // Last item absorbs rounding difference to ensure exact totals
-        item.itemDeliveryFee = parseFloat(
-          (deliveryFee - runningDeliveryTotal).toFixed(2),
-        );
-        item.itemPlatformFee = parseFloat(
-          (platformFee - runningPlatformTotal).toFixed(2),
-        );
+        item.itemPlatformFee = parseFloat((platformFee - runningPlatformTotal).toFixed(2));
       } else {
-        item.itemDeliveryFee = parseFloat(
-          (itemProductDelivery + itemBaseFeeShare).toFixed(2),
-        );
         item.itemPlatformFee = itemPlatformShare;
       }
-
-      runningDeliveryTotal += item.itemDeliveryFee;
       runningPlatformTotal += item.itemPlatformFee;
     }
 
@@ -697,21 +784,22 @@ export class OrderService {
       0,
     );
     const discount = Math.max(0, totalMRP - subtotal);
-
-    // Total = Subtotal + Platform Fee + Delivery Fee (tax included in price)
-    const total = subtotal + deliveryFee + platformFee;
+    const grandTotal = Math.round((subtotal + deliveryFee + platformFee) * 100) / 100;
 
     return {
       items: itemDetails,
       subtotal: parseFloat(subtotal.toFixed(2)),
       deliveryFee: parseFloat(deliveryFee.toFixed(2)),
       platformFee: parseFloat(platformFee.toFixed(2)),
+      cartPlatformFee,
+      cartPlatformFeeGst,
       tax: parseFloat(tax.toFixed(2)),
       discount: parseFloat(discount.toFixed(2)),
-      total: parseFloat(total.toFixed(2)),
+      total: grandTotal,
       currency: "INR",
       warehouseCount: warehouseGroups.size,
       savings: parseFloat(discount.toFixed(2)),
+      taxSummary: financialEvaluation?.summary || null,
     };
   }
 
@@ -1175,9 +1263,32 @@ export class OrderService {
 
         // Handle variant pricing
         if (item.variantId) {
-          const variant = product.variants?.find(
+          let variant = product.variants?.find(
             (v) => v.id === item.variantId,
           );
+
+          if (!variant && product.variants?.length > 0) {
+            try {
+              const { data: pastItems } = await this.orderRepository.supabase
+                .from("order_items")
+                .select("sku")
+                .eq("variant_id", item.variantId)
+                .limit(1);
+
+              if (pastItems && pastItems.length > 0 && pastItems[0].sku) {
+                const matchedVariant = product.variants.find(
+                  (v) => v.sku === pastItems[0].sku
+                );
+                if (matchedVariant) {
+                  item.variantId = matchedVariant.id;
+                  variant = matchedVariant;
+                }
+              }
+            } catch (err) {
+              logger.warn("calculateOrderSummary: historical variant fallback lookup error:", err.message);
+            }
+          }
+
           if (!variant) {
             throw new AppError(
               `Product variant not found for ${product.title}`,

@@ -12,6 +12,7 @@ import { variantCommissionRepository } from "../repositories/variantCommissionRe
 import { DeliveryController } from "./deliveryController.js";
 import { AppError } from "../middleware/errorHandler.js";
 import { getSupabase } from "../db/index.js";
+import { invoiceRepository as defaultInvoiceRepository } from "../repositories/invoiceRepository.js";
 
 // Initialize repositories and service - but defer Supabase client access
 let orderService = null;
@@ -46,8 +47,10 @@ function getOrderService() {
  * Handles all order-related HTTP requests with comprehensive error handling and atomic operations
  */
 export class OrderController {
-  constructor(orderServiceInstance) {
+  constructor(orderServiceInstance, invoiceRepositoryInstance) {
     this.orderService = orderServiceInstance || getOrderService();
+    this.invoiceRepository =
+      invoiceRepositoryInstance || defaultInvoiceRepository;
   }
 
   /**
@@ -439,9 +442,21 @@ export class OrderController {
         });
       }
 
+      // Query order invoices
+      let invoices = [];
+      try {
+        invoices = await defaultInvoiceRepository.findByOrderId(orderId);
+      } catch (invErr) {
+        logger.warn("Failed to fetch invoices for getOrderById", {
+          orderId,
+          error: invErr.message,
+        });
+      }
+
       // Add order tracking and status information
       const enrichedOrder = {
         ...order,
+        invoices: invoices || [],
         timeline: order.events || [],
         canCancel: OrderController._canCancelOrder(order),
         canReturn: OrderController._canReturnOrder(order),
@@ -582,10 +597,21 @@ export class OrderController {
         });
       }
 
+      let invoices = [];
+      try {
+        invoices = await defaultInvoiceRepository.findByOrderId(orderId);
+      } catch (invErr) {
+        logger.warn("Failed to fetch invoices for trackOrder", {
+          orderId,
+          error: invErr.message,
+        });
+      }
+
       const trackingData = {
         orderId: order.id,
         orderNumber: order.orderNumber,
         status: order.status,
+        invoices: invoices || [],
         estimatedDeliveryDate:
           OrderController._calculateEstimatedDelivery(order),
         trackingNumber: order.trackingNumber,
@@ -651,6 +677,21 @@ export class OrderController {
     const order = await this.orderService.getOrder(id, userId);
 
     OrderController._sanitizeOrders(order, req.user?.role);
+
+    let invoices = [];
+    try {
+      const repo = this.invoiceRepository || defaultInvoiceRepository;
+      invoices = await repo.findByOrderId(id);
+    } catch (invErr) {
+      logger.warn("Failed to fetch invoices for getOrder", {
+        orderId: id,
+        error: invErr.message,
+      });
+    }
+
+    if (order) {
+      order.invoices = invoices || [];
+    }
 
     res.json({
       success: true,
@@ -948,9 +989,21 @@ export class OrderController {
     // Get order with events for tracking
     const order = await this.orderService.getOrder(id, userId);
 
+    let invoices = [];
+    try {
+      const repo = this.invoiceRepository || defaultInvoiceRepository;
+      invoices = await repo.findByOrderId(id);
+    } catch (invErr) {
+      logger.warn("Failed to fetch invoices for getOrderTracking", {
+        orderId: id,
+        error: invErr.message,
+      });
+    }
+
     const trackingInfo = {
       orderId: order.id,
       status: order.status,
+      invoices: invoices || [],
       events: order.events,
       estimatedDelivery: order.estimatedDeliveryDate,
       trackingNumber: order.trackingNumber,
