@@ -3,6 +3,7 @@ import { retailerSchoolController } from "../controllers/retailerSchoolControlle
 import {
   authenticateToken,
   requirePermissions,
+  requireAdminScope,
 } from "../middleware/authMiddleware.js";
 
 /**
@@ -36,6 +37,7 @@ export default function retailerSchoolRoutes(dependencies = {}) {
   router.get(
     "/admin/pending",
     requirePermissions(accessService, "approvals:school_retailers:read"),
+    requireAdminScope(accessService, "SCHOOL"),
     retailerSchoolController.getAllPendingRequests,
   );
 
@@ -80,6 +82,7 @@ export default function retailerSchoolRoutes(dependencies = {}) {
   router.patch(
     "/status",
     requirePermissions(accessService, "approvals:school_retailers:manage"),
+    requireAdminScope(accessService, "SCHOOL", "schoolId"),
     retailerSchoolController.updateLinkStatus
   );
 

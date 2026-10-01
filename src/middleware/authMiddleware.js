@@ -274,7 +274,7 @@ export const requireRetailerSchoolScope = (accessService) => {
       const roles = req.user.roles || (req.user.role ? [req.user.role] : []);
 
       // Admins & Managers bypass retailer school scope checks
-      if (roles.includes("superadmin") || roles.includes("manager")) {
+      if (roles.includes("superadmin") || roles.includes("admin") || roles.includes("manager")) {
         return next();
       }
 
@@ -324,7 +324,7 @@ export const requireRetailerGeneralScope = (accessService) => {
       const userId = req.user.id || req.user._id;
       const roles = req.user.roles || (req.user.role ? [req.user.role] : []);
 
-      if (roles.includes("superadmin") || roles.includes("manager")) {
+      if (roles.includes("superadmin") || roles.includes("admin") || roles.includes("manager")) {
         return next();
       }
 
@@ -375,6 +375,61 @@ export const requireAdminScope = (accessService, entityType, idParamName = "id")
       const entityId = req.params[idParamName] || req.body[idParamName] || req.query[idParamName] || null;
 
       await accessService.validateAdminScope(userId, entityType, entityId);
+
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+};
+
+/**
+ * Enforces ABAC scope for comprehensive product creation.
+ * If user is a retailer:
+ * - If schoolId is present in request body, validates retailer school scope.
+ * - Otherwise (general catalog), validates retailer general category scope.
+ * Admin and managers bypass this check.
+ * @param {Object} accessService - Injected AccessService instance
+ * @returns {Function} Express middleware function
+ */
+export const requireProductCreationScope = (accessService) => {
+  return async (req, res, next) => {
+    try {
+      if (!req.user) {
+        throw new AppError("Authentication required. Please login.", 401);
+      }
+
+      if (!accessService) {
+        logger.error("requireProductCreationScope error: accessService not provided");
+        throw new AppError("Access service unavailable", 500);
+      }
+
+      const userId = req.user.id || req.user._id;
+      const roles = req.user.roles || (req.user.role ? [req.user.role] : []);
+
+      // Admins & Managers bypass retailer scope validation
+      if (roles.includes("superadmin") || roles.includes("admin") || roles.includes("manager")) {
+        return next();
+      }
+
+      // If user is a retailer, validate appropriate scope
+      if (roles.includes("retailer")) {
+        const schoolId = req.body?.schoolId;
+        const categoryId = req.body?.categoryId;
+
+        if (schoolId) {
+          const grade = req.body?.grade || null;
+          const productType = req.body?.productType || null;
+          await accessService.validateRetailerSchoolScope(
+            userId,
+            schoolId,
+            grade,
+            productType
+          );
+        } else if (categoryId) {
+          await accessService.validateRetailerGeneralScope(userId, categoryId);
+        }
+      }
 
       next();
     } catch (error) {

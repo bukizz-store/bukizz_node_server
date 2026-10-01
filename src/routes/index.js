@@ -19,6 +19,8 @@ import adminDeliveryRoutes from "./adminDeliveryRoutes.js";
 import deliveryRoutes from "./deliveryRoutes.js";
 import dpAdminRoutes from "./dpAdminRoutes.js";
 import bannerRoutes from "./bannerRoutes.js";
+import accessRoutes from "./accessRoutes.js";
+import adminDashboardRoutes from "./adminDashboardRoutes.js";
 import { notFoundHandler } from "../middleware/errorHandler.js";
 
 /**
@@ -95,6 +97,8 @@ export function setupRoutes(app, dependencies = {}) {
   app.use(`${apiV1}/images`, imageRoutes);
   app.use(`${apiV1}/settlements`, settlementRoutes(dependencies));
   app.use(`${apiV1}/banners`, bannerRoutes(dependencies));
+  app.use(`${apiV1}/admin/access`, accessRoutes(dependencies));
+  app.use(`${apiV1}/admin/dashboard`, adminDashboardRoutes(dependencies));
 
   // Handle 404 for all other routes
   app.use("*", notFoundHandler);

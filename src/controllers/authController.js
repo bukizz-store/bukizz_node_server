@@ -78,6 +78,7 @@ export class AuthController {
     this.getPendingDeliveryPartnersList = this.getPendingDeliveryPartnersList.bind(this);
     this.loginDeliveryPartner = this.loginDeliveryPartner.bind(this);
     this.resendDeliveryPartnerPin = this.resendDeliveryPartnerPin.bind(this);
+    this.getPermissions = this.getPermissions.bind(this);
     this._attachPermissions = this._attachPermissions.bind(this);
   }
 
@@ -105,12 +106,21 @@ export class AuthController {
       }
     }
 
+    let scopes = [];
     if (accessSvc && user.id) {
       // Query live permissions based on admin_user_roles lookup
       permissions = await accessSvc.getPermissionsForUser(user.id);
 
       if (accessSvc.accessRepository?.getUserAdminRoles) {
         roles = await accessSvc.accessRepository.getUserAdminRoles(user.id);
+      }
+
+      if (accessSvc.getAdminScopes) {
+        try {
+          scopes = await accessSvc.getAdminScopes(user.id);
+        } catch (err) {
+          logger.warn("AuthController: Failed to fetch admin scopes:", err.message);
+        }
       }
     }
 
@@ -131,6 +141,7 @@ export class AuthController {
       ...user,
       roles: effectiveRoles,
       permissions,
+      scopes,
     };
   }
 
@@ -527,6 +538,40 @@ export class AuthController {
       res.status(400).json({
         success: false,
         message: error.message || "Failed to get profile",
+      });
+    }
+  }
+
+  /**
+   * Returns evaluated permissions, roles, and scopes for current authenticated user
+   * GET /api/v1/auth/permissions
+   */
+  async getPermissions(req, res) {
+    try {
+      const user = req.user;
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: "Authentication required",
+        });
+      }
+
+      const userWithPermissions = await this._attachPermissions(user);
+
+      res.status(200).json({
+        success: true,
+        data: {
+          roles: userWithPermissions.roles || [],
+          permissions: userWithPermissions.permissions || [],
+          scopes: userWithPermissions.scopes || [],
+        },
+        message: "Permissions retrieved successfully",
+      });
+    } catch (error) {
+      logger.error("Get permissions error:", error);
+      res.status(400).json({
+        success: false,
+        message: error.message || "Failed to get permissions",
       });
     }
   }

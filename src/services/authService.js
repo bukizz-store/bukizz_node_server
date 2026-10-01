@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { createClient } from "@supabase/supabase-js";
+import { getSupabase } from "../db/index.js";
 import { logger } from "../utils/logger.js";
 import { queueForgotPasswordEmail, queueOtpEmail } from "../queue/emailQueue.js";
 import OtpRepository from "../repositories/otpRepository.js";
@@ -14,18 +15,23 @@ const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_LOCKOUT_MS = 15 * 60 * 1000;
 
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
-);
-
 export class AuthService {
   constructor(supabaseClient) {
-    this.supabase = supabaseClient;
+    this._customSupabase =
+      supabaseClient && typeof supabaseClient.from === "function"
+        ? supabaseClient
+        : null;
     this.jwtSecret = process.env.JWT_SECRET || "your-secret-key";
     this.jwtExpiry = process.env.JWT_EXPIRY || "24h";
     this.refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRY || "7d";
+  }
+
+  get supabase() {
+    return this._customSupabase || getSupabase();
+  }
+
+  set supabase(client) {
+    this._customSupabase = client;
   }
 
   normalizePhone(phone) {
@@ -1071,8 +1077,37 @@ export class AuthService {
         throw new Error("User account is inactive");
       }
 
-      // Map role to roles array for middleware compatibility
-      user.roles = user.role ? [user.role] : [];
+      // Map portal role
+      user.portalRole = user.role;
+
+      // Query assigned administrative roles from admin_user_roles
+      let assignedRoles = [];
+      try {
+        const { data: adminRoles, error: rolesError } = await this.supabase
+          .from("admin_user_roles")
+          .select("admin_roles(role_name)")
+          .eq("user_id", user.id);
+
+        if (rolesError) {
+          logger.error("verifyToken: Error querying admin_user_roles:", rolesError);
+        } else if (adminRoles && adminRoles.length > 0) {
+          assignedRoles = adminRoles
+            .map((r) => r.admin_roles?.role_name?.toLowerCase()?.trim())
+            .filter(Boolean);
+        }
+      } catch (err) {
+        logger.error("verifyToken: Exception querying admin roles:", err);
+      }
+
+      if (assignedRoles.length > 0) {
+        user.roles = assignedRoles;
+      } else {
+        user.roles = user.role ? [user.role.toLowerCase().trim()] : [];
+      }
+
+      if (user.role === "superadmin" && !user.roles.includes("superadmin")) {
+        user.roles.push("superadmin");
+      }
 
       return {
         valid: true,
@@ -1917,5 +1952,5 @@ export class AuthService {
   }
 }
 
-const authService = new AuthService(supabase);
+const authService = new AuthService();
 export default authService;

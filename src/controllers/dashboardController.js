@@ -271,6 +271,344 @@ export class DashboardController {
       return [];
     }
   }
+
+  /**
+   * GET /api/v1/admin/dashboard/overview
+   * Returns aggregated platform-wide e-commerce overview for admins,
+   * supporting optional multi-retailer filtering (?retailerIds=id1,id2)
+   */
+  getAdminDashboardOverview = asyncHandler(async (req, res) => {
+    const supabase = getSupabase();
+
+    // Parse requested retailer filter if present
+    const rawRetailerIds = req.query.retailerIds;
+    let selectedRetailerIds = [];
+    if (rawRetailerIds) {
+      selectedRetailerIds = (
+        Array.isArray(rawRetailerIds)
+          ? rawRetailerIds
+          : String(rawRetailerIds).split(",")
+      )
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+
+    const isFiltered = selectedRetailerIds.length > 0;
+
+    // Run parallel baseline metadata queries across Supabase
+    const [
+      availableRetailersResult,
+      schoolsResult,
+      productsResult,
+      customersResult,
+      retailersResult,
+      deliveryPartnersResult,
+      pendingRetailersResult,
+      pendingSchoolRetailersResult,
+      openQueriesResult,
+    ] = await Promise.all([
+      supabase
+        .from("users")
+        .select(
+          "id, full_name, email, is_active, deactivation_reason, retailer_data!retailer_id(display_name, owner_name)"
+        )
+        .eq("role", "retailer")
+        .order("full_name", { ascending: true }),
+      supabase.from("schools").select("id", { count: "exact", head: true }),
+      supabase.from("products").select("id", { count: "exact", head: true }),
+      supabase.from("users").select("id", { count: "exact", head: true }).eq("role", "customer"),
+      supabase.from("users").select("id", { count: "exact", head: true }).eq("role", "retailer"),
+      supabase.from("users").select("id", { count: "exact", head: true }).eq("role", "delivery_partner"),
+      supabase.from("users").select("id", { count: "exact", head: true }).eq("role", "retailer").eq("is_active", false).eq("deactivation_reason", "unauthorized"),
+      supabase.from("retailer_schools").select("school_id", { count: "exact", head: true }).eq("status", "pending"),
+      supabase.from("order_queries").select("id", { count: "exact", head: true }).eq("status", "open"),
+    ]);
+
+    const availableRetailers = (availableRetailersResult.data || []).map((r) => {
+      const rd = r.retailer_data;
+      const storeName = rd?.display_name || r.full_name;
+      const isActive =
+        r.is_active &&
+        r.deactivation_reason !== "unauthorized" &&
+        r.deactivation_reason !== "User requested account deletion";
+      return {
+        id: r.id,
+        name: r.full_name,
+        storeName,
+        email: r.email,
+        isActive,
+      };
+    });
+
+    let ordersResult;
+    let recentOrdersResult;
+    let timelineResult;
+    let activeSchoolsCount = schoolsResult.count || 0;
+    let activeCustomersCount = customersResult.count || 0;
+    let activeRetailersCount = retailersResult.count || 0;
+
+    if (isFiltered) {
+      // 1. Get warehouse IDs for selected retailers
+      const { data: rw } = await supabase
+        .from("retailer_warehouse")
+        .select("warehouse_id")
+        .in("retailer_id", selectedRetailerIds);
+      const whIds = Array.from(new Set((rw || []).map((r) => r.warehouse_id)));
+
+      if (whIds.length === 0) {
+        ordersResult = {
+          totalRevenue: 0,
+          totalOrders: 0,
+          averageOrderValue: 0,
+          byStatus: {},
+          byPaymentMethod: {},
+        };
+        recentOrdersResult = [];
+        timelineResult = [];
+        activeCustomersCount = 0;
+        activeSchoolsCount = 0;
+      } else {
+        // Query order_items with warehouse_id filter
+        const { data: items, error: itemsError } = await supabase
+          .from("order_items")
+          .select(
+            "order_id, status, orders!order_id(id, total_amount, status, payment_method, payment_status, created_at, user_id, users!user_id(full_name, email, phone))"
+          )
+          .in("warehouse_id", whIds);
+
+        const orderMap = new Map();
+        (items || []).forEach((item) => {
+          if (item.orders && !orderMap.has(item.order_id)) {
+            orderMap.set(item.order_id, item.orders);
+          }
+        });
+        const filteredOrders = Array.from(orderMap.values());
+
+        ordersResult = this._computeOrdersStats(filteredOrders);
+        recentOrdersResult = this._formatRecentOrders(filteredOrders.slice(0, 6));
+        timelineResult = this._computeRevenueTimeline(filteredOrders);
+
+        // Distinct customer count for these retailers
+        const distinctCustomerIds = new Set(
+          filteredOrders.map((o) => o.user_id).filter(Boolean)
+        );
+        activeCustomersCount = distinctCustomerIds.size;
+
+        // Distinct schools linked to selected retailers
+        const { data: rs } = await supabase
+          .from("retailer_schools")
+          .select("school_id")
+          .in("retailer_id", selectedRetailerIds);
+        activeSchoolsCount = new Set((rs || []).map((r) => r.school_id)).size;
+      }
+
+      activeRetailersCount = selectedRetailerIds.length;
+    } else {
+      [ordersResult, recentOrdersResult, timelineResult] = await Promise.all([
+        this._getPlatformOrderStats(supabase),
+        this._getPlatformRecentOrders(supabase),
+        this._getPlatformRevenueTimeline(supabase),
+      ]);
+    }
+
+    const data = {
+      kpis: {
+        totalRevenue: ordersResult.totalRevenue,
+        totalOrders: ordersResult.totalOrders,
+        averageOrderValue: ordersResult.averageOrderValue,
+        activeCustomers: activeCustomersCount,
+        activeSchools: activeSchoolsCount,
+        activeRetailers: activeRetailersCount,
+        totalProducts: productsResult.count || 0,
+        activeDeliveryPartners: deliveryPartnersResult.count || 0,
+      },
+      orderMetrics: {
+        byStatus: ordersResult.byStatus,
+        byPaymentMethod: ordersResult.byPaymentMethod,
+      },
+      pendingActions: {
+        pendingRetailers: pendingRetailersResult.count || 0,
+        pendingSchoolRetailers: pendingSchoolRetailersResult.count || 0,
+        openQueries: openQueriesResult.count || 0,
+      },
+      revenueTimeline: timelineResult,
+      recentOrders: recentOrdersResult,
+      availableRetailers,
+      isFiltered,
+    };
+
+    res.json({
+      success: true,
+      data,
+      message: "Admin dashboard overview retrieved successfully",
+    });
+  });
+
+  _computeOrdersStats(orders) {
+    let totalRevenue = 0;
+    const totalOrders = orders.length;
+    const byStatus = {};
+    const byPaymentMethod = {};
+
+    for (const order of orders) {
+      const amt = parseFloat(order.total_amount || 0);
+      const status = order.status || "initialized";
+      const method = order.payment_method || "unknown";
+
+      if (status !== "cancelled") {
+        totalRevenue += amt;
+      }
+
+      if (!byStatus[status]) {
+        byStatus[status] = { count: 0, revenue: 0 };
+      }
+      byStatus[status].count++;
+      byStatus[status].revenue = parseFloat(
+        (byStatus[status].revenue + amt).toFixed(2)
+      );
+
+      if (!byPaymentMethod[method]) {
+        byPaymentMethod[method] = { count: 0, revenue: 0 };
+      }
+      byPaymentMethod[method].count++;
+      byPaymentMethod[method].revenue = parseFloat(
+        (byPaymentMethod[method].revenue + amt).toFixed(2)
+      );
+    }
+
+    const validOrderCount = orders.filter((o) => o.status !== "cancelled").length;
+    const averageOrderValue =
+      validOrderCount > 0
+        ? parseFloat((totalRevenue / validOrderCount).toFixed(2))
+        : 0;
+
+    return {
+      totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+      totalOrders,
+      averageOrderValue,
+      byStatus,
+      byPaymentMethod,
+    };
+  }
+
+  _formatRecentOrders(orders) {
+    const sorted = [...orders].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    );
+    return sorted.slice(0, 6).map((o) => ({
+      id: o.id,
+      totalAmount: parseFloat(o.total_amount || 0),
+      status: o.status || "initialized",
+      paymentMethod: o.payment_method || "unknown",
+      paymentStatus: o.payment_status || "pending",
+      createdAt: o.created_at,
+      customerName:
+        o.users?.full_name || o.users?.email?.split("@")[0] || "Guest Customer",
+      customerEmail: o.users?.email || "—",
+      customerPhone: o.users?.phone || "—",
+    }));
+  }
+
+  _computeRevenueTimeline(orders) {
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+    const recent = orders.filter(
+      (o) => new Date(o.created_at) >= sixMonthsAgo
+    ).sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+
+    const monthMap = {};
+    for (const o of recent) {
+      const d = new Date(o.created_at);
+      const key = d.toLocaleString("en-US", { month: "short", year: "2-digit" });
+      if (!monthMap[key]) {
+        monthMap[key] = { period: key, revenue: 0, orders: 0 };
+      }
+      monthMap[key].orders++;
+      if (o.status !== "cancelled") {
+        monthMap[key].revenue += parseFloat(o.total_amount || 0);
+      }
+    }
+
+    return Object.values(monthMap).map((m) => ({
+      ...m,
+      revenue: parseFloat(m.revenue.toFixed(2)),
+    }));
+  }
+
+  async _getPlatformOrderStats(supabase) {
+    try {
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select("total_amount, status, payment_method");
+
+      if (error || !orders) {
+        logger.error("Error fetching platform order stats:", error);
+        return {
+          totalRevenue: 0,
+          totalOrders: 0,
+          averageOrderValue: 0,
+          byStatus: {},
+          byPaymentMethod: {},
+        };
+      }
+
+      return this._computeOrdersStats(orders);
+    } catch (err) {
+      logger.error("Error in _getPlatformOrderStats:", err);
+      return {
+        totalRevenue: 0,
+        totalOrders: 0,
+        averageOrderValue: 0,
+        byStatus: {},
+        byPaymentMethod: {},
+      };
+    }
+  }
+
+  async _getPlatformRecentOrders(supabase) {
+    try {
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select(
+          "id, total_amount, status, payment_method, payment_status, created_at, users!user_id(full_name, email, phone)"
+        )
+        .order("created_at", { ascending: false })
+        .limit(6);
+
+      if (error || !orders) {
+        logger.error("Error fetching recent orders:", error);
+        return [];
+      }
+
+      return this._formatRecentOrders(orders);
+    } catch (err) {
+      logger.error("Error in _getPlatformRecentOrders:", err);
+      return [];
+    }
+  }
+
+  async _getPlatformRevenueTimeline(supabase) {
+    try {
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select("total_amount, created_at, status")
+        .gte("created_at", sixMonthsAgo.toISOString())
+        .order("created_at", { ascending: true });
+
+      if (error || !orders) {
+        return [];
+      }
+
+      return this._computeRevenueTimeline(orders);
+    } catch (err) {
+      logger.error("Error in _getPlatformRevenueTimeline:", err);
+      return [];
+    }
+  }
 }
 
 export const dashboardController = new DashboardController();

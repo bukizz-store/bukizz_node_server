@@ -101,6 +101,7 @@ export default function authRoutes(dependencies = {}) {
     authController.verifyRetailer
   );
   router.get("/me", authenticateToken, authController.getProfile);
+  router.get("/permissions", authenticateToken, authController.getPermissions);
   router.post("/logout", authenticateToken, authController.logout);
   router.delete("/delete-account", authenticateToken, authController.deleteAccount);
 

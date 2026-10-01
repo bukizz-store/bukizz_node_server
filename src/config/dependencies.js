@@ -17,6 +17,7 @@ import { AuthController } from "../controllers/authController.js";
 import { ProductController } from "../controllers/productController.js";
 import { SchoolController } from "../controllers/schoolController.js";
 import { OrderController } from "../controllers/orderController.js";
+import { AccessController } from "../controllers/accessController.js";
 import { ledgerRepository } from "../repositories/ledgerRepository.js";
 import { settlementRepository } from "../repositories/settlementRepository.js";
 import { SettlementService } from "../services/settlementService.js";
@@ -64,7 +65,7 @@ export async function createDependencies(overrides = {}) {
 
   // Services (Business Logic Layer)
   const userService = overrides.userService || new UserService(userRepository);
-  const authService = overrides.authService || new AuthService(userRepository);
+  const authService = overrides.authService || new AuthService(supabase);
   const productService =
     overrides.productService || new ProductService(productRepository);
   const schoolService =
@@ -139,6 +140,9 @@ export async function createDependencies(overrides = {}) {
       deliveryIncentiveService: deliveryIncentiveSvc,
       deliveryBankService: deliveryBankSvc,
     });
+  const accessController =
+    overrides.accessController ||
+    new AccessController(accessService);
 
   return {
     // Database
@@ -174,6 +178,7 @@ export async function createDependencies(overrides = {}) {
     // Controllers
     userController,
     authController,
+    accessController,
     productController,
     schoolController,
     orderController,

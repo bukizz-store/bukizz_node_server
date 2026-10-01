@@ -3,6 +3,7 @@ import multer from "multer";
 import {
   authenticateToken,
   requirePermissions,
+  requireAdminScope,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import { schoolSchemas, paramSchemas } from "../models/schemas.js";
@@ -174,6 +175,7 @@ export default function schoolRoutes(dependencies = {}) {
     "/:id",
     authenticateToken,
     requirePermissions(accessService, "schools:manage"),
+    requireAdminScope(accessService, "SCHOOL", "id"),
     upload.fields([{ name: "image", maxCount: 1 }, { name: "cover_image", maxCount: 1 }]),
     parseMultipartFields,
     validate(paramSchemas.id, "params"),
@@ -189,6 +191,7 @@ export default function schoolRoutes(dependencies = {}) {
     "/:id",
     authenticateToken,
     requirePermissions(accessService, "schools:manage"),
+    requireAdminScope(accessService, "SCHOOL", "id"),
     validate(paramSchemas.id, "params"),
     schoolController.deactivateSchool
   );
@@ -201,6 +204,7 @@ export default function schoolRoutes(dependencies = {}) {
     "/:id/reactivate",
     authenticateToken,
     requirePermissions(accessService, "schools:manage"),
+    requireAdminScope(accessService, "SCHOOL", "id"),
     validate(paramSchemas.id, "params"),
     schoolController.reactivateSchool
   );
@@ -280,6 +284,7 @@ export default function schoolRoutes(dependencies = {}) {
     "/:id/partnerships",
     authenticateToken,
     requirePermissions(accessService, "schools:partnerships:manage"),
+    requireAdminScope(accessService, "SCHOOL", "id"),
     validate(paramSchemas.id, "params"),
     validate(schoolSchemas.partnership),
     schoolController.createPartnership

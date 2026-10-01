@@ -601,14 +601,15 @@ export class UserService {
   async searchUsers(filters) {
     try {
       // Validate filters
-      if (filters.role) {
-        const validRoles = ["customer", "retailer", "admin", "delivery_partner"];
-        if (!validRoles.includes(filters.role)) {
-          throw new AppError(
-            `Invalid role filter. Must be one of: ${validRoles.join(", ")}`,
-            400,
-          );
-        }
+      if (
+        filters.role &&
+        filters.role !== "all" &&
+        !["customer", "retailer", "admin", "delivery_partner"].includes(filters.role)
+      ) {
+        throw new AppError(
+          "Invalid role filter. Must be one of: customer, retailer, admin, delivery_partner",
+          400
+        );
       }
 
       // Validate pagination

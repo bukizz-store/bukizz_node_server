@@ -710,11 +710,16 @@ export class UserRepository {
         .select(
           "id, full_name, email, phone, role, is_active, email_verified, phone_verified, created_at, last_login_at, city, state, school_id",
           { count: "exact" }, // Request count for pagination
-        )
-        .eq("is_active", true);
+        );
 
-      // Apply filters
-      if (filters.role) {
+      if (filters.isActive !== undefined) {
+        query = query.eq("is_active", filters.isActive);
+      } else if (filters.is_active !== undefined) {
+        query = query.eq("is_active", filters.is_active);
+      }
+
+      // Apply portal role filter (customer, retailer, admin, delivery_partner)
+      if (filters.role && filters.role !== "all") {
         query = query.eq("role", filters.role);
       }
 
@@ -722,31 +727,51 @@ export class UserRepository {
         query = query.eq("email_verified", filters.email_verified);
       }
 
-      if (filters.search) {
-        const safeSearch = filters.search.replace(/"/g, '""');
+      // Support search by full_name, email, or phone
+      const searchTerm = filters.search || filters.query || filters.q;
+      if (searchTerm && String(searchTerm).trim()) {
+        const safeSearch = String(searchTerm).trim().replace(/"/g, '""');
         query = query.or(
-          `full_name.ilike."%${safeSearch}%",email.ilike."%${safeSearch}%"`,
+          `full_name.ilike.%${safeSearch}%,email.ilike.%${safeSearch}%,phone.ilike.%${safeSearch}%`
         );
       }
 
       // Apply pagination
-      const page = filters.page || 1;
-      const limit = filters.limit || 20;
+      const page = Math.max(1, parseInt(filters.page) || 1);
+      const limit = Math.min(100, Math.max(1, parseInt(filters.limit) || 20));
       const offset = (page - 1) * limit;
 
-      query = query.range(offset, offset + limit - 1);
+      query = query
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
 
       const { data, error, count } = await query;
 
       if (error) throw error;
 
+      const users = (data || []).map((user) => ({
+        ...user,
+        fullName: user.full_name || null,
+        isActive: Boolean(user.is_active),
+        createdAt: user.created_at,
+        lastLoginAt: user.last_login_at,
+        emailVerified: Boolean(user.email_verified),
+        phoneVerified: Boolean(user.phone_verified),
+      }));
+
+      const totalCount = count || 0;
+      const totalPages = Math.ceil(totalCount / limit) || 1;
+
       return {
-        users: data || [],
+        users,
+        total: totalCount,
+        totalPages,
         pagination: {
           page,
           limit,
-          total: count,
-          pages: Math.ceil(count / limit),
+          total: totalCount,
+          pages: totalPages,
+          totalPages,
         },
       };
     } catch (error) {

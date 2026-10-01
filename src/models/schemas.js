@@ -1293,3 +1293,40 @@ export const dpAdminSchemas = {
     limit: Joi.number().integer().min(1).max(100).default(20),
   }),
 };
+
+/**
+ * Access Control (RBAC & ABAC) validation schemas
+ */
+export const accessControlSchemas = {
+  createRole: Joi.object({
+    roleName: Joi.string().min(2).max(50).trim().required(),
+    description: Joi.string().max(500).allow("", null).optional(),
+    permissions: Joi.array().items(Joi.string()).optional(),
+  }),
+
+  updateRole: Joi.object({
+    roleName: Joi.string().min(2).max(50).trim().optional(),
+    description: Joi.string().max(500).allow("", null).optional(),
+    permissions: Joi.array().items(Joi.string()).optional(),
+  }),
+
+  setRolePermissions: Joi.object({
+    permissions: Joi.array().items(Joi.string()).required(),
+  }),
+
+  assignUserRole: Joi.object({
+    roleId: uuidSchema,
+  }),
+
+  setUserRoles: Joi.object({
+    roleIds: Joi.array().items(Joi.string().uuid()).required(),
+  }),
+
+  assignAdminScope: Joi.object({
+    entityType: Joi.string()
+      .valid("SCHOOL", "CATEGORY", "RETAILER", "ALL")
+      .required(),
+    entityId: Joi.string().uuid().allow(null, "").optional(),
+  }),
+};
+

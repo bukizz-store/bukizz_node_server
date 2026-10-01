@@ -52,6 +52,10 @@ import { dpAdminService } from "./src/services/dpAdminService.js";
 import { dpAdminController } from "./src/controllers/dpAdminController.js";
 
 // Import middleware and utilities
+import cookieParser from "cookie-parser";
+import { AccessRepository } from "./src/repositories/accessRepository.js";
+import { createAccessService } from "./src/services/accessService.js";
+import { AccessController } from "./src/controllers/accessController.js";
 import { errorHandler } from "./src/middleware/errorHandler.js";
 import { optionalAuth } from "./src/middleware/authMiddleware.js";
 import { logger } from "./src/utils/logger.js";
@@ -89,6 +93,7 @@ app.use(limiter);
 // Body parsing middleware
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+app.use(cookieParser());
 
 // Initialize Supabase client
 async function startServer() {
@@ -106,6 +111,7 @@ async function startServer() {
     const productOptionRepository = ProductOptionRepository;
     const schoolRepository = new SchoolRepository();
     const userRepository = new UserRepository(supabase);
+    const accessRepository = new AccessRepository();
 
     // Initialize services with repositories
     const productService = new ProductService(
@@ -116,14 +122,19 @@ async function startServer() {
     const schoolService = new SchoolService(schoolRepository);
     const orderService = new OrderService(); // Lazy-initialized via getOrderService() in controller
     const userService = new UserService(userRepository);
-    const authService = new AuthService();
+    const authService = new AuthService(supabase);
+    const accessService = createAccessService({ accessRepository });
+
+    // Warm in-memory RBAC role-permission cache on server boot
+    await accessService.initialize();
 
     // Initialize controllers with services
     const productController = new ProductController(productService);
     const schoolController = new SchoolController(schoolService);
     const orderController = new OrderController(orderService);
     const userController = new UserController(userService);
-    const authController = new AuthController(authService);
+    const authController = new AuthController({ authService, userService, accessService });
+    const accessController = new AccessController(accessService);
 
     // Initialize settlement layer
     const settlementService = new SettlementService(
@@ -154,6 +165,7 @@ async function startServer() {
       supabase,
       authController,
       userController,
+      accessController,
       productController,
       schoolController,
       orderController,
@@ -162,6 +174,7 @@ async function startServer() {
       dpAdminCtrl,
       authService,
       userService,
+      accessService,
       productService,
       schoolService,
       orderService,
@@ -172,6 +185,7 @@ async function startServer() {
       productOptionRepository,
       schoolRepository,
       userRepository,
+      accessRepository,
       ledgerRepository,
       settlementRepository,
     };

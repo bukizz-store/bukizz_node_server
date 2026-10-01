@@ -2,6 +2,8 @@ import express from "express";
 import {
   authenticateToken,
   requirePermissions,
+  requireAdminScope,
+  requireProductCreationScope,
 } from "../middleware/authMiddleware.js";
 import { validate } from "../middleware/validator.js";
 import {
@@ -296,6 +298,7 @@ export default function productRoutes(dependencies = {}) {
     "/comprehensive",
     authenticateToken,
     requirePermissions(accessService, "products:manage"),
+    requireProductCreationScope(accessService),
     productController.createComprehensiveProduct,
   );
 
@@ -355,6 +358,7 @@ export default function productRoutes(dependencies = {}) {
     "/:id/activate",
     authenticateToken,
     requirePermissions(accessService, "approvals:products:manage"),
+    requireAdminScope(accessService, "CATEGORY"),
     validate(paramSchemas.id, "params"),
     productController.activateProduct,
   );

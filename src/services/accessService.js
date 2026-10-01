@@ -82,11 +82,9 @@ export class AccessService {
    * @throws {AppError} 403 Forbidden if unauthorized
    */
   hasPermission(roles, requiredPermissions) {
-    const rolesArray = Array.isArray(roles)
-      ? roles
-      : roles
-      ? [roles]
-      : [];
+    const rolesArray = (
+      Array.isArray(roles) ? roles : roles ? [roles] : []
+    ).map((r) => String(r).toLowerCase().trim());
 
     const requiredArray = Array.isArray(requiredPermissions)
       ? requiredPermissions
@@ -94,7 +92,7 @@ export class AccessService {
       ? [requiredPermissions]
       : [];
 
-    // Superadmin bypasses all RBAC permission checks
+    // Superadmin role bypasses all RBAC permission checks
     if (rolesArray.includes("superadmin")) {
       return true;
     }
@@ -153,11 +151,9 @@ export class AccessService {
    * @returns {Array<string>} List of distinct permission strings
    */
   getUserPermissions(roles) {
-    const rolesArray = Array.isArray(roles)
-      ? roles
-      : roles
-      ? [roles]
-      : [];
+    const rolesArray = (
+      Array.isArray(roles) ? roles : roles ? [roles] : []
+    ).map((r) => String(r).toLowerCase().trim());
 
     if (rolesArray.includes("superadmin")) {
       // Superadmin receives all known permissions in the cache
@@ -443,6 +439,212 @@ export class AccessService {
   clearCache() {
     this.abacCache.clear();
     logger.info("AccessService: Cleared all entries from ABAC LRU micro-cache");
+  }
+
+  /**
+   * Fetches all registered administrative roles.
+   * @returns {Promise<Array<Object>>}
+   */
+  async getAllRoles() {
+    return await this.accessRepository.getAllRoles();
+  }
+
+  /**
+   * Fetches a role by ID.
+   * @param {string} roleId
+   * @returns {Promise<Object>}
+   */
+  async getRoleById(roleId) {
+    const role = await this.accessRepository.getRoleById(roleId);
+    if (!role) {
+      throw new AppError("Role not found", 404);
+    }
+    return role;
+  }
+
+  /**
+   * Creates a new administrative role and optionally assigns permissions.
+   * Automatically refreshes in-memory RBAC cache.
+   * @param {Object} roleData - { roleName, description, permissions }
+   * @returns {Promise<Object>}
+   */
+  async createRole({ roleName, description, permissions = [] }) {
+    if (!roleName) {
+      throw new AppError("Role name is required", 400);
+    }
+
+    const createdRole = await this.accessRepository.createRole({
+      roleName,
+      description,
+    });
+
+    if (Array.isArray(permissions) && permissions.length > 0) {
+      await this.accessRepository.setRolePermissions(createdRole.id, permissions);
+    }
+
+    await this.refreshRoleCache();
+    return createdRole;
+  }
+
+  /**
+   * Updates an existing role and optionally updates its permissions.
+   * Automatically refreshes in-memory RBAC cache.
+   * @param {string} roleId
+   * @param {Object} updateData - { roleName, description, permissions }
+   * @returns {Promise<Object>}
+   */
+  async updateRole(roleId, { roleName, description, permissions }) {
+    const existing = await this.getRoleById(roleId);
+
+    // Prevent modifying reserved system roles' names
+    if (["superadmin"].includes(existing.role_name) && roleName && roleName !== existing.role_name) {
+      throw new AppError("Cannot rename root superadmin role", 400);
+    }
+
+    const updatedRole = await this.accessRepository.updateRole(roleId, {
+      roleName,
+      description,
+    });
+
+    if (Array.isArray(permissions)) {
+      await this.accessRepository.setRolePermissions(roleId, permissions);
+    }
+
+    await this.refreshRoleCache();
+    return updatedRole;
+  }
+
+  /**
+   * Deletes a role.
+   * Prevents deleting the protected 'superadmin' role.
+   * @param {string} roleId
+   * @returns {Promise<boolean>}
+   */
+  async deleteRole(roleId) {
+    const existing = await this.getRoleById(roleId);
+    if (["superadmin", "manager", "support"].includes(existing.role_name)) {
+      throw new AppError(`Cannot delete built-in system role '${existing.role_name}'`, 400);
+    }
+
+    await this.accessRepository.deleteRole(roleId);
+    await this.refreshRoleCache();
+    return true;
+  }
+
+  /**
+   * Fetches the complete system permissions catalog.
+   * @returns {Promise<Array<Object>>}
+   */
+  async getAllPermissions() {
+    return await this.accessRepository.getAllPermissions();
+  }
+
+  /**
+   * Fetches all permissions assigned to a role.
+   * @param {string} roleId
+   * @returns {Promise<Array<Object>>}
+   */
+  async getRolePermissions(roleId) {
+    await this.getRoleById(roleId);
+    return await this.accessRepository.getRolePermissions(roleId);
+  }
+
+  /**
+   * Sets (replaces) all permissions for a role.
+   * Automatically refreshes in-memory RBAC cache.
+   * @param {string} roleId
+   * @param {Array<string>} permissions
+   * @returns {Promise<Array<string>>}
+   */
+  async setRolePermissions(roleId, permissions) {
+    await this.getRoleById(roleId);
+    const result = await this.accessRepository.setRolePermissions(roleId, permissions);
+    await this.refreshRoleCache();
+    return result;
+  }
+
+  /**
+   * Fetches user's assigned administrative roles with role details.
+   * @param {string} userId
+   * @returns {Promise<Array<Object>>}
+   */
+  async getUserAdminRolesWithDetails(userId) {
+    return await this.accessRepository.getUserAdminRolesWithDetails(userId);
+  }
+
+  /**
+   * Assigns an administrative role to a user.
+   * @param {string} userId
+   * @param {string} roleId
+   * @returns {Promise<Object>}
+   */
+  async assignUserAdminRole(userId, roleId) {
+    await this.getRoleById(roleId);
+    const result = await this.accessRepository.assignUserAdminRole(userId, roleId);
+    return result;
+  }
+
+  /**
+   * Removes an administrative role from a user.
+   * @param {string} userId
+   * @param {string} roleId
+   * @returns {Promise<boolean>}
+   */
+  async removeUserAdminRole(userId, roleId) {
+    return await this.accessRepository.removeUserAdminRole(userId, roleId);
+  }
+
+  /**
+   * Sets all administrative roles for a user (replaces existing).
+   * @param {string} userId
+   * @param {Array<string>} roleIds
+   * @returns {Promise<Array<string>>}
+   */
+  async setUserAdminRoles(userId, roleIds) {
+    return await this.accessRepository.setUserAdminRoles(userId, roleIds);
+  }
+
+  /**
+   * Fetches administrative scopes (ABAC) for a user.
+   * @param {string} userId
+   * @returns {Promise<Array<Object>>}
+   */
+  async getAdminScopes(userId) {
+    return await this.accessRepository.getAdminScopes(userId);
+  }
+
+  /**
+   * Adds an admin scope constraint for a user and invalidates user scope cache.
+   * @param {string} userId
+   * @param {string} entityType - 'SCHOOL' | 'CATEGORY' | 'RETAILER' | 'ALL'
+   * @param {string|null} entityId
+   * @returns {Promise<Object>}
+   */
+  async addAdminScope(userId, entityType, entityId = null) {
+    const result = await this.accessRepository.addAdminScope(userId, entityType, entityId);
+    this.invalidateAdminScope(userId);
+    return result;
+  }
+
+  /**
+   * Removes an admin scope constraint for a user and invalidates user scope cache.
+   * @param {string} userId
+   * @param {string} scopeId
+   * @returns {Promise<boolean>}
+   */
+  async removeAdminScope(userId, scopeId) {
+    const result = await this.accessRepository.deleteAdminScope(scopeId);
+    this.invalidateAdminScope(userId);
+    return result;
+  }
+
+  /**
+   * Fetches admin users with their assigned admin_roles and admin_scopes.
+   * @param {Object} options
+   * @returns {Promise<Object>}
+   */
+  async getAdminUsers(options) {
+    return this.accessRepository.getAdminUsers(options);
   }
 
   /**
